@@ -31,7 +31,7 @@ The 21 use cases identified in the research paper are as follows:
 10. Storage  
 11. Simple wallet  
 12. Price Bet  
-13. Payment splitter  
+13. [Payment splitter](payment-splitter/README.md)
 14. Lottery  
 15. Constant-product AMM  
 16. Upgradeable Proxy  
@@ -43,21 +43,7 @@ The 21 use cases identified in the research paper are as follows:
 
 ### 🛠 Running a Use Case
 
-Each use case is implemented in its own directory. To run a specific use case, navigate to its directory and follow the instructions provided in its README file. For example:
-
-***sh
-cd payment-splitter/onchain/aiken
-# Run the on-chain implementation
-aiken check
-aiken build
-***
-
-***sh
-cd payment-splitter/offchain/meshjs
-# Run the off-chain implementation
-npm install
-npm start
-***
+Each use case is implemented in its own directory. To run a specific use case, navigate to its directory and follow the instructions provided in its README file. (E.g. [here](payment-splitter/README.md))
 
 ## 💙 Contributing
 
