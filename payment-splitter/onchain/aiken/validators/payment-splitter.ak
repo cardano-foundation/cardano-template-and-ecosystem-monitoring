@@ -4,12 +4,20 @@ use aiken/option
 use cardano/address.{Address, VerificationKey}
 use cardano/assets.{from_lovelace, lovelace_of}
 use cardano/transaction.{
-  Input, NoDatum, Output, OutputReference, Redeemer, Transaction, placeholder,
+  Input, NoDatum, Output, OutputReference, Transaction, placeholder,
+}
+
+pub type Datum {
+  owner: VerificationKeyHash,
+}
+
+pub type Redeemer {
+  message: ByteArray,
 }
 
 validator split_payment(script_hashes: List<VerificationKeyHash>) {
   spend(
-    _datum: Option<Data>,
+    _datum: Option<Datum>,
     _redeemer: Redeemer,
     _spent_output: OutputReference,
     transaction: Transaction,
@@ -219,7 +227,18 @@ test should_split_equally() {
       #"06cae4f91a7e73521cfb42a0dcfe0d90feff52ffa096467995bfb503",
     ]
 
-  split_payment.spend(script_hashes, None, None, output_utxo, transaction)
+  let datum =
+    Datum { owner: #"92e2ae51fb03dcc55c471506fe35bdedad9c266b0d09c2b8bc7cb445" }
+
+  let redeemer = Redeemer { message: "Payday" }
+
+  split_payment.spend(
+    script_hashes,
+    Some(datum),
+    redeemer,
+    output_utxo,
+    transaction,
+  )
 }
 
 test payment_splitter_should_fail() fail {
@@ -317,5 +336,15 @@ test payment_splitter_should_fail() fail {
       #"06cae4f91a7e73521cfb42a0dcfe0d90feff52ffa096467995bfb503",
     ]
 
-  split_payment.spend(script_hashes, None, None, output_utxo, transaction)
+  let datum =
+    Datum { owner: #"92e2ae51fb03dcc55c471506fe35bdedad9c266b0d09c2b8bc7cb445" }
+
+  let redeemer = Redeemer { message: "Payday" }
+  split_payment.spend(
+    script_hashes,
+    Some(datum),
+    redeemer,
+    output_utxo,
+    transaction,
+  )
 }

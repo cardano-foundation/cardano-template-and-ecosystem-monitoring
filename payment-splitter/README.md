@@ -16,7 +16,7 @@ The validator checks two simple rules:
 
 #### 🪄 Test and build
 
-```bash
+```zsh
 cd onchain/aiken
 aiken check
 aiken build
@@ -32,7 +32,7 @@ aiken build
 
 #### 💳 Prepare a list of wallets
 
-```bash
+```zsh
 cd offchain/meshjs
 deno run --allow-env --allow-read --allow-write use-payment-splitter.ts prepare 5
 ```
@@ -46,19 +46,31 @@ If you don't have tAda at all, you can get some from the [Cardano Testnets Fauce
 
 Anyone can lock funds in the payment splitter by sending an amount to the contract address.
 
-```bash
+```zsh
 # Lock 10 tAda
 deno run --allow-env --allow-read --allow-net use-payment-splitter.ts lock 10000000
 ```
 
-Example transaction: https://preprod.cexplorer.io/tx/0008dd3ead94b0ca922ad45162762d73b5200efc5565a24532f1517fdf060dee
+Example output:
+
+```zsh
+Successfully locked 10000000 lovelace to the script address addr_test1wqn8pmxvahephy3vxesjw3x8tf0ktq53k62d6hdgw0dw2ksv6p87s.
+
+  See: https://preprod.cexplorer.io/tx/01cb68261dda5d591341b0d2561e18677899a4844b50f7e6fa732d0da010101c
+```
 
 #### 🤑 Trigger a payout
 
 This command will generate a transaction that calculates the total available Lovelace value within the contract UTXOs and distributes the funds among the payees.
 
-```bash
+```zsh
 deno run --allow-env --allow-read --allow-net use-payment-splitter.ts unlock
 ```
 
-Example transaction: https://preprod.cexplorer.io/tx/53be51e0f1268d41caae2944a760387fd762e76058aceddee73ca507d9e9a9c7
+Example output:
+
+```zsh
+Successfully unlocked the lovelace from the script address addr_test1wqn8pmxvahephy3vxesjw3x8tf0ktq53k62d6hdgw0dw2ksv6p87s and split it equally (2000000 Lovelace) to all payees.
+
+    See: https://preprod.cexplorer.io/tx/422205f06a44668efd81747e93eb88229db5af526c0447d8a480b6acd44c91f0
+```

@@ -1,8 +1,8 @@
 import { MeshWallet, KoiosProvider, 
   serializePlutusScript, resolvePaymentKeyHash, Transaction, largestFirst, 
-  Asset} from 'npm:@meshsdk/core';
-import { applyParamsToScript, deserializeAddress } from 'npm:@meshsdk/core-cst';
-import { builtinByteString, list, PlutusScript } from "npm:@meshsdk/common";
+  Asset} from '@meshsdk/core';
+import { applyParamsToScript, deserializeAddress } from '@meshsdk/core-cst';
+import { builtinByteString, list, PlutusScript } from "@meshsdk/common";
 
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
@@ -29,7 +29,8 @@ async function prepare (payeeAmount: number) {
             words: mnemonic,
         },
     });
-    await wallet.init();
+    // TODO: remove comment after upgrading to npm:@meshsdk/core@1.9.x
+    // await wallet.init();
     const address = await wallet.getChangeAddress();
     addresses.push(address);
     Deno.writeTextFileSync(`payee_${i}.txt`, JSON.stringify(mnemonic));
@@ -54,7 +55,8 @@ async function setup () {
       words: mnemonic,
     },
   });
-  await wallet.init();
+    // TODO: remove comment after upgrading to npm:@meshsdk/core@1.9.x
+    // await wallet.init();
   const files = Deno.readDirSync('.')
 
   const payeeSeeds = [];
@@ -76,7 +78,8 @@ async function setup () {
         words: seed,
       },
     });
-    await payee.init();
+    // TODO: remove comment after upgrading to npm:@meshsdk/core@1.9.x
+    // await payee.init();
     payees.push(await payee.getChangeAddress());
   }
 
@@ -130,7 +133,7 @@ async function lockAda(lovelaceAmount: string) {
   const unsignedTx = await tx.build();
   const signedTx = await wallet.signTx(unsignedTx);
   const txHash = await wallet.submitTx(signedTx);
-  console.log(`Successfully locked ${lovelaceAmount} lovelace to the script address ${scriptAddress}.\n
+  console.log(`Successfully locked ${lovelaceAmount} lovelace to the script address ${scriptAddress.address}.\n
   See: https://preprod.cexplorer.io/tx/${txHash}`);
 };
 
@@ -139,7 +142,7 @@ async function unlockAda () {
   const utxos = await koiosProvider.fetchAddressUTxOs(scriptAddress.address);
   const paymentAddress = await wallet.getChangeAddress();
 
-  const lovelaceForCollateral = "6000000";
+  const lovelaceForCollateral = "5000000";
   const collateralUtxos = largestFirst(lovelaceForCollateral, await koiosProvider.fetchAddressUTxOs(paymentAddress));
   const pubKeyHash = deserializeAddress(await wallet.getChangeAddress()).asBase()?.getPaymentCredential().hash || '';
   const datum = {
@@ -150,7 +153,8 @@ async function unlockAda () {
   const redeemerData = "Hello, World!";
   const redeemer = { data: { alternative: 0, fields: [redeemerData] } };
 
-  let tx = new Transaction({ initiator: wallet, fetcher: koiosProvider, verbose: true });
+  let tx = new Transaction({ initiator: wallet, fetcher: koiosProvider });
+  tx.setNetwork('preprod')
   let split = 0;
   for (const utxo of utxos) {
     const amount: Asset[] = utxo.output?.amount;
@@ -182,7 +186,7 @@ async function unlockAda () {
   try {
     const signedTx = await wallet.signTx(unsignedTx, true);
     const txHash = await wallet.submitTx(signedTx);
-    console.log(`Successfully unlocked the lovelace from the script address ${scriptAddress} and split it equally (${split} Lovelace) to all payees.\n
+    console.log(`Successfully unlocked the lovelace from the script address ${scriptAddress.address} and split it equally (${split} Lovelace) to all payees.\n
     See: https://preprod.cexplorer.io/tx/${txHash}`);
   } catch (error) {
     console.warn(error);
@@ -203,7 +207,7 @@ if (Deno.args.length > 0) {
     await unlockAda();
   } else if (Deno.args[0] === 'prepare') {
     if (Deno.args.length > 1 && isPositiveNumber(Deno.args[1])) {
-      const files = Deno.readDirSync('.')
+      const files = Deno.readDirSync('.');
       const payeeSeeds = [];
       for (const file of files) {
         if (file.name.match(/payee_[0-9]+.txt/) !== null) {
