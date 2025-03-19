@@ -23,11 +23,11 @@ The 21 use cases identified in the research paper are as follows:
 2. Simple transfer  
 3. Token transfer  
 4. HTLC  
-5. Escrow  
+5. [Escrow](escrow/README.md)  
 6. Auction  
 7. Crowdfund  
 8. Vault  
-9. Vesting  
+9. [Vesting](vesting/README.md)  
 10. Storage  
 11. Simple wallet  
 12. Price Bet  
