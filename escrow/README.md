@@ -1,7 +1,6 @@
 # Escrow
 
 Escrow contract facilitates the secure exchange of assets between two parties by acting as a trusted intermediary that holds the assets until the conditions of the agreement are met.
-
 The escrow smart contract allows two parties to exchange assets securely. The contract holds the assets until both parties agree and sign off on the transaction.
 
 There are 4 actions available to interact with this smart contract:
@@ -12,6 +11,24 @@ There are 4 actions available to interact with this smart contract:
 - cancel escrow
 
 [Read more and live demo](https://meshjs.dev/smart-contracts/escrow)
+
+## ⛓ On-chain
+
+### Aiken
+
+#### 🔌 Prerequirements
+
+- [Aiken](https://aiken-lang.org/installation-instructions#from-aikup-linux--macos-only)
+
+#### 🪄 Test and build
+
+```zsh
+cd onchain/aiken
+aiken check
+aiken build
+```
+
+## ⛓ Off-chain
 
 ## Usage
 

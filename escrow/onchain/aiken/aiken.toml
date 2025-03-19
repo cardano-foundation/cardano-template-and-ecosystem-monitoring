@@ -1,12 +1,12 @@
-name = "meshjs/escrow"
-version = "0.0.0"
-compiler = "v1.1.0"
+name = "cardano-foundation/cardano-blueprint-and-ecosystem-monitoring/escrow"
+version = "0.1.0"
+compiler = "v1.1.2"
 plutus = "v3"
 license = "Apache-2.0"
-description = "Aiken contracts for project 'meshjs/escrow'"
+description = "Aiken contracts for project 'cardano-foundation/cardano-blueprint-and-ecosystem-monitoring/escrow'"
 
 [repository]
-user = "meshjs"
+user = "cardano-foundation/cardano-blueprint-and-ecosystem-monitoring"
 project = "escrow"
 platform = "github"
 
