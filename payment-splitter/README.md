@@ -34,7 +34,7 @@ aiken build
 
 ```zsh
 cd offchain/meshjs
-deno run --allow-env --allow-read --allow-write use-payment-splitter.ts prepare 5
+deno run --allow-env --allow-read --allow-write payment-splitter.ts prepare 5
 ```
 
 #### 💎 Top up the wallets
@@ -48,7 +48,7 @@ Anyone can lock funds in the payment splitter by sending an amount to the contra
 
 ```zsh
 # Lock 10 tAda
-deno run --allow-env --allow-read --allow-net use-payment-splitter.ts lock 10000000
+deno run --allow-env --allow-read --allow-net payment-splitter.ts lock 10000000
 ```
 
 Example output:
@@ -64,7 +64,7 @@ Successfully locked 10000000 lovelace to the script address addr_test1wqn8pmxvah
 This command will generate a transaction that calculates the total available Lovelace value within the contract UTXOs and distributes the funds among the payees.
 
 ```zsh
-deno run --allow-env --allow-read --allow-net use-payment-splitter.ts unlock
+deno run --allow-env --allow-read --allow-net payment-splitter.ts unlock
 ```
 
 Example output:
