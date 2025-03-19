@@ -1,18 +1,26 @@
-import { AppWallet, KoiosProvider, 
-  resolvePlutusScriptAddress, resolvePaymentKeyHash, Transaction, largestFirst, 
+import { MeshWallet, KoiosProvider, 
+  serializePlutusScript, resolvePaymentKeyHash, Transaction, largestFirst, 
   Asset} from 'npm:@meshsdk/core';
 import { applyParamsToScript, deserializeAddress } from 'npm:@meshsdk/core-cst';
-import { builtinByteString, list } from "npm:@meshsdk/common";
+import { builtinByteString, list, PlutusScript } from "npm:@meshsdk/common";
 
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
-function prepare (payeeAmount: number) {
-  let mnemonic = AppWallet.brew();
+function createWallet () {
+  const mnemonic = MeshWallet.brew();
+  if (typeof mnemonic === 'string') {
+    return mnemonic.split(' ');
+  }
+  return mnemonic
+}
+
+async function prepare (payeeAmount: number) {
+  let mnemonic = createWallet();
   const koiosProvider = new KoiosProvider('preprod');
   
   const addresses = [];
   for (let i = 0; i < payeeAmount; i++) {
-    const wallet = new AppWallet({
+    const wallet = new MeshWallet({
         networkId: 0,
         fetcher: koiosProvider,
         submitter: koiosProvider,
@@ -21,21 +29,23 @@ function prepare (payeeAmount: number) {
             words: mnemonic,
         },
     });
-    addresses.push(wallet.getPaymentAddress(0));
+    await wallet.init();
+    const address = await wallet.getChangeAddress();
+    addresses.push(address);
     Deno.writeTextFileSync(`payee_${i}.txt`, JSON.stringify(mnemonic));
-    mnemonic = AppWallet.brew();
+    mnemonic = createWallet();
   }
   console.log(`Successfully prepared ${payeeAmount} payees (seed phrases).`);
-  console.log(`Make sure to send some tADA to the payee 0 ${addresses[0]} 
-  as this will payee will be used in this example, to submit the transaction. 
-  Therefore enough tAda for the fees and to provide a collateral will be needed.`);
+  console.log(`Make sure to send some tADA to the payee ${addresses[0]} 
+  as this payee will be used in this example, to submit the transaction. 
+  Therefore enough tAda for covering fees and to provide a collateral will be needed.`);
 }
 
-function setup () {
+async function setup () {
   const koiosProvider = new KoiosProvider('preprod');
   const mnemonic = JSON.parse(Deno.readTextFileSync("payee_0.txt"));
 
-  const wallet = new AppWallet({
+  const wallet = new MeshWallet({
     networkId: 0,
     fetcher: koiosProvider,
     submitter: koiosProvider,
@@ -44,7 +54,7 @@ function setup () {
       words: mnemonic,
     },
   });
-
+  await wallet.init();
   const files = Deno.readDirSync('.')
 
   const payeeSeeds = [];
@@ -57,7 +67,7 @@ function setup () {
   const payees = [];
   for (const payeeSeed of payeeSeeds) {
     const seed = JSON.parse(Deno.readTextFileSync(payeeSeed));
-    const payee = new AppWallet({
+    const payee = new MeshWallet({
       networkId: 0,
       fetcher: koiosProvider,
       submitter: koiosProvider,
@@ -66,14 +76,17 @@ function setup () {
         words: seed,
       },
     });
-    payees.push(payee.getPaymentAddress());
+    await payee.init();
+    payees.push(await payee.getChangeAddress());
   }
 
   const plutusData = list(
-    payees.map((payee) =>
-      builtinByteString(deserializeAddress(payee).pubKeyHash),
-    ),
-  )
+    payees.map((payee) => {
+      const paymentCredential = deserializeAddress(payee).asBase()?.getPaymentCredential().hash
+      if (paymentCredential) {
+        return builtinByteString(paymentCredential)
+      }
+  }));
   
   const parameterizedScript = applyParamsToScript(
           blueprint.validators[0].compiledCode,
@@ -81,11 +94,11 @@ function setup () {
           "JSON",
         );
 
-  const script = {
+  const script: PlutusScript = {
     code: parameterizedScript,
-    version: "V2",
+    version: "V3",
   };
-  const scriptAddress = resolvePlutusScriptAddress(script, 0);
+  const scriptAddress = serializePlutusScript(script, undefined, 0);
 
   return {
     koiosProvider,
@@ -98,7 +111,7 @@ function setup () {
 
 async function lockAda(lovelaceAmount: string) {
   const { wallet, scriptAddress } = await setup();
-  const paymentAddress = await wallet.getPaymentAddress();
+  const paymentAddress = await wallet.getChangeAddress();
 
   const hash = resolvePaymentKeyHash(paymentAddress);
   const datum = {
@@ -108,7 +121,7 @@ async function lockAda(lovelaceAmount: string) {
 
   const tx = new Transaction({ initiator: wallet }).sendLovelace(
       {
-      address: scriptAddress,
+      address: scriptAddress.address,
       datum: { value: datum }
       },
       lovelaceAmount
@@ -123,21 +136,21 @@ async function lockAda(lovelaceAmount: string) {
 
 async function unlockAda () {
   const { koiosProvider, wallet, scriptAddress, script, payees } = await setup();
-  const utxos = await koiosProvider.fetchAddressUTxOs(scriptAddress);
-  const paymentAddress = await wallet.getPaymentAddress();
+  const utxos = await koiosProvider.fetchAddressUTxOs(scriptAddress.address);
+  const paymentAddress = await wallet.getChangeAddress();
 
   const lovelaceForCollateral = "6000000";
   const collateralUtxos = largestFirst(lovelaceForCollateral, await koiosProvider.fetchAddressUTxOs(paymentAddress));
-  const hash = resolvePaymentKeyHash(paymentAddress);
+  const pubKeyHash = deserializeAddress(await wallet.getChangeAddress()).asBase()?.getPaymentCredential().hash || '';
   const datum = {
-      alternative: 0,
-      fields: [hash],
+    alternative: 0,
+    fields: [pubKeyHash],
   };
 
   const redeemerData = "Hello, World!";
   const redeemer = { data: { alternative: 0, fields: [redeemerData] } };
 
-  let tx = new Transaction({ initiator: wallet })
+  let tx = new Transaction({ initiator: wallet, fetcher: koiosProvider, verbose: true });
   let split = 0;
   for (const utxo of utxos) {
     const amount: Asset[] = utxo.output?.amount;
@@ -157,7 +170,7 @@ async function unlockAda () {
   }
 
   tx = tx.setCollateral(collateralUtxos);
-  for (const payee of payees) {    
+  for (const payee of payees) {   
       tx = tx.sendLovelace(
           payee,
           split.toString()
@@ -181,13 +194,13 @@ const isPositiveNumber = (s: string) => Number.isInteger(Number(s)) && Number(s)
 if (Deno.args.length > 0) {
   if (Deno.args[0] === 'lock') {
     if (Deno.args.length > 1 && isPositiveNumber(Deno.args[1])) {
-      lockAda(Deno.args[1]);
+      await lockAda(Deno.args[1]);
     } else {
       console.log('Expected a positive number (lovelace amount) as the second argument.');
       console.log('Example usage: node use-payment-splitter.js lock 10000000');
     } 
   } else if (Deno.args[0] === 'unlock') {
-    unlockAda();
+    await unlockAda();
   } else if (Deno.args[0] === 'prepare') {
     if (Deno.args.length > 1 && isPositiveNumber(Deno.args[1])) {
       const files = Deno.readDirSync('.')
@@ -201,7 +214,7 @@ if (Deno.args.length > 0) {
       if (payeeSeeds.length > 0) {
         console.log('Seed phrases (files with format payee_[0-9]+.txt) already exist. Please remove them before preparing new ones.');
       } else {
-        prepare(parseInt(Deno.args[1]));
+        await prepare(parseInt(Deno.args[1]));
       }
     } else {
       console.log('Expected a positive number (of seed phrases to prepare) as the second argument.');
