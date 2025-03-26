@@ -4,8 +4,8 @@
 //COMPILE_OPTIONS --enable-preview -source 24
 //RUNTIME_OPTIONS --enable-preview
 
-//DEPS com.bloxbean.cardano:cardano-client-lib:0.6.4
-//DEPS com.bloxbean.cardano:cardano-client-backend-blockfrost:0.6.4
+//DEPS com.bloxbean.cardano:cardano-client-lib:0.7.0-beta2
+//DEPS com.bloxbean.cardano:cardano-client-backend-blockfrost:0.7.0-beta2
 //DEPS com.bloxbean.cardano:aiken-java-binding:0.1.0
 
 import com.bloxbean.cardano.aiken.AikenScriptUtil;
