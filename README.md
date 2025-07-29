@@ -19,7 +19,7 @@ The use cases implemented in this repository are based on the research paper [Sm
 
 The 21 use cases identified in the research paper are as follows:
 
-1. Bet  
+1. [Bet](bet/README.md)  
 2. Simple transfer  
 3. Token transfer  
 4. HTLC  
