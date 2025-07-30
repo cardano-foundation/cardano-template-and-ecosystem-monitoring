@@ -1,6 +1,7 @@
-name = "cardano-foundation/cardano-template-and-ecosystem-monitoring/bet"
+name = "cardano-foundation/cardano-template-and-ecosystem-monitoring"
 version = "0.2.0"
-licences = ["Apache-2.0"]
+compiler = "v1.1.17"
+plutus = "v3"
 description = "Aiken contracts for project 'cardano-foundation/cardano-template-and-ecosystem-monitoring/bet'"
 
 [repository]
@@ -12,3 +13,10 @@ platform = "github"
 name = "aiken-lang/stdlib"
 version = "2.1.0"
 source = "github"
+
+[[dependencies]]
+name = "sidan-lab/vodka"
+version = "0.1.15"
+source = "github"
+
+[config]
