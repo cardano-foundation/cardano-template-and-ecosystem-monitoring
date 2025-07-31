@@ -19,7 +19,7 @@ pub type BetDatum {
   /// The public key hash of the first player (bet creator)
   player1: VerificationKeyHash,
   /// The public key hash of the second player (None if no one has joined yet)
-  player2: Option<VerificationKeyHash>,
+  player2: VerificationKeyHash,
   /// The public key hash of the trusted oracle who will announce the winner
   oracle: VerificationKeyHash,
   /// The expiration time of the bet (in seconds since the epoch)
@@ -60,13 +60,13 @@ validator bet {
     // Validation rules for bet initialization:
     and {
       // 1. Player1 must sign the transaction (they're creating the bet)
-      key_signed(extra_signatories, player1),
-      // 2. Player2 must be None (no one has joined yet)
-      player2 == None,
+      key_signed(extra_signatories, player1)?,
+      // 2. Player2 must be "" (no one has joined yet)
+      (player2 == "")?,
       // 3. Oracle cannot be the same as player1 (conflict of interest)
-      oracle != player1,
+      (oracle != player1)?,
       // 4. The bet must have a valid expiration time (after the current time)
-      valid_before(validity_range, expiration),
+      valid_before(validity_range, expiration)?,
     }
   }
 
@@ -114,12 +114,12 @@ validator bet {
 
         // Extract the updated bet state
         expect Some(new_datum) = updated_datum
-        expect Some(joining_player) = new_datum.player2
+        let joining_player = new_datum.player2
 
         // Validation rules for joining:
         and {
           // 1. Current bet must not have a player2 yet
-          (current_datum.player2 == None)?,
+          (current_datum.player2 == "")?,
           // 2. Input must contain the bet token
           has_bet_token?,
           // 3. Player2 must sign the transaction
@@ -156,10 +156,10 @@ validator bet {
           // 1. Winner must be either player1 or player2
           or {
             winner == player1,
-            Some(winner) == player2,
+            winner == player2,
           },
           // 2. Both players must have joined (player2 is not None)
-          (player2 != None)?,
+          (player2 != "")?,
           // 3. No continuing datum (bet is being closed)
           (updated_datum == None)?,
           // 4. Payout goes to the winner's address
@@ -188,7 +188,7 @@ test should_init_the_bet() {
   let initial_bet_datum =
     BetDatum {
       player1: mock_pub_key_hash(1),
-      player2: None,
+      player2: "",
       // No second player yet
       oracle: mock_pub_key_hash(3),
       expiration: 1753939940,
@@ -225,7 +225,7 @@ test join_the_bet() {
   let initial_bet_datum =
     BetDatum {
       player1: mock_pub_key_hash(1),
-      player2: None,
+      player2: "",
       oracle: mock_pub_key_hash(3),
       expiration: 1753939940,
     }
@@ -234,7 +234,7 @@ test join_the_bet() {
   let updated_bet_datum =
     BetDatum {
       player1: mock_pub_key_hash(1),
-      player2: Some(mock_pub_key_hash(2)),
+      player2: mock_pub_key_hash(2),
       oracle: mock_pub_key_hash(3),
       expiration: 1753939940,
     }
@@ -290,7 +290,7 @@ test payout_winner() {
   let final_bet_datum =
     BetDatum {
       player1: mock_pub_key_hash(1),
-      player2: Some(mock_pub_key_hash(2)),
+      player2: mock_pub_key_hash(2),
       oracle: mock_pub_key_hash(3),
       expiration: 1753939940,
     }
