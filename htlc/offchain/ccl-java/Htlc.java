@@ -11,7 +11,6 @@
 // @formatter:on
 
 import java.io.File;
-import java.math.BigInteger;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -61,7 +60,7 @@ public class Htlc {
     // The network used for this example is Testnet
     static Network network = Networks.testnet();
 
-    static Account payee1 = new Account(network, mnemonic);
+    static Account payee1 = Account.createFromMnemonic(network, mnemonic);
 
     static Address ownerAddress = payee1.getBaseAddress();
     // In this example we are using the same address, but in a real scenario, you
@@ -105,7 +104,7 @@ public class Htlc {
         System.out.println("Current slot: " + slot);
         ConstrPlutusData redeemer = secretGuess.map(secret -> ConstrPlutusData.builder()
                 .alternative(0)
-                .data(ListPlutusData.of(BytesPlutusData.of(Blake2bUtil.blake2bHash256(secret.getBytes()))))
+                .data(ListPlutusData.of(BytesPlutusData.of(secret)))
                 .build()).orElse(
                         ConstrPlutusData.builder()
                                 .alternative(1)
