@@ -30,6 +30,7 @@ import com.bloxbean.cardano.client.backend.blockfrost.service.BFBackendService;
 import com.bloxbean.cardano.client.common.model.Network;
 import com.bloxbean.cardano.client.common.model.Networks;
 import com.bloxbean.cardano.client.crypto.Blake2bUtil;
+import com.bloxbean.cardano.client.crypto.bip39.Sha256Hash;
 import com.bloxbean.cardano.client.function.helper.SignerProviders;
 import com.bloxbean.cardano.client.plutus.blueprint.PlutusBlueprintLoader;
 import com.bloxbean.cardano.client.plutus.blueprint.PlutusBlueprintUtil;
@@ -47,132 +48,135 @@ import com.bloxbean.cardano.client.quicktx.TxResult;
 
 public class Htlc {
 
-    // Backend service to connect to Cardano node. Here we are using Blockfrost as
-    // an example.
-    static BackendService backendService = new BFBackendService("http://localhost:8081/api/v1/", "Dummy Key");
-    static UtxoSupplier utxoSupplier = new DefaultUtxoSupplier(backendService.getUtxoService());
+        // Backend service to connect to Cardano node. Here we are using Blockfrost as
+        // an example.
+        static BackendService backendService = new BFBackendService("http://localhost:8081/api/v1/", "Dummy Key");
+        static UtxoSupplier utxoSupplier = new DefaultUtxoSupplier(backendService.getUtxoService());
 
-    // Dummy mnemonic for the example. Replace with a valid mnemonic.
-    static String mnemonic = "test test test test test test test test test test test test test test test test test test test test test test test sauce";
+        // Dummy mnemonic for the example. Replace with a valid mnemonic.
+        static String mnemonic = "test test test test test test test test test test test test test test test test test test test test test test test sauce";
 
-    static String secret = "Secret Answer"; // The secret answer to be used in the HTLC
+        static String secret = "Secret Answer"; // The secret answer to be used in the HTLC
 
-    // The network used for this example is Testnet
-    static Network network = Networks.testnet();
+        // The network used for this example is Testnet
+        static Network network = Networks.testnet();
 
-    static Account payee1 = Account.createFromMnemonic(network, mnemonic);
+        static Account payee1 = Account.createFromMnemonic(network, mnemonic);
 
-    static Address ownerAddress = payee1.getBaseAddress();
-    // In this example we are using the same address, but in a real scenario, you
-    // might have a different address for the receiver.
-    static Address receiverAddress = payee1.getBaseAddress();
-    static QuickTxBuilder quickTxBuilder = new QuickTxBuilder(backendService);
-    static PlutusScript plutusScript = getParametrisedPlutusScript();
-    static Address scriptAddress = AddressProvider.getEntAddress(plutusScript, network);
+        static Address ownerAddress = payee1.getBaseAddress();
+        // In this example we are using the same address, but in a real scenario, you
+        // might have a different address for the receiver.
+        static Address receiverAddress = payee1.getBaseAddress();
+        static QuickTxBuilder quickTxBuilder = new QuickTxBuilder(backendService);
+        static PlutusScript plutusScript = getParametrisedPlutusScript();
+        static Address scriptAddress = AddressProvider.getEntAddress(plutusScript, network);
 
-    public static void main(String[] args) throws ApiException, InterruptedException {
+        public static void main(String[] args) throws ApiException, InterruptedException {
 
-        // Locking 10 Ada to the contract address
-        lockFunds(20);
+                // Locking 10 Ada to the contract address
+                lockFunds(20);
 
-        TxResult notSuccessfull = unlockFundsWithSecret(Optional.of("WrongSecret"), 2); // Attempt to unlock with a
-        // wrong secret guess
-        System.out.println("Is the transaction successful? " + notSuccessfull.isSuccessful());
-        TxResult success = unlockFundsWithSecret(Optional.of(secret), 5);
-        System.out.println("Funds unlocked successfully. TxHash: %s".formatted(success.getTxHash()));
-        // Unlock as the owner without providing the secret
-        System.out.println("Waiting for 60 seconds before unlocking without secret...");
-        Thread.sleep(70000); // Wait for 70 seconds before unlocking
-        TxResult unlockFunds = unlockFundsWithSecret(Optional.empty(), 5);
-        System.out.println("Funds unlocked successfully without secret. TxHash: %s".formatted(unlockFunds.getTxHash()));
-    }
+                TxResult notSuccessfull = unlockFundsWithSecret(Optional.of("WrongSecret"), 2); // Attempt to unlock
+                                                                                                // with a
+                // wrong secret guess
+                System.out.println("Is the transaction successful? " + notSuccessfull.isSuccessful());
+                TxResult success = unlockFundsWithSecret(Optional.of(secret), 5);
+                System.out.println("Funds unlocked successfully. TxHash: %s".formatted(success.getTxHash()));
+                // Unlock as the owner without providing the secret
+                System.out.println("Waiting for 60 seconds before unlocking without secret...");
+                Thread.sleep(70000); // Wait for 70 seconds before unlocking
+                TxResult unlockFunds = unlockFundsWithSecret(Optional.empty(), 5);
+                System.out.println("Funds unlocked successfully without secret. TxHash: %s"
+                                .formatted(unlockFunds.getTxHash()));
+        }
 
-    /**
-     * Unlocks the funds from the HTLC contract using the provided secret guess.
-     *
-     * @param secretGuess The secret guess to unlock the funds. If empty, it will
-     *                    unlock as the owner without providing the secret.
-     * @param adaAmount   The amount of Ada to unlock.
-     * @return The transaction result.
-     * @throws ApiException If there is an error during the transaction.
-     */
-    private static TxResult unlockFundsWithSecret(Optional<String> secretGuess, int adaAmount) throws ApiException {
+        /**
+         * Unlocks the funds from the HTLC contract using the provided secret guess.
+         *
+         * @param secretGuess The secret guess to unlock the funds. If empty, it will
+         *                    unlock as the owner without providing the secret.
+         * @param adaAmount   The amount of Ada to unlock.
+         * @return The transaction result.
+         * @throws ApiException If there is an error during the transaction.
+         */
+        private static TxResult unlockFundsWithSecret(Optional<String> secretGuess, int adaAmount) throws ApiException {
 
-        // Getting all utxos from the script address
-        List<Utxo> allScriptUtxos = utxoSupplier.getAll(scriptAddress.getAddress());
-        long slot = backendService.getBlockService().getLatestBlock().getValue().getSlot();
-        System.out.println("Current slot: " + slot);
-        ConstrPlutusData redeemer = secretGuess.map(secret -> ConstrPlutusData.builder()
-                .alternative(0)
-                .data(ListPlutusData.of(BytesPlutusData.of(secret)))
-                .build()).orElse(
-                        ConstrPlutusData.builder()
-                                .alternative(1)
-                                .data(ListPlutusData.of())
-                                .build());
+                // Getting all utxos from the script address
+                List<Utxo> allScriptUtxos = utxoSupplier.getAll(scriptAddress.getAddress());
+                long slot = backendService.getBlockService().getLatestBlock().getValue().getSlot();
+                System.out.println("Current slot: " + slot);
+                ConstrPlutusData redeemer = secretGuess.map(secret -> ConstrPlutusData.builder()
+                                .alternative(0)
+                                .data(ListPlutusData.of(BytesPlutusData.of(secret.getBytes())))
+                                .build()).orElse(
+                                                ConstrPlutusData.builder()
+                                                                .alternative(1)
+                                                                .data(ListPlutusData.of())
+                                                                .build());
 
-        ScriptTx scriptTx = new ScriptTx()
-                .collectFrom(allScriptUtxos,
-                        redeemer)
-                .payToAddress(receiverAddress.getAddress(), Amount.ada(
-                        adaAmount))
-                .attachSpendingValidator(plutusScript)
-                .withChangeAddress(scriptAddress.getAddress());
-        return quickTxBuilder.compose(scriptTx)
-                .validFrom(slot - 10)
-                .validTo(slot + 10) // Set a validity range
-                .feePayer(ownerAddress.getAddress())
-                .withSigner(SignerProviders.signerFrom(payee1))
-                .withRequiredSigners(ownerAddress)
-                .completeAndWait();
-    }
+                ScriptTx scriptTx = new ScriptTx()
+                                .collectFrom(allScriptUtxos,
+                                                redeemer)
+                                .payToAddress(receiverAddress.getAddress(), Amount.ada(
+                                                adaAmount))
+                                .attachSpendingValidator(plutusScript)
+                                .withChangeAddress(scriptAddress.getAddress());
+                return quickTxBuilder.compose(scriptTx)
+                                .validFrom(slot - 10)
+                                .validTo(slot + 10) // Set a validity range
+                                .feePayer(ownerAddress.getAddress())
+                                .withSigner(SignerProviders.signerFrom(payee1))
+                                .withRequiredSigners(ownerAddress)
+                                .completeAndWait();
+        }
 
-    /**
-     * Locks funds to the HTLC contract address.
-     *
-     * @param adaMount The amount of Ada to lock.
-     */
-    private static void lockFunds(int adaMount) {
-        PlutusScript plutusScript = getParametrisedPlutusScript();
-        Address scriptAddress = AddressProvider.getEntAddress(plutusScript, network);
-        System.out.println("Script Address: " + scriptAddress.getAddress());
-        // Locking 10 Ada to the contract address
-        Tx tx = new Tx().payToAddress(scriptAddress.getAddress(), Amount.ada(adaMount))
-                .withChangeAddress(ownerAddress.getAddress())
-                .from(ownerAddress.getAddress());
-        TxResult txResult = quickTxBuilder.compose(tx)
-                .feePayer(ownerAddress.getAddress())
-                .withSigner(SignerProviders.signerFrom(payee1))
-                .completeAndWait();
-        System.out.println("Funds locked. TxHash: %s".formatted(txResult.getTxHash()));
-    }
+        /**
+         * Locks funds to the HTLC contract address.
+         *
+         * @param adaMount The amount of Ada to lock.
+         */
+        private static void lockFunds(int adaMount) {
+                PlutusScript plutusScript = getParametrisedPlutusScript();
+                Address scriptAddress = AddressProvider.getEntAddress(plutusScript, network);
+                System.out.println("Script Address: " + scriptAddress.getAddress());
+                // Locking 10 Ada to the contract address
+                Tx tx = new Tx().payToAddress(scriptAddress.getAddress(), Amount.ada(adaMount))
+                                .withChangeAddress(ownerAddress.getAddress())
+                                .from(ownerAddress.getAddress());
+                TxResult txResult = quickTxBuilder.compose(tx)
+                                .feePayer(ownerAddress.getAddress())
+                                .withSigner(SignerProviders.signerFrom(payee1))
+                                .completeAndWait();
+                System.out.println("Funds locked. TxHash: %s".formatted(txResult.getTxHash()));
+        }
 
-    /**
-     * Retrieves the parametrized Plutus script for the HTLC contract.
-     *
-     * @return The Plutus script with the parameters applied.
-     */
-    private static PlutusScript getParametrisedPlutusScript() {
-        PlutusContractBlueprint plutusContractBlueprint = PlutusBlueprintLoader
-                .loadBlueprint(new File("../../onchain/aiken/plutus.json"));
-        String simpleTransferCompiledCode = plutusContractBlueprint.getValidators().getFirst()
-                .getCompiledCode();
+        /**
+         * Retrieves the parametrized Plutus script for the HTLC contract.
+         *
+         * @return The Plutus script with the parameters applied.
+         */
+        private static PlutusScript getParametrisedPlutusScript() {
+                PlutusContractBlueprint plutusContractBlueprint = PlutusBlueprintLoader
+                                .loadBlueprint(new File("../../onchain/aiken/plutus.json"));
+                String simpleTransferCompiledCode = plutusContractBlueprint.getValidators().getFirst()
+                                .getCompiledCode();
 
-        byte[] hashedAnswer = Blake2bUtil.blake2bHash256(secret.getBytes()); // Hash the secret answer
-        long expiration = LocalDateTime.now().plusMinutes(1).toEpochSecond(ZoneOffset.UTC) * 1000; // Set expiration
-                                                                                                   // time to
-        // 60 minutes from now
-        System.out.println("Expiration time (epoch seconds): " + expiration);
-        // Apply parameters to the validator compiled code to get the compiled code
-        String compiledCode = AikenScriptUtil.applyParamToScript(
-                ListPlutusData.of(
-                        BytesPlutusData.of(hashedAnswer),
-                        BigIntPlutusData.of(expiration),
-                        BytesPlutusData.of(ownerAddress.getPaymentCredentialHash().get())),
-                simpleTransferCompiledCode);
+                byte[] hashedAnswer = Sha256Hash.hash(secret.getBytes()); // Hash the secret answer
+                long expiration = LocalDateTime.now().plusMinutes(1).toEpochSecond(ZoneOffset.UTC) * 1000; // Set
+                                                                                                           // expiration
+                                                                                                           // time to
+                // 60 minutes from now
+                System.out.println("Expiration time (epoch seconds): " + expiration);
+                // Apply parameters to the validator compiled code to get the compiled code
+                String compiledCode = AikenScriptUtil.applyParamToScript(
+                                ListPlutusData.of(
+                                                BytesPlutusData.of(hashedAnswer),
+                                                BigIntPlutusData.of(expiration),
+                                                BytesPlutusData.of(ownerAddress.getPaymentCredentialHash().get())),
+                                simpleTransferCompiledCode);
 
-        PlutusScript plutusScript = PlutusBlueprintUtil.getPlutusScriptFromCompiledCode(compiledCode,
-                PlutusVersion.v3);
-        return plutusScript;
-    }
+                PlutusScript plutusScript = PlutusBlueprintUtil.getPlutusScriptFromCompiledCode(compiledCode,
+                                PlutusVersion.v3);
+                return plutusScript;
+        }
 }

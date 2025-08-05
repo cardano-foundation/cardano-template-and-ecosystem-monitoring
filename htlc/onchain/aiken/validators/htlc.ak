@@ -1,6 +1,6 @@
 use cardano/transaction.{Transaction, OutputReference}
 use cocktail/vodka_validity_range.{valid_after, valid_before}
-use aiken/crypto.{VerificationKeyHash, blake2b_256}
+use aiken/crypto.{VerificationKeyHash, sha2_256}
 use cocktail/vodka_extra_signatories.{key_signed}
 
 pub type Htlc {
@@ -21,7 +21,7 @@ validator htlc(secret: ByteArray, expiration: Int, owner: VerificationKeyHash) {
       GUESS {answer} -> {
         and{
           valid_before(validity_range, expiration), // The guess must be made before the expiration time
-          (blake2b_256(answer) == secret)
+          (sha2_256(answer) == secret)
         }
       }
       WITHDRAW -> {
