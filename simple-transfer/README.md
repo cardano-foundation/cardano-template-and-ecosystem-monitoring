@@ -74,11 +74,6 @@ cd offchain/ccl-java
 jbang simple-transfer.java
 ```
 
-This command will execute the `main` method, which performs the following steps:
-1. Creates the required accounts in the `init()` method.
-2. Locks the funds in the contract address using the `lock()` method.
-3. Unlocks the funds and distributes them to the recipients using the `unlock()` method.
-
 ## Verify the Output
 
 After running the code, you can verify the output in Yaci Viewer. To access Yaci Viewer in docker distribution, use the following url
