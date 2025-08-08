@@ -165,7 +165,6 @@ public class Htlc {
                 long expiration = LocalDateTime.now().plusMinutes(1).toEpochSecond(ZoneOffset.UTC) * 1000; // Set
                                                                                                            // expiration
                                                                                                            // time to
-                // 60 minutes from now
                 System.out.println("Expiration time (epoch seconds): " + expiration);
                 // Apply parameters to the validator compiled code to get the compiled code
                 String compiledCode = AikenScriptUtil.applyParamToScript(
