@@ -1,9 +1,6 @@
-# Simple transfer
+# Token Transfer
 
-The Hash Timed Locked Contract (HTLC) involves two users, the owner and the guesser.
-This contract allows the owner to lock funds within a contract by providing an expiration time and a secret.
-Others can try to unlock the funds before the expiration by trying to guess the secret.
-The owner can unlock the funds after the expiration to get the funds out of the contract. 
+This smart contract locks a specific crypto asset, defined by its PolicyId and assetName, which can only be spent by a designated receiver. The receiver must sign the transaction to withdraw the asset, and the transaction cannot involve sending other unexpected assets to different addresses. To prevent funds from being permanently locked, the contract also allows anyone to spend UTXOs sent to its address that do not contain the specified asset.
 
 ## ⛓ On-chain
 
@@ -74,7 +71,7 @@ To run the code, use the following command:
 
 ```shell
 cd offchain/ccl-java
-jbang simple-transfer.java
+jbang TokenTransfer.java
 ```
 
 ## Verify the Output
