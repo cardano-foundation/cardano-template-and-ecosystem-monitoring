@@ -71,7 +71,7 @@ Outbid participants can:
 ### Step 4: Auction Settlement
 After expiration:
 - Highest bidder wins the auction
-- Seller receives the winning bid amount
+- Seller can claim the winning bid amount
 - Winner receives rights to the auctioned item
 - No additional fees beyond standard transaction costs
 
