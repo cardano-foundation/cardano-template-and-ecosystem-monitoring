@@ -65,7 +65,7 @@ A player can join by:
 During the active period:
 - Oracle continuously provides exchange rate updates
 - Player can claim winnings if target rate is exceeded
-- Contract monitors price conditions until deadline
+- Off-chain component monitors price conditions until deadline and creates a transaction
 
 ### Step 4: Resolution
 Two possible outcomes:
