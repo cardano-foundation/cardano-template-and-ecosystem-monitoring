@@ -26,7 +26,7 @@ The 21 use cases identified in the research paper are as follows:
 5. [Escrow](escrow/README.md)  
 6. Auction  
 7. [Crowdfund](crowdfund/README.md)  
-8. Vault  
+8. [Vault](vault/README.md)
 9. [Vesting](vesting/README.md)  
 10. Storage  
 11. Simple wallet  
