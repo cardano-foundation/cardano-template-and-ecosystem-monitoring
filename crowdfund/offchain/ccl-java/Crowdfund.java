@@ -1,5 +1,5 @@
 /// usr/bin/env jbang "$0" "$@" ; exit $?
-/// 
+///
 // @formatter:off
 //JAVA 24+
 //COMPILE_OPTIONS --enable-preview -source 24
@@ -49,7 +49,7 @@ public class Crowdfund {
 
     // Backend service to connect to Cardano node. Here we are using Blockfrost as
     // an example.
-    static BackendService backendService = new BFBackendService("http://localhost:8081/api/v1/", "Dummy Key");
+    static BackendService backendService = new BFBackendService("http://localhost:8080/api/v1/", "Dummy Key");
     static UtxoSupplier utxoSupplier = new DefaultUtxoSupplier(backendService.getUtxoService());
 
     // Dummy mnemonic for the example. Replace with a valid mnemonic.
@@ -103,6 +103,9 @@ public class Crowdfund {
         TxResult claimTxResult = getClaimTxResult(beneficiar, 10);
         System.out.println("Funds claimed by beneficiar. Tx Hash: " +
                 claimTxResult.getTxHash());
+
+        if (!claimTxResult.isSuccessful())
+            throw new AssertionError("Crowdfund CCL test failed");
     }
 
     private static TxResult getReclaimTxResult(Account initiator, int adaAmount)
@@ -190,7 +193,7 @@ public class Crowdfund {
 
     private static PlutusScript getParametrisedPlutusScript() {
         PlutusContractBlueprint plutusContractBlueprint = PlutusBlueprintLoader
-                .loadBlueprint(new File("crowdfund/onchain/aiken/plutus.json"));
+                .loadBlueprint(new File("../../onchain/aiken/plutus.json"));
         String simpleTransferCompiledCode = plutusContractBlueprint.getValidators().getFirst()
                 .getCompiledCode();
 

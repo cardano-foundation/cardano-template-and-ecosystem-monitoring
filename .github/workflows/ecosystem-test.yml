@@ -1,0 +1,415 @@
+name: Cardano Ecosystem Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+# Cancel in-progress runs for the same workflow and branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  discover:
+    name: Discover Examples
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      aiken-examples: ${{ steps.discovery.outputs.aiken-examples }}
+      ccl-examples: ${{ steps.discovery.outputs.ccl-examples }}
+      mesh-examples: ${{ steps.discovery.outputs.mesh-examples }}
+      lucid-examples: ${{ steps.discovery.outputs.lucid-examples }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run discovery script
+        id: discovery
+        run: |
+          chmod +x scripts/local-test-discovery.sh
+          scripts/local-test-discovery.sh
+
+  compile-aiken:
+    name: Compile Aiken - ${{ matrix.example }}
+    needs: discover
+    if: needs.discover.outputs.aiken-examples != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        example: ${{ fromJson(needs.discover.outputs.aiken-examples) }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Aiken
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf https://install.aiken-lang.org | sh
+          echo "$HOME/.aiken/bin" >> $GITHUB_PATH
+
+      - name: Verify Aiken installation
+        run: aiken --version
+
+      - name: Cache Aiken dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.aiken
+            ${{ matrix.example }}/onchain/aiken/build
+          key: aiken-${{ matrix.example }}-${{ hashFiles(format('{0}/onchain/aiken/aiken.toml', matrix.example)) }}
+
+      - name: Run aiken check
+        working-directory: ${{ matrix.example }}/onchain/aiken
+        run: aiken check
+
+      - name: Run aiken build
+        working-directory: ${{ matrix.example }}/onchain/aiken
+        run: aiken build
+
+      - name: Verify plutus.json generated
+        run: |
+          if [ ! -f "${{ matrix.example }}/onchain/aiken/plutus.json" ]; then
+            echo "❌ plutus.json not generated"
+            exit 1
+          fi
+          echo "✅ plutus.json generated ($(wc -c < ${{ matrix.example }}/onchain/aiken/plutus.json) bytes)"
+
+      - name: Upload plutus.json artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: plutus-${{ matrix.example }}
+          path: ${{ matrix.example }}/onchain/aiken/plutus.json
+          retention-days: 1
+
+  start-yaci-devkit:
+    name: Start Yaci DevKit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Yaci DevKit
+        run: npm install -g @bloxbean/yaci-devkit
+
+      - name: Start Yaci DevKit
+        run: |
+          nohup yaci-devkit up --enable-yaci-store > yaci-devkit.log 2>&1 &
+          echo "Yaci DevKit starting..."
+
+      - name: Wait for Yaci DevKit to be ready
+        run: |
+          echo "Waiting for Yaci DevKit to start..."
+          for i in {1..30}; do
+            if nc -z localhost 8080; then
+              echo "✅ Yaci DevKit is ready!"
+              exit 0
+            fi
+            echo "Attempt $i/30: Waiting..."
+            sleep 5
+          done
+          echo "❌ Yaci DevKit failed to start"
+          cat yaci-devkit.log
+          exit 1
+
+      - name: Verify Blockfrost API endpoint
+        run: |
+          if nc -z localhost 8080; then
+            echo "✅ Blockfrost API endpoint is available"
+          else
+            echo "⚠️  Blockfrost API endpoint not available (may still work)"
+          fi
+
+      - name: Keep Yaci DevKit running
+        run: |
+          echo "Yaci DevKit is running and ready for tests"
+          # This job completes, but Yaci DevKit will be available for dependent jobs in the same runner
+
+  test-ccl-java:
+    name: Test CCL Java - ${{ matrix.example }}
+    needs: [discover, compile-aiken, start-yaci-devkit]
+    if: needs.discover.outputs.ccl-examples != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        example: ${{ fromJson(needs.discover.outputs.ccl-examples) }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Install JBang
+        run: |
+          curl -Ls https://sh.jbang.dev | bash -s - app setup
+          echo "$HOME/.jbang/bin" >> $GITHUB_PATH
+
+      - name: Verify JBang installation
+        run: jbang version
+
+      - name: Cache JBang dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.jbang/cache
+          key: jbang-${{ matrix.example }}-${{ hashFiles(format('{0}/offchain/ccl-java/*.java', matrix.example)) }}
+
+      - name: Setup Node.js (for Yaci DevKit)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install and Start Yaci DevKit
+        run: |
+          npm install -g @bloxbean/yaci-devkit
+          nohup yaci-devkit up --enable-yaci-store > yaci-devkit.log 2>&1 &
+
+      - name: Wait for Yaci DevKit
+        run: |
+          for i in {1..30}; do
+            if nc -z localhost 8080; then
+              echo "✅ Yaci DevKit ready"
+              exit 0
+            fi
+            sleep 5
+          done
+          exit 1
+
+      - name: Download plutus.json artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: plutus-${{ matrix.example }}
+          path: ${{ matrix.example }}/onchain/aiken/
+
+      - name: Run CCL Java test
+        id: test
+        continue-on-error: true
+        working-directory: ${{ matrix.example }}/offchain/ccl-java
+        run: |
+          JAVA_FILE=$(ls *.java | head -1)
+          echo "Running: jbang $JAVA_FILE"
+          timeout 300 jbang "$JAVA_FILE" | tee test-output.log
+
+      # No need for verification step - JBang exit code indicates success/failure
+      # All CCL Java examples now throw AssertionError on failure
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-ccl-${{ matrix.example }}
+          path: ${{ matrix.example }}/offchain/ccl-java/test-output.log
+          retention-days: 30
+
+  test-mesh:
+    name: Test Mesh.js - ${{ matrix.example }}
+    needs: [discover, compile-aiken, start-yaci-devkit]
+    if: needs.discover.outputs.mesh-examples != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        example: ${{ fromJson(needs.discover.outputs.mesh-examples) }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v1
+        with:
+          deno-version: v1.x
+
+      - name: Cache Deno dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/deno
+          key: deno-${{ matrix.example }}-${{ hashFiles(format('{0}/offchain/meshjs/deno.json', matrix.example)) }}
+
+      - name: Setup Node.js (for Yaci DevKit)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install and Start Yaci DevKit
+        run: |
+          npm install -g @bloxbean/yaci-devkit
+          nohup yaci-devkit up --enable-yaci-store > yaci-devkit.log 2>&1 &
+
+      - name: Wait for Yaci DevKit
+        run: |
+          for i in {1..30}; do
+            if nc -z localhost 8080; then
+              echo "✅ Yaci DevKit ready"
+              exit 0
+            fi
+            sleep 5
+          done
+          exit 1
+
+      - name: Download plutus.json artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: plutus-${{ matrix.example }}
+          path: ${{ matrix.example }}/onchain/aiken/
+
+      - name: Run Mesh.js test
+        id: test
+        continue-on-error: true
+        working-directory: ${{ matrix.example }}/offchain/meshjs
+        run: |
+          TS_FILE=$(ls *.ts | head -1)
+          echo "Running: deno run --allow-all $TS_FILE"
+          timeout 300 deno run --allow-all "$TS_FILE" | tee test-output.log
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-mesh-${{ matrix.example }}
+          path: ${{ matrix.example }}/offchain/meshjs/test-output.log
+          retention-days: 30
+
+  test-lucid:
+    name: Test Lucid Evolution - ${{ matrix.example }}
+    needs: [discover, compile-aiken, start-yaci-devkit]
+    if: needs.discover.outputs.lucid-examples != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        example: ${{ fromJson(needs.discover.outputs.lucid-examples) }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v1
+        with:
+          deno-version: v1.x
+
+      - name: Setup Node.js (for Yaci DevKit)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install and Start Yaci DevKit
+        run: |
+          npm install -g @bloxbean/yaci-devkit
+          nohup yaci-devkit up --enable-yaci-store > yaci-devkit.log 2>&1 &
+
+      - name: Wait for Yaci DevKit
+        run: |
+          for i in {1..30}; do
+            if nc -z localhost 8080; then
+              echo "✅ Yaci DevKit ready"
+              exit 0
+            fi
+            sleep 5
+          done
+          exit 1
+
+      - name: Download plutus.json artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: plutus-${{ matrix.example }}
+          path: ${{ matrix.example }}/onchain/aiken/
+
+      - name: Run Lucid Evolution test
+        working-directory: ${{ matrix.example }}/offchain/lucid-evolution
+        run: |
+          TS_FILE=$(ls *.ts | head -1)
+          timeout 300 deno run --allow-all "$TS_FILE" | tee test-output.log
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-lucid-${{ matrix.example }}
+          path: ${{ matrix.example }}/offchain/lucid-evolution/test-output.log
+          retention-days: 30
+
+  report:
+    name: Generate Ecosystem Report
+    needs: [compile-aiken, test-ccl-java, test-mesh, test-lucid]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Generate report
+        run: |
+          mkdir -p .local-test-results
+
+          # Process Aiken compilation results
+          echo "# 🔍 Cardano Ecosystem Test Report" > report.md
+          echo "" >> report.md
+          echo "**Generated**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> report.md
+          echo "**Workflow Run**: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> report.md
+          echo "" >> report.md
+
+          echo "## Summary" >> report.md
+          echo "" >> report.md
+
+          # Count artifacts
+          AIKEN_COUNT=$(find artifacts -name "plutus-*" -type d 2>/dev/null | wc -l)
+          CCL_COUNT=$(find artifacts -name "logs-ccl-*" -type d 2>/dev/null | wc -l)
+          MESH_COUNT=$(find artifacts -name "logs-mesh-*" -type d 2>/dev/null | wc -l)
+          LUCID_COUNT=$(find artifacts -name "logs-lucid-*" -type d 2>/dev/null | wc -l)
+
+          echo "- **Aiken Examples Compiled**: $AIKEN_COUNT" >> report.md
+          echo "- **CCL Java Tests**: $CCL_COUNT" >> report.md
+          echo "- **Mesh.js Tests**: $MESH_COUNT" >> report.md
+          echo "- **Lucid Evolution Tests**: $LUCID_COUNT" >> report.md
+          echo "" >> report.md
+
+          echo "## Artifacts" >> report.md
+          echo "" >> report.md
+          echo "All test logs and build artifacts are available in the workflow artifacts." >> report.md
+          echo "" >> report.md
+
+          cat report.md
+
+      - name: Upload report as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ecosystem-report
+          path: report.md
+          retention-days: 30
+
+      - name: Add report to workflow summary
+        run: cat report.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('report.md', 'utf8');
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: report
+            });

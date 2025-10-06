@@ -1,5 +1,5 @@
 /// usr/bin/env jbang "$0" "$@" ; exit $?
-/// 
+///
 // @formatter:off
 //JAVA 24+
 //COMPILE_OPTIONS --enable-preview -source 24
@@ -50,7 +50,7 @@ public class Htlc {
 
         // Backend service to connect to Cardano node. Here we are using Blockfrost as
         // an example.
-        static BackendService backendService = new BFBackendService("http://localhost:8081/api/v1/", "Dummy Key");
+        static BackendService backendService = new BFBackendService("http://localhost:8080/api/v1/", "Dummy Key");
         static UtxoSupplier utxoSupplier = new DefaultUtxoSupplier(backendService.getUtxoService());
 
         // Dummy mnemonic for the example. Replace with a valid mnemonic.
@@ -72,7 +72,6 @@ public class Htlc {
         static Address scriptAddress = AddressProvider.getEntAddress(plutusScript, network);
 
         public static void main(String[] args) throws ApiException, InterruptedException {
-
                 // Locking 10 Ada to the contract address
                 lockFunds(20);
 
@@ -88,6 +87,10 @@ public class Htlc {
                 TxResult unlockFunds = unlockFundsWithSecret(Optional.empty(), 5);
                 System.out.println("Funds unlocked successfully without secret. TxHash: %s"
                                 .formatted(unlockFunds.getTxHash()));
+
+                // Verify transactions succeeded
+                if (!success.isSuccessful() || !unlockFunds.isSuccessful())
+                        throw new AssertionError("HTLC CCL test failed");
         }
 
         /**

@@ -86,6 +86,9 @@ static void lock() {
         System.out.println("Success: " + result.getValue());
     else
         System.out.println("Failed: " + result);
+
+    if (!result.isSuccessful())
+        throw new AssertionError("Lock tx failed " + result);
 }
 
 static void unlock() throws ApiException {
@@ -124,6 +127,9 @@ static void unlock() throws ApiException {
         System.out.println("Success: " + result.getValue());
     else
         System.out.println("Failed: " + result);
+
+    if (!result.isSuccessful())
+        throw new AssertionError("Unlock tx failed " + result);
 }
 
 //Main method
@@ -136,4 +142,7 @@ void main(String[] args) throws ApiException {
     System.out.println("Unlocking funds from the script address");
     unlock();
 
+    // Verify all transactions succeeded
+    // Note: lock() and unlock() methods already check isSuccessful() and print status
+    System.out.println("PaymentSplitter CCL test completed successfully");
 }

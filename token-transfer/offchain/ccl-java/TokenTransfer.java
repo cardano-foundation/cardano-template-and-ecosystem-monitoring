@@ -1,5 +1,5 @@
 /// usr/bin/env jbang "$0" "$@" ; exit $?
-/// 
+///
 // @formatter:off
 //JAVA 24+
 //COMPILE_OPTIONS --enable-preview -source 24
@@ -48,7 +48,7 @@ public class TokenTransfer {
         private static final String ASSET_NAME = "TestAsset";
         // Backend service to connect to Cardano node. Here we are using Blockfrost as
         // an example.
-        static BackendService backendService = new BFBackendService("http://localhost:8081/api/v1/", "Dummy Key");
+        static BackendService backendService = new BFBackendService("http://localhost:8080/api/v1/", "Dummy Key");
         static UtxoSupplier utxoSupplier = new DefaultUtxoSupplier(backendService.getUtxoService());
         // Dummy mnemonic for the example. Replace with a valid mnemonic.
         static String mnemonic = "test test test test test test test test test test test test test test test test test test test test test test test sauce";
@@ -92,12 +92,15 @@ public class TokenTransfer {
                 System.out.println("TxHash: " + completeAndWait.getTxHash());
                 System.out.println("Transferred Asset to " + payee1.getBaseAddress().getAddress());
 
+                // Verify transactions succeeded
+                if (!mintTokens.isSuccessful() || !completeAndWait.isSuccessful())
+                        throw new AssertionError("TokenTransfer CCL test failed");
         }
 
         /**
          * First we need to mint an asset using a Plutus script. We are using an
          * always-succeeds Plutus script and sending them directly to our script.
-         * 
+         *
          * @param scriptAddress The address of the script where the asset will be
          *                      minted.
          * @return TxResult containing the transaction result.
@@ -121,7 +124,7 @@ public class TokenTransfer {
          * Create a parametrized contract by applying parameters to the compiled code
          * of the Plutus script. This is used to create a contract that can handle
          * the transfer of assets.
-         * 
+         *
          * @return PlutusScript containing the compiled code of the parametrized
          *         contract.
          * @throws CborSerializationException

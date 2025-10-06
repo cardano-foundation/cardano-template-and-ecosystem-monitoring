@@ -1,5 +1,5 @@
 /// usr/bin/env jbang "$0" "$@" ; exit $?
-/// 
+///
 // @formatter:off
 //JAVA 24+
 //COMPILE_OPTIONS --enable-preview -source 24
@@ -48,7 +48,7 @@ public class Vault {
 
     // Backend service to connect to Cardano node. Here we are using Blockfrost as
     // an example.
-    static BackendService backendService = new BFBackendService("http://localhost:8081/api/v1/", "Dummy Key");
+    static BackendService backendService = new BFBackendService("http://localhost:8080/api/v1/", "Dummy Key");
     static UtxoSupplier utxoSupplier = new DefaultUtxoSupplier(backendService.getUtxoService());
 
     // Dummy mnemonic for the example. Replace with a valid mnemonic.
@@ -71,7 +71,7 @@ public class Vault {
         System.out.println("Owner Address: " + ownerAddress.getAddress());
         System.out.println("Script Address: " + scriptAddress.getAddress());
 
-        // First pay some money to the vault 
+        // First pay some money to the vault
         Tx payToVaultTx = new Tx()
                 .payToAddress(scriptAddress.getAddress(), Amount.ada(10))
                 .from(ownerAddress.getAddress());
@@ -110,7 +110,7 @@ public class Vault {
         allScriptUtxos = allScriptUtxos.stream().filter(utxo -> utxo.getInlineDatum() != null).toList();
         System.out.println("Script Utxos with datum: " + allScriptUtxos);
         ScriptTx finalizeWithDrawTx = new ScriptTx()
-                .collectFrom(allScriptUtxos.getFirst(), 
+                .collectFrom(allScriptUtxos.getFirst(),
                                         ConstrPlutusData.builder().alternative(1)
                                                         .data(ListPlutusData.of())
                                                         .build()) // 1 = Finalize withdraw
@@ -126,6 +126,10 @@ public class Vault {
                 .validTo(slot + 100)
                 .completeAndWait();
         System.out.println("Finalize withdraw tx: " + finalizeWithdrawResult.getTxHash());
+
+        if (!finalizeWithdrawResult.isSucessful())
+            throw new AssertionError("Withdrawal failed : " + finalizeWithdrawResult);
+
     }
 
     private static PlutusScript getParametrisedPlutusScript() {
