@@ -48,11 +48,12 @@ jobs:
 
       - name: Install Aiken
         run: |
-          # Install aikup
+          # Install aikup and aiken
           curl --proto '=https' --tlsv1.2 -LsSf https://install.aiken-lang.org | sh
-          # Add to PATH and install latest aiken
-          export PATH="$HOME/.aiken/bin:$PATH"
-          aikup install latest
+          # Source the environment to add aiken to PATH
+          source $HOME/.aiken/bin/env
+          # Install the default/latest stable version
+          aikup
           aiken --version
 
       - name: Cache Aiken dependencies
