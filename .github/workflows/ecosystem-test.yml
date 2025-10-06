@@ -47,12 +47,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Aiken
-        run: |
-          curl --proto '=https' --tlsv1.2 -LsSf https://install.aiken-lang.org | sh
-          echo "$HOME/.aiken/bin" >> $GITHUB_PATH
-
-      - name: Verify Aiken installation
-        run: aiken --version
+        run: curl --proto '=https' --tlsv1.2 -LsSf https://install.aiken-lang.org | sh
 
       - name: Cache Aiken dependencies
         uses: actions/cache@v4
@@ -62,13 +57,13 @@ jobs:
             ${{ matrix.example }}/onchain/aiken/build
           key: aiken-${{ matrix.example }}-${{ hashFiles(format('{0}/onchain/aiken/aiken.toml', matrix.example)) }}
 
-      - name: Run aiken check
+      - name: Run aiken check and build
         working-directory: ${{ matrix.example }}/onchain/aiken
-        run: aiken check
-
-      - name: Run aiken build
-        working-directory: ${{ matrix.example }}/onchain/aiken
-        run: aiken build
+        run: |
+          export PATH="$HOME/.aiken/bin:$PATH"
+          aiken --version
+          aiken check
+          aiken build
 
       - name: Verify plutus.json generated
         run: |
