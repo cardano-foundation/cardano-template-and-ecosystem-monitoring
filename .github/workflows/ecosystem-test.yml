@@ -150,6 +150,7 @@ jobs:
       - name: Run CCL Java test
         working-directory: ${{ matrix.example }}/offchain/ccl-java
         run: |
+          set -o pipefail
           JAVA_FILE=$(ls *.java | head -1)
           echo "Running: jbang $JAVA_FILE"
           timeout 300 jbang "$JAVA_FILE" | tee test-output.log
@@ -219,6 +220,7 @@ jobs:
       - name: Run Mesh.js test
         working-directory: ${{ matrix.example }}/offchain/meshjs
         run: |
+          set -o pipefail
           TS_FILE=$(ls *.ts | head -1)
           echo "Running: deno run --allow-all $TS_FILE"
           timeout 300 deno run --allow-all "$TS_FILE" | tee test-output.log
@@ -280,6 +282,7 @@ jobs:
       - name: Run Lucid Evolution test
         working-directory: ${{ matrix.example }}/offchain/lucid-evolution
         run: |
+          set -o pipefail
           TS_FILE=$(ls *.ts | head -1)
           timeout 300 deno run --allow-all "$TS_FILE" | tee test-output.log
 
