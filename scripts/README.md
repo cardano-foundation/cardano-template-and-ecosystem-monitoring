@@ -10,7 +10,7 @@ This directory contains scripts for testing all Cardano examples locally. These 
 - **GitHub Actions** (`.github/workflows/ecosystem-test.yml`): Run tests **in parallel** for speed
 - **Both use identical commands**: `aiken check`, `aiken build`, `jbang`, etc.
 
-The discovery script (`local-test-discovery.sh`) is **directly reused** by GitHub Actions - zero duplication!
+The discovery script (`local-test-discovery.sh`) is **directly reused** by GitHub Actions.
 
 ## Quick Start
 
@@ -60,32 +60,49 @@ Generates a markdown report from existing test results in `.local-test-results/`
 
 ### Required Tools
 
-1. **Aiken** (for on-chain compilation)
+1. **Aiken** - v1.1.17+ (for on-chain compilation)
    ```bash
    curl --proto '=https' --tlsv1.2 -LsSf https://install.aiken-lang.org | sh
+   source $HOME/.aiken/bin/env
+   aikup  # Installs latest stable version
+   aiken --version
    ```
 
-2. **JBang** (for CCL Java tests)
+2. **Java** - JDK 24+ (for CCL Java tests)
+   ```bash
+   # macOS
+   brew install openjdk@24
+
+   # Linux - Download from https://adoptium.net/
+   java --version
+   ```
+
+3. **JBang** - Latest (for running CCL Java scripts)
    ```bash
    # macOS
    brew install jbang
 
    # Linux
    curl -Ls https://sh.jbang.dev | bash -s - app setup
+
+   jbang version
    ```
 
-3. **Deno** (for Mesh.js/Lucid tests)
+4. **Deno** - v2.0+ (for Mesh.js/Lucid tests)
    ```bash
    # macOS
    brew install deno
 
    # Linux
    curl -fsSL https://deno.land/install.sh | sh
+
+   deno --version  # Must be 2.0+
    ```
 
-4. **Yaci DevKit** (for local testnet)
+5. **Yaci DevKit** - Latest (for local testnet)
    ```bash
    npm install -g @bloxbean/yaci-devkit
+   yaci-devkit --version
    ```
 
 ### Optional: Install Only What You Need
