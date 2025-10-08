@@ -42,7 +42,7 @@ public class SimpleTransfer {
 
         // Backend service to connect to Cardano node. Here we are using Blockfrost as
         // an example.
-        static BackendService backendService = new BFBackendService("http://localhost:8081/api/v1/", "Dummy Key");
+        static BackendService backendService = new BFBackendService("http://localhost:8080/api/v1/", "Dummy Key");
         static UtxoSupplier utxoSupplier = new DefaultUtxoSupplier(backendService.getUtxoService());
 
         // Dummy mnemonic for the example. Replace with a valid mnemonic.
@@ -102,5 +102,9 @@ public class SimpleTransfer {
                                 .completeAndWait();
                 System.out.println("Funds withdrawn. TxHash:");
                 System.out.println(txResult1.getTxHash());
+
+                // Verify transactions succeeded
+                if (!txResult.isSuccessful() || !txResult1.isSuccessful())
+                        throw new AssertionError("SimpleTransfer CCL test failed");
         }
 }
