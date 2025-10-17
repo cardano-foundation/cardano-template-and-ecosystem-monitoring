@@ -69,19 +69,19 @@ validator script_logic_version_1_0(proxy_policy_id: PolicyId) {
       or {
         invoke_mint_validation,
         invoke_spend_validation,
-      },
+      }?,
       validate_mint(
         redeemer,
         proxy_policy_id,
         transaction,
         invoke_mint_validation,
-      ),
+      )?,
       validate_spend(
         redeemer,
         proxy_policy_id,
         transaction,
         invoke_spend_validation,
-      ),
+      )?,
     }
   }
 

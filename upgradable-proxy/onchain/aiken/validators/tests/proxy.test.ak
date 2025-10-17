@@ -13,6 +13,7 @@ use mocktail/virgin_key_hash.{
 }
 use mocktail/virgin_output_reference.{mock_utxo_ref}
 use proxy.{INIT, ProxyDatum, SPEND}
+use script_logic_v_1.{MyRedeemer}
 
 test should_init_a_proxy_contract() {
   let policy_id = mock_policy_id(1)
@@ -112,5 +113,16 @@ test should_mint_via_proxy_contract() {
       extra_signatories: [mock_pub_key_hash(4)],
     }
 
-  proxy.proxy.spend(utxo_ref, None, redeemer, spent_utxo, transaction)
+  let script_logic_redeemer =
+    MyRedeemer { token_name: "Test", password: "Hello, World!" }
+
+  and {
+    proxy.proxy.spend(utxo_ref, None, redeemer, spent_utxo, transaction),
+    script_logic_v_1.script_logic_version_1_0.withdraw(
+      policy_id,
+      script_logic_redeemer,
+      Script(mock_script_hash(1)),
+      transaction,
+    ),
+  }
 }
