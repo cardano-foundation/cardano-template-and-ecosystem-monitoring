@@ -1,6 +1,5 @@
-use aiken/collection/dict
+use aiken/collection/dict.{is_empty}
 use aiken/collection/list
-use aiken/collection/pairs
 use cardano/address.{Credential, Script}
 use cardano/assets.{PolicyId, tokens}
 use cardano/certificate.{Certificate, RegisterCredential}
@@ -26,8 +25,8 @@ fn validate_mint(
         |> dict.to_pairs()
 
     and {
-      amount == 1,
-      asset_name == redeemer.token_name,
+      (amount == 1)?,
+      (asset_name == redeemer.token_name)?,
     }
   } else {
     True
@@ -52,10 +51,9 @@ validator script_logic_version_1_0(proxy_policy_id: PolicyId) {
     let Transaction { mint, inputs, .. } = transaction
 
     let invoke_mint_validation =
-      mint
+      !(mint
         |> tokens(proxy_policy_id)
-        |> dict.to_pairs()
-        |> pairs.has_key(proxy_policy_id)
+        |> is_empty)
 
     let invoke_spend_validation =
       list.any(

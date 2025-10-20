@@ -126,7 +126,7 @@ validator proxy(utxo_ref: OutputReference) {
         let included_withdrawal_scripts = pairs.keys(withdrawals)
 
         and {
-          !list.has(minted_tokens, state_token_name)?,
+          (!list.has(minted_tokens, state_token_name))?,
           list.has(
             included_withdrawal_scripts,
             Script(proxy_datum.script_pointer),
