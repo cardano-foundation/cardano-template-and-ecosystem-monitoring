@@ -1,144 +1,149 @@
-# ⚛️ Multi-Operation Atomic Transaction
+# ⚛️ Atomic Transaction
 
-A smart contract demonstration of building complex transactions with multiple operations on Cardano. Since all Cardano transactions are atomic by design, this showcases how to construct transactions that perform multiple operations in a single atomic execution.
+This smart contract demonstrates Cardano's native atomic transaction guarantees. In this example, we build a transaction that executes two validator operations simultaneously: spending from a script (with a validator that always returns `true`) and minting a token (with a validator that requires a password). This showcases how Cardano transactions are atomic by design - all operations either succeed together or fail together.
 
-## 🌟 What is a Multi-Operation Transaction?
+## 🌟 What are Atomic Transactions?
 
-All transactions on Cardano are inherently atomic - they either completely succeed or completely fail. This contract demonstrates building complex transactions that perform multiple operations simultaneously:
+Atomic transactions are transactions where all operations either complete successfully together or fail together - there is no partial execution. On Cardano, **all transactions are inherently atomic** by the protocol design. This is a fundamental property of the UTXO model and Cardano's transaction execution engine.
 
-- Multiple UTXOs consumed and produced in one transaction
-- Smart contract interactions combined with native token operations
-- NFT minting/burning with simultaneous transfers
-- DeFi operations combined with staking/delegation actions
+This example demonstrates this atomicity by:
+- Combining a spending validator (always returns `true`) with a minting validator (requires password)
+- First attempting the transaction with a **wrong password** - the entire transaction fails even though the spending validator passes
+- Then attempting with the **correct password** - both validators pass and the entire transaction succeeds
 
-Rather than simulating atomicity (which Cardano already provides), this demonstrates how to construct sophisticated multi-operation transactions that leverage Cardano's native atomic execution model.
+This proves that even though the spending validator would individually succeed, the transaction as a whole fails if any part fails.
 
-## 💎 Key Benefits
+## 🏗️ Example Architecture
 
-### 🔒 **Native Atomic Execution**
-- Leverages Cardano's built-in transaction atomicity
-- All operations succeed or fail together automatically
-- No additional complexity needed for atomic guarantees
+This example includes two validators in a single script:
 
-### 🌐 **Complex Operation Composition**
-- Multi-step DeFi operations (swap + stake + claim) in one transaction
-- Cross-contract interactions with guaranteed consistency
-- Batched NFT operations and multi-token transfers
-- Simultaneous UTXO management and smart contract execution
+### Spending Validator
+```aiken
+spend(_datum, _redeemer, _utxo, _self) {
+    True  // Always allows spending
+}
+```
+- Always returns `true`
+- Would succeed on its own
+- Demonstrates that a passing validator doesn't guarantee transaction success
 
-### 🔍 **Efficient Resource Usage**
-- Single transaction fee for multiple operations
-- Optimized UTXO consumption and production
-- Reduced network congestion compared to separate transactions
+### Minting Validator
+```aiken
+mint(redeemer: MintRedeemer, _policy_id, _self) {
+    redeemer.password == "super_secret_password"
+}
+```
+- Requires the correct password
+- When this fails, it causes the entire transaction to fail
+- Demonstrates atomic failure propagation
 
-### ⚖️ **MEV Protection Through Batching**
-- Single transaction prevents MEV attacks between operations
-- No intermediate states exposed to front-runners
-- Guaranteed operation order within the transaction
+## 🔄 Transaction Flow
 
-## 🏗️ Architecture Overview
+### Step 1: Lock Funds
+Fund the script address with ADA, creating a UTXO that can be spent (the spending validator always allows it).
 
-### Multi-Operation Transaction Design
+### Step 2: Attempt with Wrong Password
+Build a transaction that:
+- Spends from the script UTXO (validator returns `true`)
+- Attempts to mint a token with wrong password (validator returns `false`)
 
-This contract demonstrates how to build complex Cardano transactions that include:
+**Result**: The entire transaction fails, even though the spending validator passed. This demonstrates atomicity.
 
-- ✅ Multiple UTXO inputs and outputs in a single transaction
-- ✅ Smart contract execution combined with native token operations
-- ✅ NFT minting/burning with simultaneous transfers
-- ✅ DeFi interactions with staking/delegation in one atomic unit
-- ✅ Cross-contract calls within the same transaction
+### Step 3: Execute with Correct Password
+Build a transaction that:
+- Spends from the script UTXO (validator returns `true`)
+- Mints a token with correct password (validator returns `true`)
 
-This showcases Cardano's native capability to perform complex multi-operation transactions atomically without requiring additional batching infrastructure.
+**Result**: Both validators pass, the transaction succeeds, and both operations complete atomically.
 
-## 🔄 Transaction Construction Examples
+## ⛓ On-chain
 
-### Example 1: DeFi + Staking Operation
-A single transaction that:
-- Swaps ADA for a native token via DEX
-- Stakes the remaining ADA to a stake pool
-- Delegates voting rights to a DRep
-- All operations succeed or fail together
+### Aiken
 
-### Example 2: NFT Marketplace Operation
-A single transaction that:
-- Burns an old NFT version
-- Mints a new upgraded NFT
-- Transfers ownership to buyer
-- Pays royalties to original creator
-- Updates marketplace listings
+#### 🔌 Prerequisites
 
-### Example 3: Multi-Contract DeFi
-A single transaction that:
-- Provides liquidity to a DEX pool
-- Stakes LP tokens in yield farming contract
-- Claims rewards from previous farming
-- Compounds rewards back into the pool
+- [Aiken](https://aiken-lang.org/installation-instructions#from-aikup-linux--macos-only)
 
-### Example 4: Portfolio Rebalancing
-A single transaction that:
-- Withdraws from multiple DeFi protocols
-- Swaps various tokens to target allocation
-- Re-deposits into new protocols
-- Updates portfolio tracking contract
+#### 🪄 Test and build
 
-## 📋 Contract Specification
+```zsh
+cd onchain/aiken
+aiken check
+aiken build
+```
 
-### Transaction Builder Contract:
-- **Multi-Input Processing**: handles multiple UTXO inputs efficiently
-- **Cross-Contract Calls**: validates and executes calls to multiple smart contracts
-- **Native Token Operations**: minting, burning, and transferring in combination with logic
-- **State Coordination**: ensures all contract states update consistently
+## 📄 Off-chain
 
-### Demonstration Operations:
-- **complex_defi_operation**: combines DEX, staking, and governance actions
-- **nft_marketplace_transaction**: handles NFT creation, transfer, and marketplace updates
-- **portfolio_rebalance**: withdraws, swaps, and re-deposits across protocols
-- **multi_contract_interaction**: demonstrates calling multiple contracts atomically
+### Java Cardano Client Lib
+This offchain code is written using the [Cardano Client Lib](https://github.com/bloxbean/cardano-client-lib).
+It assumes that the addresses are topped up. If you need some tAda, you can get some from the [Cardano Testnets Faucet](https://docs.cardano.org/cardano-testnets/tools/faucet/).
 
-### Required Functionalities:
-- Multiple UTXO input/output management
-- Cross-contract interaction validation
-- Native token operation coordination
-- Transaction fee optimization for complex operations
+To simplify execution, all the code is contained in a single file, which can be run using `jbang`.
 
-## 🛠️ Development Approach with Cardano
+#### Prerequisites
 
-### Choosing Your Development Stack
+Before running the code, ensure you have the following tools installed:
 
-For guidance on selecting the right tools and technologies for your Cardano development needs, consult the **[Cardano Tool Compass](https://github.com/cardano-foundation/cardano-tool-compass)** - a comprehensive guide to help you navigate the Cardano development ecosystem and choose the tools that best fit your project requirements and technical preferences.
+##### 1. Install JBang
+You can install JBang using various methods:
 
-### Smart Contract Development
-Choose your preferred Cardano smart contract language and framework:
-- **Aiken**: Functional programming approach with strong type safety
-- **Plutus (Haskell)**: Native Cardano smart contract language
-- **OpShin (Python)**: Python-based smart contract development
-- **Helios**: TypeScript-like syntax for Cardano contracts
+- Using **SDKMAN**:
+    ```shell
+    sdk install jbang
+    ```
 
-### Off-chain Development
-Select appropriate off-chain tools based on your tech stack:
-- **JavaScript/TypeScript**: Lucid Evolution, Mesh.js, or CardanoJS
-- **Java**: Cardano Client Library (CCL)
-- **Python**: PyCardano or similar libraries
-- **Haskell**: Plutus Application Framework
+- Using **cURL**:
+    ```shell
+    curl -Ls https://sh.jbang.dev | bash -s - app setup
+    ```
 
-### Development Process
-1. **Design Phase**: Define batch composition rules and execution logic
-2. **Implementation**: Build smart contracts with proper validation and rollback
-3. **Testing**: Thoroughly test batch execution scenarios on testnets
-4. **Integration**: Develop off-chain components for batch management
-5. **Deployment**: Deploy to Cardano mainnet after comprehensive testing
+For other installation methods, refer to the [JBang installation guide](https://www.jbang.dev/download/).
 
-### Cardano-Specific Considerations
-- **UTXO Model**: Efficiently manage multiple UTXO inputs and outputs in single transactions
-- **Transaction Size Limits**: Optimize for Cardano's transaction size constraints
-- **Script Execution Limits**: Consider computational limits for complex multi-operation transactions
-- **Datum/Redeemer Design**: Structure data for efficient validation across multiple operations
-- **Native Token Handling**: Leverage Cardano's native multi-asset capabilities
+**Note:** If Java is not installed on your machine, JBang will download a Java runtime for you.
 
-## 🤝 Contributing
+##### 2. Install and Start Yaci DevKit
+You need to download and start the Yaci DevKit. This can be done using either the Docker version or the NPM distribution.
 
-This smart contract serves as an educational example of multi-operation transaction construction on Cardano. Contributions, improvements, and discussions are welcome!
+###### a. Docker Version:
+Follow the instructions [here](https://devkit.yaci.xyz/yaci_cli_distribution).
 
-## ⚠️ Disclaimer
+After installing Yaci Devkit Docker distribution, you can start DevKit in non-interactive mode in just one command:
 
-This is an educational project demonstrating Cardano's native atomic transaction capabilities through complex multi-operation examples. Always audit contracts thoroughly before using with real funds. Ensure compliance with local regulations regarding smart contracts and automated transactions.
+```shell
+devkit start create-node -o --start
+```
+
+###### b. NPM Distribution:
+Follow the instructions [here](https://devkit.yaci.xyz/yaci_cli_npm_distr).
+
+**Important:**  
+When starting the Yaci DevKit using NPM distribution, be sure to include the `--enable-yaci-store` option with the `up` command.
+
+#### Running the Code
+
+To run the code, use the following command from the repository root:
+
+```shell
+jbang atomic-transaction/offchain/atomicTransaction.java
+```
+
+This command will execute the `main` method, which performs the following steps:
+1. Funds the script address with ADA
+2. Attempts to spend and mint with an incorrect password (transaction fails)
+3. Attempts to spend and mint with the correct password (transaction succeeds)
+
+## Verify the Output
+
+After running the code, you can verify the output in Yaci Viewer. To access Yaci Viewer in docker distribution, use the following url:
+
+```html
+http://localhost:5173
+```
+
+The output should show:
+- First transaction fails (wrong password) despite the spending validator passing
+- Second transaction succeeds (correct password) with both operations completing
+
+## 🎯 Key Takeaway
+
+This example demonstrates that **Cardano transactions are atomic by design**. You don't need special mechanisms or additional logic to ensure atomicity - it's a fundamental guarantee of the protocol. When building complex transactions with multiple validator executions, you can rely on this property to ensure consistent state transitions.

@@ -39,7 +39,7 @@ The 21 use cases identified in the research paper are as follows:
 18. Decentralized identity  
 19. Editable NFT  
 20. Anonymous Data  
-21. Atomic Transactions  
+21. [Atomic Transactions](atomic-transaction/README.md)
 
 ### 🛠 Running a Use Case
 
