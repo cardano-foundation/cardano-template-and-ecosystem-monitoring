@@ -1,7 +1,7 @@
 use aiken/collection/dict.{is_empty}
 use aiken/collection/list
 use cardano/address.{Credential, Script}
-use cardano/assets.{PolicyId, tokens}
+use cardano/assets.{tokens}
 use cardano/certificate.{Certificate, RegisterCredential}
 use cardano/transaction.{Input, Output, Redeemer, Transaction}
 
@@ -46,7 +46,7 @@ fn validate_spend(
   }
 }
 
-validator script_logic_version_1_0(proxy_policy_id: PolicyId) {
+validator script_logic_version_1_0(proxy_policy_id: ByteArray) {
   withdraw(redeemer: MyRedeemer, _account: Credential, transaction: Transaction) {
     let Transaction { mint, inputs, .. } = transaction
 
