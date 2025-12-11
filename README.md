@@ -1,6 +1,6 @@
-### Cardano Blueprint and Ecosystem Monitoring
+### Cardano Template and Ecosystem Monitoring
 
-The goal of this repository is to implement the 21 most common blockchain use cases for Cardano using as many on-chain and off-chain frameworks and languages as possible. This will allow developers to use these implementations as blueprints for their own projects while also enabling us to monitor the Cardano ecosystem and its development. Essentially, this project aims to create a map and ecosystem monitoring tool for combinations of on-chain and off-chain technologies, as well as an ecosystem readiness check for upcoming Cardano hard forks.
+The goal of this repository is to implement the 21 most common blockchain use cases for Cardano using as many on-chain and off-chain frameworks and languages as possible. This will allow developers to use these implementations as templates for their own projects while also enabling us to monitor the Cardano ecosystem and its development. Essentially, this project aims to create a map and ecosystem monitoring tool for combinations of on-chain and off-chain technologies, as well as an ecosystem readiness check for upcoming Cardano hard forks.
 
 ## 🎡 Overview
 
@@ -39,7 +39,7 @@ The 21 use cases identified in the research paper are as follows:
 18. Decentralized identity  
 19. Editable NFT  
 20. Anonymous Data  
-21. Atomic Transactions  
+21. [Atomic Transactions](atomic-transaction/README.md)
 
 ### 🛠 Running a Use Case
 
