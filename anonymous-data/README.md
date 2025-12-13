@@ -33,7 +33,7 @@ Uniqueness is enforced by minting a single native token whose asset name equals 
 ### Retrieve Data (Reveal Phase)
 
 * User builds a transaction spending the script UTxO.
-* Redeemer includes the original nonce.
+* Redeemer is the original nonce used while storing data.
 * Validator:
 
     * Extracts signatories from the transaction.
