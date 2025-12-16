@@ -1,46 +1,40 @@
 # Anonymous Data
 
-This Aiken smart contract implements an anonymous, commitment-based data storage mechanism.
-Users generate an identifier off-chain as:
+An **anonymous, commitment-based data storage contract** implemented in Aiken on Cardano.
+
+Users commit data on-chain using a cryptographic identifier derived off-chain from their wallet and a secret nonce. Ownership is later proven by revealing the nonce and signing the spending transaction.
+
+The contract uses a standard **commit–reveal pattern** and does not store public key hashes on-chain.
+
+---
+
+## How it works
+
+A user derives an identifier **off-chain**:
 
 ```
+
 id = blake2b_256(pkh || nonce)
-```
 
-Data is stored on-chain under this identifier, without revealing the user’s public key.
-Retrieval requires providing the original nonce and signing the spending transaction with the same key, allowing the validator to recompute the identifier and verify ownership.
+````
 
-Uniqueness is enforced by minting a single native token whose asset name equals the identifier. The associated UTxO stores a datum containing the identifier and an arbitrary payload.
+* `pkh` is the public key hash of a transaction signer
+* `nonce` is a user-chosen secret
+* `id` is used as the **asset name** of a singleton native token
 
-## How It Works
+### Commit (store data)
 
-### Store Data (Commit Phase)
+* Exactly one token with asset name = `id` is minted
+* The token is locked at the script address
+* The output **must carry an inline datum**, whose contents are user-defined
+* No ownership or signature checks are performed in this phase
 
-* User selects a random nonce and computes `id = hash(pkh || nonce)` off-chain.
-* A transaction:
+### Reveal (retrieve data)
 
-    * Mints one token with asset name = `id`.
-    * Creates a script UTxO storing:
-
-        * `id`
-        * `payload : ByteString`
-    * Includes the token inside that output.
-* Minting policy ensures:
-
-    * Exactly one token is minted per identifier.
-    * Minting is tied to creation of the script UTxO containing that `id`.
-
-### Retrieve Data (Reveal Phase)
-
-* User builds a transaction spending the script UTxO.
-* Redeemer is the original nonce used while storing data.
-* Validator:
-
-    * Extracts signatories from the transaction.
-    * Recomputes `blake2b_256(pkh || nonce)` for each signer.
-    * Allows spending only if one matches the stored `id`.
-
-This allows a user to prove ownership of the stored data without having revealed their public key during the commit phase.
+* The user spends the script UTxO
+* The redeemer supplies the original nonce
+* The validator recomputes `blake2b_256(pkh || nonce)` for each signer
+* The spend succeeds if any signer reproduces the committed `id`
 
 ---
 
@@ -48,34 +42,80 @@ This allows a user to prove ownership of the stored data without having revealed
 
 ### Aiken
 
-#### Prerequirements
+#### Prerequisites
 
 * [Aiken](https://aiken-lang.org/installation-instructions#from-aikup-linux--macos-only)
 
-#### Test and Build
+#### Test and build
 
 ```zsh
 cd onchain/aiken
 aiken check
 aiken build
-```
+````
 
 ---
 
 ## 📄 Off-chain
 
-Off-chain code is responsible for:
+### MeshJS (Deno)
 
-* Generating nonces
-* Computing identifiers
-* Building minting transactions for storing data
-* Constructing retrieval transactions (with nonce and signature)
+#### Prerequisites
 
-Any Cardano off-chain framework may be used, such as Mesh.js, Lucid Evolution, PyCardano, or the Cardano Client Lib.
+* Deno ([https://deno.land/](https://deno.land/))
+* A funded wallet on preprod
 
-Typical flow:
+#### Commit data
 
-1. Generate `nonce`
-2. Compute `id = blake2b_256(pkh || nonce)`
-3. Mint token + create script UTxO with datum `{ id, payload }`
-4. To retrieve, submit a spending transaction with `nonce` in redeemer and the wallet signature
+Locks arbitrary data at the script address under an anonymous commitment.
+
+```zsh
+deno run -A anonymous-data.ts commit <wallet.json> <nonce> <data>
+```
+
+Example:
+
+```zsh
+deno run -A anonymous-data.ts commit wallet_0.json nonce-729873 escrow-record-key-01
+```
+
+Output includes the derived commitment ID and submitted transaction hash.
+
+---
+
+#### Reveal data
+
+Proves ownership and spends the committed UTxO by revealing the nonce.
+
+```zsh
+deno run -A anonymous-data.ts reveal <wallet.json> <nonce>
+```
+
+Example:
+
+```zsh
+deno run -A anonymous-data.ts reveal wallet_0.json nonce-729873
+```
+
+The transaction succeeds only if the signer can reproduce the original commitment.
+
+---
+
+## Notes
+
+* The nonce must be generated off-chain with sufficient entropy
+* Commitments are unlinkable to public keys until reveal
+* On-chain data is public; this contract does not provide data confidentiality
+* Users may reuse the same wallet with different nonces to create multiple commitments
+
+---
+
+## Scope
+
+This project demonstrates:
+
+* anonymous on-chain commitments
+* ownership proofs without persistent identity storage
+* a Cardano-native implementation of the Rosetta “Anonymous Data” specification
+
+It is intended as a **reference implementation** and should be audited before production use.
