@@ -1,0 +1,14 @@
+name = "cardano-foundation/cardano-blueprint-and-ecosystem-monitoring/payment-splitter"
+version = "0.2.0"
+licences = ["Apache-2.0"]
+description = "Aiken contracts for project 'cardano-foundation/cardano-blueprint-and-ecosystem-monitoring/payment-splitter'"
+
+[repository]
+user = "cardano-foundation/cardano-blueprint-and-ecosystem-monitoring"
+project = "payment-splitter"
+platform = "github"
+
+[[dependencies]]
+name = "aiken-lang/stdlib"
+version = "2.1.0"
+source = "github"

@@ -1,0 +1,5 @@
+{
+    "imports": {
+        "@evolution-sdk/lucid": "npm:@evolution-sdk/lucid@2.0.1"
+    }
+}

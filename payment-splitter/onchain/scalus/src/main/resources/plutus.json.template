@@ -1,0 +1,86 @@
+{
+  "preamble": {
+    "title": "cardano-foundation/cardano-blueprint-and-ecosystem-monitoring",
+    "description": "Scalus contracts for project 'cardano-foundation/cardano-blueprint-and-ecosystem-monitoring/payment-splitter'",
+    "version": "0.2.0",
+    "plutusVersion": "v3",
+    "compiler": {
+      "name": "Scalus",
+      "version": "0.9.1"
+    }
+  },
+  "validators": [
+    {
+      "title": "payment_splitter.split_payment.spend",
+      "datum": {
+        "title": "_datum",
+        "schema": {
+          "$ref": "#/definitions/payment_splitter~1Datum"
+        }
+      },
+      "redeemer": {
+        "title": "_redeemer",
+        "schema": {
+          "$ref": "#/definitions/payment_splitter~1Redeemer"
+        }
+      },
+      "parameters": [
+        {
+          "title": "script_hashes",
+          "schema": {
+            "$ref": "#/definitions/List$aiken~1crypto~1VerificationKeyHash"
+          }
+        }
+      ],
+      "compiledCode": "$compiledCode",
+      "hash": "$hash"
+    }
+  ],
+  "definitions": {
+    "ByteArray": {
+      "dataType": "bytes"
+    },
+    "List$aiken/crypto/VerificationKeyHash": {
+      "dataType": "list",
+      "items": {
+        "$ref": "#/definitions/aiken~1crypto~1VerificationKeyHash"
+      }
+    },
+    "aiken/crypto/VerificationKeyHash": {
+      "title": "VerificationKeyHash",
+      "dataType": "bytes"
+    },
+    "payment_splitter/Datum": {
+      "title": "Datum",
+      "anyOf": [
+        {
+          "title": "Datum",
+          "dataType": "constructor",
+          "index": 0,
+          "fields": [
+            {
+              "title": "owner",
+              "$ref": "#/definitions/aiken~1crypto~1VerificationKeyHash"
+            }
+          ]
+        }
+      ]
+    },
+    "payment_splitter/Redeemer": {
+      "title": "Redeemer",
+      "anyOf": [
+        {
+          "title": "Redeemer",
+          "dataType": "constructor",
+          "index": 0,
+          "fields": [
+            {
+              "title": "message",
+              "$ref": "#/definitions/ByteArray"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
