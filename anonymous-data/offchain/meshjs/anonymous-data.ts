@@ -387,41 +387,56 @@ export async function revealData(
 // ------------------------------------------------------------
 // CLI entrypoint
 // ------------------------------------------------------------
-
-if (import.meta.main) {
+async function main() {
     const [command, ...args] = Deno.args;
+
+    // No command given => print help and exit successfully (CI-safe)
+    if (!command) {
+        console.log(
+          "Usage:\n\n" +
+          "  commit <wallet.json> <nonce> <data>\n" +
+          "  reveal <wallet.json> <nonce>\n",
+        );
+        return;
+    }
 
     if (command === "commit") {
         if (args.length !== 3) {
             console.error(
-                "Usage:\n" +
-                "  deno run -A anonymous-data.ts commit <wallet.json> <nonce> <data>",
+              "Usage:\n" +
+              "  deno run -A anonymous-data.ts commit <wallet.json> <nonce> <data>",
             );
             Deno.exit(1);
         }
 
         const [walletFile, nonce, data] = args;
         await commitData(walletFile, nonce, data);
+        return;
+    }
 
-    } else if (command === "reveal") {
+    if (command === "reveal") {
         if (args.length !== 2) {
             console.error(
-                "Usage:\n" +
-                "  deno run -A anonymous-data.ts reveal <wallet.json> <nonce>",
+              "Usage:\n" +
+              "  deno run -A anonymous-data.ts reveal <wallet.json> <nonce>",
             );
             Deno.exit(1);
         }
 
         const [walletFile, nonce] = args;
         await revealData(walletFile, nonce);
-
-    } else {
-        console.error(
-            "Unknown command.\n\n" +
-            "Commands:\n" +
-            "  commit <wallet.json> <nonce> <data>\n" +
-            "  reveal <wallet.json> <nonce>",
-        );
-        Deno.exit(1);
+        return;
     }
+
+    console.error(
+      "Unknown command.\n\n" +
+      "Commands:\n" +
+      "  commit <wallet.json> <nonce> <data>\n" +
+      "  reveal <wallet.json> <nonce>",
+    );
+    Deno.exit(1);
+}
+
+if (import.meta.main) {
+    main();
 }
