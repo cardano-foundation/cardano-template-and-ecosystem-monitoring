@@ -34,7 +34,7 @@ The 21 use cases identified in the research paper are as follows:
 13. [Payment splitter](payment-splitter/README.md)
 14. Lottery  
 15. Constant-product AMM  
-16. Upgradeable Proxy  
+16. [Upgradeable Proxy](upgradable-proxy/README.md)  
 17. Factory  
 18. Decentralized identity  
 19. Editable NFT  
