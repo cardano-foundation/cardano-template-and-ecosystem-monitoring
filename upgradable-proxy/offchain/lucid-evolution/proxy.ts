@@ -1,30 +1,8 @@
-import { Lucid, Koios, assetsToValue, generateSeedPhrase, validatorToAddress, getAddressDetails, Data, LucidEvolution, applyParamsToScript, Constr, validatorToScriptHash, Script, Redeemer, toUnit, validatorToRewardAddress } from "@evolution-sdk/lucid";
+import { Lucid, Koios, generateSeedPhrase, validatorToAddress, Data, applyParamsToScript, Constr, validatorToScriptHash, Script, Redeemer, toUnit, validatorToRewardAddress } from "@evolution-sdk/lucid";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 import { encodeHex } from "@std/encoding/hex";
-import { sha3_256 } from "@noble/hashes/sha3.js";
-
-const ProxyDatumSchema = Data.Object({
-  script_pointer: Data.Bytes(),
-  script_owner: Data.Bytes(),
-});
-
-type ProxyDatum = Data.Static<typeof ProxyDatumSchema>;
-const ProxyDatum = ProxyDatumSchema as unknown as ProxyDatum;
-
-const WithdrawalRedeemerV1Schema = Data.Object({
-  token_name: Data.Bytes(),
-  password: Data.Bytes(),
-});
-
-type WithdrawalRedeemerV1 = Data.Static<typeof WithdrawalRedeemerV1Schema>;
-const WithdrawalRedeemerV1 = WithdrawalRedeemerV1Schema as unknown as WithdrawalRedeemerV1;
-
-const WithdrawalRedeemerV2Schema = Data.Object({
-  invalid_token_name: Data.Bytes(),
-});
-
-type WithdrawalRedeemerV2 = Data.Static<typeof WithdrawalRedeemerV2Schema>;
-const WithdrawalRedeemerV2 = WithdrawalRedeemerV2Schema as unknown as WithdrawalRedeemerV2;
+import { ProxyDatum, WithdrawalRedeemerV1, WithdrawalRedeemerV2 } from "./types.ts";
+import { getStateTokenName, getUserUtxo, prepareProvider, resolveVersion } from "./helper.ts";
 
 async function prepare () {
   const lucid = await Lucid(
@@ -44,35 +22,17 @@ async function prepare () {
   Therefore enough tAda for covering fees and to provide a collateral will be needed.`);
 }
 
-function selectWallet (lucid: LucidEvolution) {
-  const mnemonic = Deno.readTextFileSync(`wallet.txt`);
-  lucid.selectWallet.fromSeed(mnemonic);
-}
-
 async function initProxy() {
-  const lucid = await Lucid(
-    new Koios("https://preprod.koios.rest/api/v1"),
-    "Preprod",
-  );
-  selectWallet(lucid);
+  const { lucid, address, paymentCredential } = await prepareProvider();
 
-  const address = await lucid.wallet().address();
-  const { paymentCredential } = getAddressDetails(address);
-
-  const allUTxOs = await lucid.utxosAt(address);
-  const userUtxo = allUTxOs.find(utxo => {
-    const value = assetsToValue(utxo.assets);
-    return value.coin() > 2_000_000n;
-  });
+  const userUtxo = await getUserUtxo(lucid, address);
 
   if (!userUtxo) {
     console.error("No UTxO with enough funds found in the selected wallet. Please fund the wallet and try again.");
     Deno.exit(1);
   }
 
-  const transactionHash = String(userUtxo.txHash);
-  const outputIndex = BigInt(userUtxo.outputIndex);
-  const outputReference = new Constr(0, [transactionHash, outputIndex]);
+  const outputReference = new Constr(0, [userUtxo.txHash, BigInt(userUtxo.outputIndex)]);
 
   // apply parameters (utxo) to script 
   const proxyValidator: Script = {
@@ -99,29 +59,17 @@ async function initProxy() {
     script_owner: String(paymentCredential?.hash!),
   }, ProxyDatum)
 
-  const txHashBytes = new Uint8Array(
-    userUtxo.txHash.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16))
-  );
-
-  const outputIndexString = userUtxo.outputIndex.toString();
-  const outputIndexBytes = new TextEncoder().encode(outputIndexString);
-
-  const messageBuffer = new Uint8Array(txHashBytes.length + outputIndexBytes.length);
-  messageBuffer.set(txHashBytes, 0);
-  messageBuffer.set(outputIndexBytes, txHashBytes.length);
-
-  const hash = sha3_256(messageBuffer);
-  const state_token_name = encodeHex(new Uint8Array(hash));
-
   const redeemer: Redeemer = Data.to(new Constr(1, []));
+  const stateTokenName = getStateTokenName(userUtxo.txHash, userUtxo.outputIndex);
+  const tokenUnit = toUnit(proxyPolicyId, stateTokenName)
 
   const tx = await lucid.newTx()
+      .collectFrom([userUtxo!], Data.void())
+      .mintAssets({ [tokenUnit]: 1n }, redeemer)
+      .register.Stake(validatorToRewardAddress('Preprod', upgradableLogicValidator))
+      .pay.ToContract(validatorToAddress('Preprod', proxyValidator), { kind: 'inline', value: datum }, { [tokenUnit]: 1n }, proxyValidator)
       .attach.MintingPolicy(proxyValidator)
       .attach.CertificateValidator(upgradableLogicValidator)
-      .collectFrom([userUtxo!], Data.void())
-      .mintAssets({ [toUnit(proxyPolicyId, state_token_name)]: 1n }, redeemer)
-      .register.Stake(validatorToRewardAddress('Preprod', upgradableLogicValidator))
-      .pay.ToContract(validatorToAddress('Preprod', proxyValidator), { kind: 'inline', value: datum }, { [toUnit(proxyPolicyId, state_token_name)]: 1n })
       .addSigner(address);
 
   try {
@@ -131,191 +79,151 @@ async function initProxy() {
     console.log(`Successfully setup a proxy contract pointing to ${address}.\n
     See: https://preprod.cexplorer.io/tx/${txHash}`);
     console.log(`Proxy Script Address: ${validatorToAddress('Preprod', proxyValidator)}`);
-    console.log(`The utxo reference for this parameterized script is: ${transactionHash}#${outputIndex}`);
+    console.log(`The utxo reference for this parameterized script is: ${userUtxo.txHash}#${userUtxo.outputIndex}`);
     console.log(`You can now use this utxo reference to mint new tokens via the proxy contract.`);
-    console.log(`Example usage: deno run -A proxy.ts mint ${transactionHash} ${outputIndex} 1`);
+    console.log(`Example usage: deno run -A proxy.ts mint ${tokenUnit}`);
   } catch (error) {
     console.error("Error while submitting transaction:", error);
     Deno.exit(1);
   }
 };
 
-async function mint(txHash: string, outputIndex: number, version: number) {
-  const lucid = await Lucid(
-    new Koios("https://preprod.koios.rest/api/v1"),
-    "Preprod",
-  );
-  selectWallet(lucid);
-  const address = await lucid.wallet().address();
+async function mint(tokenUnit: string) {
+  const { lucid, address } = await prepareProvider();
 
-  if (version === 1 || version === 2) {
-    const outputReference = new Constr(0, [txHash, BigInt(outputIndex)]);
+  const utxo = await lucid.utxoByUnit(tokenUnit);
 
-    // apply parameters (utxo) to script 
-    const proxyValidator: Script = {
-      type: "PlutusV3",
-      script: applyParamsToScript(
-        blueprint.validators.find(validator => validator.title.startsWith("proxy"))!.compiledCode,
-        [outputReference]
-      ),
-    };
+  if (!utxo) {
+    console.error("No UTxO found for the provided token unit. Sometimes you need to wait (around 20 seconds) until the transaction is on the blockchain.");
+    Deno.exit(1);
+  }
 
-    const proxyPolicyId = validatorToScriptHash(proxyValidator);
-    console.log(`Using proxy policy ID: ${proxyPolicyId}`);
+  const proxyValidator: Script = utxo.scriptRef!;
+  const upgradableLogicScriptHash = Data.from(utxo.datum!, ProxyDatum).script_pointer;
 
-    // apply parameters script hash of the first script to the logic script
-    const upgradableLogicValidator: Script = {
-      type: "PlutusV3",
-      script: applyParamsToScript(
-        blueprint.validators.find(validator => validator.title.startsWith(`script_logic_v_${version}`))!.compiledCode,
-        [proxyPolicyId]
-      ),
-    };
+  const proxyPolicyId = validatorToScriptHash(proxyValidator);
+  
+  console.log(`Using proxy policy ID: ${proxyPolicyId}`);
 
-    const txHashBytes = new Uint8Array(
-      txHash.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16))
-    );
+  // apply parameters script hash of the first script to the logic script
+  const { version, script: upgradableLogicValidator } = resolveVersion(upgradableLogicScriptHash, proxyPolicyId);
 
-    const outputIndexString = outputIndex.toString();
-    const outputIndexBytes = new TextEncoder().encode(outputIndexString);
+  const redeemer: Redeemer = Data.to(new Constr(0, []));
+  const withdrawRedeemer: Redeemer = version === 1 ? Data.to({
+    token_name: encodeHex("ProxyMintToken"),
+    password: encodeHex("NoPassword"),
+  }, WithdrawalRedeemerV1) : Data.to({
+    invalid_token_name: encodeHex("InvalidToken"),
+  }, WithdrawalRedeemerV2);
 
-    const messageBuffer = new Uint8Array(txHashBytes.length + outputIndexBytes.length);
-    messageBuffer.set(txHashBytes, 0);
-    messageBuffer.set(outputIndexBytes, txHashBytes.length);
+  const tx = await lucid.newTx()
+      .readFrom([utxo])
+      .mintAssets({ [toUnit(proxyPolicyId, encodeHex("ProxyMintToken"))]: 1n }, redeemer)
+      .withdraw(validatorToRewardAddress('Preprod', upgradableLogicValidator), 0n, withdrawRedeemer)
+      .attach.MintingPolicy(proxyValidator)
+      .attach.WithdrawalValidator(upgradableLogicValidator)
+      .addSigner(address);
 
-    const hash = sha3_256(messageBuffer);
-    const state_token_name = encodeHex(new Uint8Array(hash));
-
-    const redeemer: Redeemer = Data.to(new Constr(0, []));
-    const withdrawRedeemer: Redeemer = version === 1 ? Data.to({
-      token_name: encodeHex("ProxyMintToken"),
-      password: encodeHex("NoPassword"),
-    }, WithdrawalRedeemerV1) : Data.to({
-      invalid_token_name: encodeHex("InvalidToken"),
-    }, WithdrawalRedeemerV2);
-
-    const utxos = await lucid.utxosAtWithUnit(validatorToAddress('Preprod', proxyValidator), toUnit(proxyPolicyId, state_token_name));
-    const stateUtxo = utxos[0];
-
-    const tx = await lucid.newTx()
-        .readFrom([stateUtxo!])
-        .attach.MintingPolicy(proxyValidator)
-        .attach.WithdrawalValidator(upgradableLogicValidator)
-        .mintAssets({ [toUnit(proxyPolicyId, encodeHex("ProxyMintToken"))]: 1n }, redeemer)
-        .withdraw(validatorToRewardAddress('Preprod', upgradableLogicValidator), 0n, withdrawRedeemer)
-        .addSigner(address);
-
-    try {
-      const unsignedTx = await tx.complete();
-      const signedTx = await unsignedTx.sign.withWallet();
-      const txHash = await (await signedTx.complete()).submit();
-      console.log(`Successfully minted a token under policy ${proxyPolicyId} using minting logic version ${version}.\n
-      See: https://preprod.cexplorer.io/tx/${txHash}`);
-    } catch (error) {
-      console.error("Error while submitting transaction:", error);
-      Deno.exit(1);
-    }
-  } else {
-    console.log("Unsupported version. Only version 1 and 2 are supported.");
-    return;
+  try {
+    const unsignedTx = await tx.complete();
+    const signedTx = await unsignedTx.sign.withWallet();
+    const txHash = await (await signedTx.complete()).submit();
+    console.log(`Successfully minted a token under policy ${proxyPolicyId} using minting logic version ${version}.\n
+    See: https://preprod.cexplorer.io/tx/${txHash}`);
+  } catch (error) {
+    console.error("Error while submitting transaction:", error);
+    Deno.exit(1);
   }
 }
 
-async function upgrade(txHash: string, outputIndex: number, version: number) {
-  const lucid = await Lucid(
-    new Koios("https://preprod.koios.rest/api/v1"),
-    "Preprod",
-  );
-  selectWallet(lucid);
-  const address = await lucid.wallet().address();
-  const { paymentCredential } = getAddressDetails(address);
+async function changeVersion(tokenUnit: string) {
+  const { lucid, address, paymentCredential } = await prepareProvider();
 
-  if (version === 1 || version === 2) {
-    const outputReference = new Constr(0, [txHash, BigInt(outputIndex)]);
+  const utxo = await lucid.utxoByUnit(tokenUnit);
 
-    // apply parameters (utxo) to script 
-    const proxyValidator: Script = {
-      type: "PlutusV3",
-      script: applyParamsToScript(
-        blueprint.validators.find(validator => validator.title.startsWith("proxy"))!.compiledCode,
-        [outputReference]
-      ),
-    };
+  if (!utxo) {
+    console.error("No UTxO found for the provided token unit. Sometimes you need to wait (around 20 seconds) until the transaction is on the blockchain.");
+    Deno.exit(1);
+  }
 
-    const proxyPolicyId = validatorToScriptHash(proxyValidator);
-    const currentVersion = version === 1 ? "v_2" : "v_1";
-    const nextVersion = version === 1 ? "v_1" : "v_2";
+  const proxyValidator: Script = utxo.scriptRef!;
+  const upgradableLogicScriptHash = Data.from(utxo.datum!, ProxyDatum).script_pointer;
 
-    // apply parameters script hash of the first script to the logic script
-    const upgradableLogicValidator_current: Script = {
-      type: "PlutusV3",
-      script: applyParamsToScript(
-        blueprint.validators.find(validator => validator.title.startsWith(`script_logic_${currentVersion}`))!.compiledCode,
-        [proxyPolicyId]
-      ),
-    };
+  const proxyPolicyId = validatorToScriptHash(proxyValidator);
+  
+  console.log(`Using proxy policy ID: ${proxyPolicyId}`);
 
-    const upgradableLogicValidator_next: Script = {
-      type: "PlutusV3",
-      script: applyParamsToScript(
-        blueprint.validators.find(validator => validator.title.startsWith(`script_logic_${nextVersion}`))!.compiledCode,
-        [proxyPolicyId]
-      ),
-    };
+  // apply parameters script hash of the first script to the logic script
+  const { version: currentVersion } = resolveVersion(upgradableLogicScriptHash, proxyPolicyId);
+  const nextVersion = currentVersion === 1 ? 2 : 1;
 
-    const txHashBytes = new Uint8Array(
-      txHash.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16))
-    );
+  if (currentVersion === 2) {
+    console.log(`The upgradable logic is already version (v2) and will now be downgraded to version (v1).`);
+  } else {
+    console.log(`The upgradable logic is currently version (v1) and will now be upgraded to version (v2).`);
+  }
 
-    const outputIndexString = outputIndex.toString();
-    const outputIndexBytes = new TextEncoder().encode(outputIndexString);
+  // apply parameters script hash of the first script to the logic script
+  const upgradableLogicValidator_current: Script = {
+    type: "PlutusV3",
+    script: applyParamsToScript(
+      blueprint.validators.find(validator => validator.title.startsWith(`script_logic_v_${currentVersion}`))!.compiledCode,
+      [proxyPolicyId]
+    ),
+  };
 
-    const messageBuffer = new Uint8Array(txHashBytes.length + outputIndexBytes.length);
-    messageBuffer.set(txHashBytes, 0);
-    messageBuffer.set(outputIndexBytes, txHashBytes.length);
+  const upgradableLogicValidator_next: Script = {
+    type: "PlutusV3",
+    script: applyParamsToScript(
+      blueprint.validators.find(validator => validator.title.startsWith(`script_logic_v_${nextVersion}`))!.compiledCode,
+      [proxyPolicyId]
+    ),
+  };
 
-    const hash = sha3_256(messageBuffer);
-    const state_token_name = encodeHex(new Uint8Array(hash));
+  const redeemer: Redeemer = Data.to(new Constr(1, []));
+  const withdrawRedeemer: Redeemer = currentVersion === 1 ? Data.to({
+    token_name: encodeHex("ProxyMintToken"),
+    password: encodeHex("Hello, World!"),
+  }, WithdrawalRedeemerV1) : Data.to({
+    invalid_token_name: encodeHex("InvalidToken"),
+  }, WithdrawalRedeemerV2);
 
-    const redeemer: Redeemer = Data.to(new Constr(1, []));
-    const withdrawRedeemer: Redeemer = version === 2 ? Data.to({
-      token_name: encodeHex("ProxyMintToken"),
-      password: encodeHex("Hello, World!"),
-    }, WithdrawalRedeemerV1) : Data.to({
-      invalid_token_name: encodeHex("InvalidToken"),
-    }, WithdrawalRedeemerV2);
+  const utxos = await lucid.utxosAtWithUnit(validatorToAddress('Preprod', proxyValidator), tokenUnit);
+  const stateUtxo = utxos[0];
 
-    const utxos = await lucid.utxosAtWithUnit(validatorToAddress('Preprod', proxyValidator), toUnit(proxyPolicyId, state_token_name));
-    const stateUtxo = utxos[0];
+  const datum = Data.to({
+    script_pointer: String(validatorToScriptHash(upgradableLogicValidator_next)),
+    script_owner: String(paymentCredential?.hash!),
+  }, ProxyDatum)
 
-    const datum = Data.to({
-      script_pointer: String(validatorToScriptHash(upgradableLogicValidator_next)),
-      script_owner: String(paymentCredential?.hash!),
-    }, ProxyDatum)
+  let tx = await lucid.newTx()
+      .collectFrom([stateUtxo!], redeemer)
+      .pay.ToContract(validatorToAddress('Preprod', proxyValidator), { kind: 'inline', value: datum }, { [tokenUnit]: 1n }, proxyValidator)
+      .attach.SpendingValidator(proxyValidator)
+      .attach.WithdrawalValidator(upgradableLogicValidator_current)
+      .withdraw(validatorToRewardAddress('Preprod', upgradableLogicValidator_current), 0n, withdrawRedeemer)
+      .addSigner(address);
 
-    const tx = await lucid.newTx()
-        .collectFrom([stateUtxo!], redeemer)
-        .pay.ToContract(validatorToAddress('Preprod', proxyValidator), { kind: 'inline', value: datum }, { [toUnit(proxyPolicyId, state_token_name)]: 1n })
-        .attach.SpendingValidator(proxyValidator)
-        .attach.WithdrawalValidator(upgradableLogicValidator_current)
-        .register.Stake(validatorToRewardAddress('Preprod', upgradableLogicValidator_next))
-        .withdraw(validatorToRewardAddress('Preprod', upgradableLogicValidator_current), 0n, withdrawRedeemer)
-        .addSigner(address);
+  if (currentVersion === 1) {
+    tx = tx.register.Stake(validatorToRewardAddress('Preprod', upgradableLogicValidator_next));
+  }
 
-    try {
-      const unsignedTx = await tx.complete();
-      const signedTx = await unsignedTx.sign.withWallet();
-      const txHash = await (await signedTx.complete()).submit();
+  try {
+    const unsignedTx = await tx.complete();
+    const signedTx = await unsignedTx.sign.withWallet();
+    const txHash = await (await signedTx.complete()).submit();
+    if (currentVersion === 1) {
       console.log(`Successfully upgraded the minting logic of ${proxyPolicyId} to logic version ${nextVersion}.\n
       See: https://preprod.cexplorer.io/tx/${txHash}`);
-    } catch (error) {
-      console.error("Error while submitting transaction:", error);
-      Deno.exit(1);
+    } else {
+      console.log(`Successfully downgraded the minting logic of ${proxyPolicyId} to logic version ${nextVersion}.\n
+      See: https://preprod.cexplorer.io/tx/${txHash}.\n
+      Note that the stake registration remains on-chain and a re-registration might cause an issue.`);
     }
-  } else {
-    console.log("Unsupported version. Only version 1 and 2 are supported.");
-    return;
-  }  
+  } catch (error) {
+    console.error("Error while submitting transaction:", error);
+    Deno.exit(1);
+  }
 }
 
 if (Deno.args.length > 0) {
@@ -329,31 +237,27 @@ if (Deno.args.length > 0) {
       await prepare();
     } 
   } else if (Deno.args[0] === 'mint') {
-    const txHash = Deno.args[1];
-    const outputIndex = Number(Deno.args[2]);
-    const version = Number(Deno.args[3]);
-    if (!txHash || isNaN(outputIndex) || isNaN(version)) {
-      console.log('For minting, please provide the transaction hash, output index, and version number.');
-      console.log('Example usage: deno run -A proxy.ts mint <txHash> <outputIndex> <version>');
+    const tokenUnit = Deno.args[1];
+    if (!tokenUnit) {
+      console.log('For minting, please provide the token unit.');
+      console.log('Example usage: deno run -A proxy.ts mint <tokenUnit>');
     } else {
-      await mint(txHash, outputIndex, version);
+      await mint(tokenUnit);
     }
-  } else if (Deno.args[0] === 'upgrade') {
-    const txHash = Deno.args[1];
-    const outputIndex = Number(Deno.args[2]);
-    const version = Number(Deno.args[3]);
-    if (!txHash || isNaN(outputIndex) || isNaN(version)) {
-      console.log('For upgrading, please provide the transaction hash, output index, and version number.');
-      console.log('Example usage: deno run -A proxy.ts upgrade <txHash> <outputIndex> <version>');
+  } else if (Deno.args[0] === 'change-version') {
+    const tokenUnit = Deno.args[1];
+    if (!tokenUnit) {
+      console.log('For upgrading, please provide the token unit.');
+      console.log('Example usage: deno run -A proxy.ts change-version <tokenUnit>');
     } else {
-      await upgrade(txHash, outputIndex, version);
+      await changeVersion(tokenUnit);
     }
   } else {
-    console.log('Invalid argument. Allowed arguments are "init", "prepare", "mint", or "upgrade".');
+    console.log('Invalid argument. Allowed arguments are "init", "prepare", "mint", or "change-version".');
     console.log('Example usage: deno run -A proxy.ts prepare');
   }
 } else {
-  console.log('Expected an argument. Allowed arguments are "init", "prepare", "mint", or "upgrade".');
+  console.log('Expected an argument. Allowed arguments are "init", "prepare", "mint", or "change-version".');
   console.log('Example usage: deno run -A proxy.ts prepare');
 }
 
