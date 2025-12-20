@@ -107,8 +107,10 @@ async function initBet(lovelaceAmount: string) {
     const unsignedTx = await tx.complete();
     const signedTx = await unsignedTx.sign.withWallet();
     const txHash = await (await signedTx.complete()).submit();
-    console.log(`Successfully locked ${lovelaceAmount} lovelace to the script address ${scriptAddress}.\n
+    console.log(`Successfully init Bet and locked ${lovelaceAmount} lovelace to the script address ${scriptAddress}.\n
     See: https://preprod.cexplorer.io/tx/${txHash}`);
+    console.log(`Use the following command to join the bet:\n
+    deno run -A bet.ts join ${txHash}`);
   } catch (error) {
     console.error("Error while submitting transaction:", error);
     Deno.exit(1);
@@ -116,14 +118,24 @@ async function initBet(lovelaceAmount: string) {
 };
 
 async function joinBet(transactionId: string) {
+  console.log(`Joining bet with transaction ID: "${transactionId}"`);
   const { lucid, scriptAddress, validator } = await setup();
 
   selectWallet(lucid, 2);
 
   const address = await lucid.wallet().address();
   const { paymentCredential } = getAddressDetails(address);
+  console.log(`Using wallet address: ${address}`);
 
-  const utxos = await lucid.utxosByOutRef([{ txHash: transactionId, outputIndex: 0 }]);
+  let utxos = [];
+
+  try {
+    utxos = await lucid.utxosByOutRef([{ txHash: transactionId, outputIndex: 0 }]);
+  } catch (error) {
+    console.error(`Error fetching UTXOs for transaction ID ${transactionId}:`, error);
+    return;
+  }
+
   if (utxos.length === 0) {
     console.error(`No UTXOs found for transaction ID: ${transactionId}`);
     return;
@@ -137,6 +149,7 @@ async function joinBet(transactionId: string) {
 
   const bet = Data.from(utxo.datum, BetDatum);
   bet.player2 = paymentCredential?.hash || '';
+  console.log('Joining bet with datum:', bet);
   const datum = Data.to(bet, BetDatum)
 
   const values = assetsToValue(utxo.assets);
@@ -181,14 +194,14 @@ if (Deno.args.length > 0) {
       await initBet(Deno.args[1]);
     } else {
       console.log('Expected a positive number (lovelace amount) as the second argument.');
-      console.log('Example usage: node use-payment-splitter.js lock 10000000');
+      console.log('Example usage: deno run -A bet.ts init 10000000');
     } 
   } else if (Deno.args[0] === 'join') {
     if (Deno.args.length > 1 && Deno.args[1].match(/^[0-9a-fA-F]{64}$/)) {
       await joinBet(Deno.args[1]);
     } else {
       console.log('Expected a valid transaction ID as the second argument.');
-      console.log('Example usage: node use-payment-splitter.js join 5714bd67aaeb664c3d2060ac34a33b66c2f4ec82e029b526a216024d27a8eaf5');
+      console.log('Example usage: deno run -A join 5714bd67aaeb664c3d2060ac34a33b66c2f4ec82e029b526a216024d27a8eaf5');
     }
   } else if (Deno.args[0] === 'prepare') {
     if (Deno.args.length > 1 && isPositiveNumber(Deno.args[1])) {
@@ -207,14 +220,14 @@ if (Deno.args.length > 0) {
       }
     } else {
       console.log('Expected a positive number (of seed phrases to prepare) as the second argument.');
-      console.log('Example usage: node use-payment-splitter.js prepare 5');
+      console.log('Example usage: deno run -A prepare 5');
     }    
   } else {
     console.log('Invalid argument. Allowed arguments are "lock", "unlock" or "prepare".');
-    console.log('Example usage: node use-payment-splitter.js prepare');
+    console.log('Example usage: deno run -A prepare');
   }
 } else {
   console.log('Expected an argument. Allowed arguments are "lock", "unlock" or "prepare".');
-  console.log('Example usage: node use-payment-splitter.js prepare 5');
+  console.log('Example usage: deno run -A prepare 5');
 }
 

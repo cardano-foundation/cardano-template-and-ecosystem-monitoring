@@ -73,7 +73,7 @@ validator bet {
   /// Spending validator: Controls how the bet UTXO can be spent
   /// Handles both JOIN and ANNOUNCE_WINNER actions
   spend(
-    updated_datum: Option<BetDatum>,
+    input_datum: Option<BetDatum>,
     redeemer: Action,
     spent_output_ref: OutputReference,
     transaction: Transaction,
@@ -83,8 +83,7 @@ validator bet {
 
     // Find the input being spent
     expect Some(spent_input) = find_input(inputs, spent_output_ref)
-    let Output { value: input_value, datum: input_datum, .. } =
-      spent_input.output
+    let Output { value: input_value, .. } = spent_input.output
 
     when redeemer is {
       // Handle player2 joining the bet
@@ -106,14 +105,15 @@ validator bet {
         // Ensure exactly one continuing output
         expect list.length(continuing_outputs) == 1
         expect Some(continuing_output) = list.head(continuing_outputs)
-        let Output { value: output_value, .. } = continuing_output
+        let Output { value: output_value, datum: updated_datum, .. } =
+          continuing_output
 
         // Extract the current bet state
-        expect InlineDatum(current_datum_data) = input_datum
-        expect current_datum: BetDatum = current_datum_data
+        expect Some(current_datum) = input_datum
 
         // Extract the updated bet state
-        expect Some(new_datum) = updated_datum
+        expect InlineDatum(updated_datum) = updated_datum
+        expect new_datum: BetDatum = updated_datum
         let joining_player = new_datum.player2
 
         // Validation rules for joining:
@@ -143,14 +143,13 @@ validator bet {
       // Handle oracle announcing the winner
       ANNOUNCE_WINNER { winner } -> {
         // Extract the current bet state
-        expect InlineDatum(current_datum_data) = input_datum
-        expect BetDatum { player1, player2, oracle, expiration } =
+        expect Some(current_datum_data) = input_datum
+        let BetDatum { player1, player2, oracle, expiration } =
           current_datum_data
 
         // Ensure there's exactly one output (the payout to winner)
         expect list.length(outputs) == 1
         expect Some(payout_output) = list.head(outputs)
-
         // Validation rules for announcing winner:
         and {
           // 1. Winner must be either player1 or player2
@@ -161,7 +160,7 @@ validator bet {
           // 2. Both players must have joined (player2 is not None)
           (player2 != "")?,
           // 3. No continuing datum (bet is being closed)
-          (updated_datum == None)?,
+          (payout_output.datum == NoDatum)?,
           // 4. Payout goes to the winner's address
           (payout_output.address == from_verification_key(winner))?,
           // 5. Oracle must sign the transaction
@@ -277,7 +276,7 @@ test join_the_bet() {
   let join_action: Action = JOIN
 
   bet.spend(
-    Some(updated_bet_datum),
+    Some(initial_bet_datum),
     join_action,
     mock_utxo_ref(1, 0),
     test_transaction,
@@ -332,5 +331,10 @@ test payout_winner() {
     }
   let announce_winner_action: Action =
     ANNOUNCE_WINNER { winner: mock_pub_key_hash(2) }
-  bet.spend(None, announce_winner_action, mock_utxo_ref(1, 0), test_transaction)
+  bet.spend(
+    Some(final_bet_datum),
+    announce_winner_action,
+    mock_utxo_ref(1, 0),
+    test_transaction,
+  )
 }
