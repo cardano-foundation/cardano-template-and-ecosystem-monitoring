@@ -1,0 +1,44 @@
+{
+  "name": "storage-offchain",
+  "version": "0.1.0",
+  "description": "Storage: Verifiable Audit Snapshots - Off-chain CLI for generating, publishing, and verifying audit snapshots on Cardano",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "storage-cli": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/cli.js",
+    "dev": "tsx src/cli.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src --ext .ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "cardano",
+    "blockchain",
+    "audit",
+    "storage",
+    "verification"
+  ],
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@blaze-cardano/sdk": "^0.2.44",
+    "commander": "^14.0.2",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@typescript-eslint/eslint-plugin": "^6.21.0",
+    "@typescript-eslint/parser": "^6.21.0",
+    "eslint": "^8.56.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.0",
+    "vitest": "^2.1.0"
+  }
+}

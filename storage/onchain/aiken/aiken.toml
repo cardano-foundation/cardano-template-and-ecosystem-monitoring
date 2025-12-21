@@ -1,0 +1,14 @@
+name = "cardano-foundation/cardano-template-and-ecosystem-monitoring"
+version = "0.1.0"
+license = "Apache-2.0"
+description = "Storage: Verifiable Audit Snapshots - On-chain contracts for anchoring cryptographic commitments"
+
+[repository]
+user = "cardano-foundation"
+project = "cardano-template-and-ecosystem-monitoring"
+platform = "github"
+
+[[dependencies]]
+name = "aiken-lang/stdlib"
+version = "v2.2.0"
+source = "github"
