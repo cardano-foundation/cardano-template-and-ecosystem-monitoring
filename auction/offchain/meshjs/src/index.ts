@@ -1,4 +1,4 @@
-import type { ConStr0 } from '@meshsdk/common';
+import type { ConStr0, BuiltinByteString, Integer } from '@meshsdk/common';
 import {
   builtinByteString,
   conStr0,
@@ -23,12 +23,12 @@ import blueprint from '../../../onchain/aiken/plutus.json' with { type: 'json' }
 
 export type AuctionDatum = ConStr0<
   [
-    string, // seller
-    string, // highest_bidder
-    bigint, // highest_bid
-    bigint, // expiration
-    string, // asset_policy
-    string // asset_name
+    BuiltinByteString, // seller
+    BuiltinByteString, // highest_bidder
+    Integer, // highest_bid
+    Integer, // expiration
+    BuiltinByteString, // asset_policy
+    BuiltinByteString // asset_name
   ]
 >;
 
@@ -41,12 +41,12 @@ export const auctionDatum = (
   assetName: string
 ): AuctionDatum => {
   return conStr0([
-    seller,
-    highestBidder,
-    BigInt(highestBid),
-    BigInt(expiration),
-    assetPolicy,
-    assetName,
+    builtinByteString(seller),
+    builtinByteString(highestBidder),
+    integer(Number(highestBid)),
+    integer(Number(expiration)),
+    builtinByteString(assetPolicy),
+    builtinByteString(assetName),
   ]);
 };
 
@@ -110,16 +110,16 @@ export class MeshAuctionContract extends MeshTxInitiator {
       inputDatum.fields;
 
     const outputDatum = auctionDatum(
-      seller,
+      seller as unknown as string,
       pubKeyHash,
       bidAmount,
-      expiration,
-      assetPolicy,
-      assetName
+      Number(expiration),
+      assetPolicy as unknown as string,
+      assetName as unknown as string
     );
 
     const asset: Asset = {
-      unit: assetPolicy + assetName,
+      unit: (assetPolicy as unknown as string) + (assetName as unknown as string),
       quantity: '1',
     };
     const assets = mergeAssets([
@@ -169,16 +169,16 @@ export class MeshAuctionContract extends MeshTxInitiator {
     ] = inputDatum.fields;
 
     const sellerAddress = serializeAddressObj(
-      pubKeyAddress(seller),
+      pubKeyAddress(seller as unknown as string),
       this.networkId
     );
     const winnerAddress = serializeAddressObj(
-      pubKeyAddress(highestBidder),
+      pubKeyAddress(highestBidder as unknown as string),
       this.networkId
     );
 
     const auctionedAsset: Asset = {
-      unit: assetPolicy + assetName,
+      unit: (assetPolicy as unknown as string) + (assetName as unknown as string),
       quantity: '1',
     };
 
