@@ -12,7 +12,6 @@ use mocktail/virgin_key_hash.{mock_policy_id, mock_pub_key_hash}
 use mocktail/virgin_output_reference.{mock_utxo_ref}
 use mocktail/virgin_validity_range.{mock_interval}
 
-
 /// Represents the state of an English auction.
 ///
 /// The auction is for a single item (e.g. an NFT) that is held in the script
@@ -59,7 +58,7 @@ validator auction {
   /// - Create a script output holding:
   ///   - The auctioned item.
   ///   - Starting bid (can be 0 or >0).
-  ///   - Inline AuctionDatum with empty highest_bidder.
+  ///   - Inline AuctionDatum with empty highest bidder.
   mint(_redeemer: Data, policy_id: ByteArray, transaction: Transaction) {
     let Transaction { outputs, extra_signatories, validity_range, .. } =
       transaction
@@ -84,27 +83,23 @@ validator auction {
       highest_bid,
       expiration,
       asset_policy,
-      asset_name,
+      asset_name: _asset_name,
     } = datum_data
 
     // Check that the output actually holds the auctioned asset.
-    let has_auction_asset =
-      list.has(
-        list.map(policies(value), fn(policy) { policy }),
-        asset_policy,
-      )
+    let has_auction_asset = list.has(list.map(policies(value), fn(policy) { policy }), asset_policy)
 
     and {
       // Seller must sign.
-      key_signed(extra_signatories, seller)?,
+      key_signed(extra_signatories, seller),
       // No highest bidder at start.
-      (highest_bidder == "")?,
+      highest_bidder == "",
       // Starting bid must be non-negative.
-      (highest_bid >= 0)?,
+      highest_bid >= 0,
       // Auction must not be expired at creation.
-      valid_before(validity_range, expiration)?,
+      valid_before(validity_range, expiration),
       // Script UTXO must contain the asset being auctioned.
-      has_auction_asset?,
+      has_auction_asset,
     }
   }
 
@@ -170,36 +165,28 @@ validator auction {
         let new_bid = new_datum.highest_bid
 
         // Auctioned asset must stay locked in the script.
-        let has_auction_asset_in =
-          list.has(
-            list.map(policies(input_value), fn(policy) { policy }),
-            asset_policy,
-          )
+        let has_auction_asset_in = list.has(list.map(policies(input_value), fn(policy) { policy }), asset_policy)
 
-        let has_auction_asset_out =
-          list.has(
-            list.map(policies(out_value), fn(policy) { policy }),
-            asset_policy,
-          )
+        let has_auction_asset_out = list.has(list.map(policies(out_value), fn(policy) { policy }), asset_policy)
 
         and {
           // Auction not expired.
-          valid_before(validity_range, expiration)?,
+          valid_before(validity_range, expiration),
           // New bid strictly larger than current highest.
-          (new_bid > highest_bid)?,
+          new_bid > highest_bid,
           // Highest bidder must sign.
-          key_signed(extra_signatories, new_highest)?,
+          key_signed(extra_signatories, new_highest),
           // Seller and auctioned asset must remain unchanged.
-          (new_datum.seller == seller)?,
-          (new_datum.asset_policy == asset_policy)?,
-          (new_datum.asset_name == asset_name)?,
+          new_datum.seller == seller,
+          new_datum.asset_policy == asset_policy,
+          new_datum.asset_name == asset_name,
           // Auctioned asset stays at script.
-          has_auction_asset_in?,
-          has_auction_asset_out?,
+          has_auction_asset_in,
+          has_auction_asset_out,
           // Datum expiration unchanged.
-          (new_datum.expiration == expiration)?,
+          new_datum.expiration == expiration,
           // Value at script non-decreasing in lovelace.
-          (lovelace_of(out_value) >= lovelace_of(input_value))?,
+          lovelace_of(out_value) >= lovelace_of(input_value),
         }
       }
 
@@ -211,51 +198,41 @@ validator auction {
 
       END -> {
         // Precompute helper lists outside `and {}`.
-        let outputs_with_asset =
-          list.filter(
-            outputs,
-            fn(o) {
-              list.has(
-                list.map(policies(o.value), fn(policy) { policy }),
-                asset_policy,
-              )
-            },
-          )
+        let outputs_with_asset = list.filter(outputs, fn(o) { list.has(list.map(policies(o.value), fn(policy) { policy }), asset_policy) })
 
-        let seller_outputs =
-          list.filter(
-            outputs,
-            fn(o) { o.address == from_verification_key(seller) },
-          )
+        let seller_outputs = list.filter(outputs, fn(o) { o.address == from_verification_key(seller) })
+
+        let addresses_mapped = list.map(outputs, fn(o) { o.address })
+
+        expect Some(item_out) = list.head(outputs_with_asset)
+        expect Some(seller_out) = list.head(seller_outputs)
+
+        let has_continuing_auction = list.has(addresses_mapped, script_address)
+
+        let check_no_continuing = !has_continuing_auction
+        let check_asset_count = list.length(outputs_with_asset) == 1
+        let check_seller_count = list.length(seller_outputs) == 1
+        let check_item_to_winner =
+          item_out.address == from_verification_key(highest_bidder)
+        let check_seller_no_datum = seller_out.datum == NoDatum
+        let check_has_bidder = highest_bidder != ""
 
         and {
           // 1. Auction expired.
-          valid_after(validity_range, expiration)?,
-
+          valid_after(validity_range, expiration),
           // 2. Exactly two outputs (winner + seller).
-          (list.length(outputs) == 2)?,
-
+          list.length(outputs) == 2,
           // 3. No continuing auction at script address.
-          (not list.has(
-            list.map(outputs, fn(o) { o.address }),
-            script_address,
-          ))?,
-
-          // 4. Exactly one asset‑carrying output and one seller output.
-          (list.length(outputs_with_asset) == 1)?,
-          (list.length(seller_outputs) == 1)?,
-
-          expect Some(item_out) = list.head(outputs_with_asset),
-          expect Some(seller_out) = list.head(seller_outputs),
-
+          check_no_continuing,
+          // 4. Exactly one asset-carrying output and one seller output.
+          check_asset_count,
+          check_seller_count,
           // 5. Item goes to highest bidder.
-          (item_out.address == from_verification_key(highest_bidder))?,
-
+          check_item_to_winner,
           // 6. Seller output has no datum.
-          (seller_out.datum == NoDatum)?,
-
+          check_seller_no_datum,
           // 7. Someone actually bid.
-          (highest_bidder != "")?,
+          check_has_bidder,
         }
       }
     }
