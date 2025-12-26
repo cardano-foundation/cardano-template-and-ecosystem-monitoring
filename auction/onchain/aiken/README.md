@@ -101,10 +101,11 @@ auction/onchain/aiken/
 
 ### Key Dependencies
 
-- **aiken-lang/stdlib**: Core standard library
-- **cocktail/vodka_extra_signatories**: Signature validation (`key_signed`)
-- **cocktail/vodka_validity_range**: Time validation (`valid_before`, `valid_after`)
-- **mocktail/\***: Testing utilities for mock data
+- **aiken-lang/stdlib**: Core standard library (v3.0.0)
+- **sidan-lab/vodka**: Utility library for common validation patterns
+  - `vodka_extra_signatories`: Signature validation (`key_signed`)
+  - `vodka_validity_range`: Time validation (`valid_before`, `valid_after`)
+- **mocktail**: Testing utilities for mock data and transaction simulation
 
 ### Development Workflow
 
