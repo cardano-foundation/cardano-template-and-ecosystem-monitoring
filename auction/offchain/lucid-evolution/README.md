@@ -1,6 +1,6 @@
 ## 💠 Deno + Lucid Evolution (Off‑chain auction)
 
-This repo includes multiple Deno + Lucid Evolution off‑chain examples. Quick setup and run steps for the Lucid Evolution implementations:
+This repo includes Auction Deno + Lucid Evolution off‑chain examples. Quick setup and run steps for the Lucid Evolution implementations:
 
 Prerequisites
 
@@ -22,31 +22,11 @@ Prepare wallets, fund, run
 
 Auction (Lucid Evolution)
 
-- Files:
-  - [auction/offchain/lucid-evolution/auction.ts](auction/offchain/lucid-evolution/auction.ts) — functions: [`prepare`](auction/offchain/lucid-evolution/auction.ts), [`initAuction`](auction/offchain/lucid-evolution/auction.ts), [`bidAuction`](auction/offchain/lucid-evolution/auction.ts)
 - Commands (run from auction/offchain/lucid-evolution):
   - Prepare 3 wallets: deno run -A auction.ts prepare 3
   - Fund wallet_0 with tADA (Preprod)
   - Initialize auction with starting bid 3 ADA: deno run -A auction.ts init 3000000
   - Place a bid: deno run -A auction.ts bid <TX_ID> <NEW_BID_LOVELACE>
-
-Upgradable Proxy (Lucid Evolution)
-
-- Files:
-  - [upgradable-proxy/offchain/lucid-evolution/proxy.ts](upgradable-proxy/offchain/lucid-evolution/proxy.ts) — functions: [`prepare`](upgradable-proxy/offchain/lucid-evolution/proxy.ts), [`initProxy`](upgradable-proxy/offchain/lucid-evolution/proxy.ts), [`mint`](upgradable-proxy/offchain/lucid-evolution/proxy.ts), [`changeVersion`](upgradable-proxy/offchain/lucid-evolution/proxy.ts)
-  - [upgradable-proxy/offchain/lucid-evolution/helper.ts](upgradable-proxy/offchain/lucid-evolution/helper.ts)
-  - [upgradable-proxy/offchain/lucid-evolution/types.ts](upgradable-proxy/offchain/lucid-evolution/types.ts)
-- Commands (run from upgradable-proxy/offchain/lucid-evolution):
-  - Prepare wallet: deno run -A proxy.ts prepare
-  - Fund the printed wallet address with tADA
-  - Initialize proxy (mints state token & creates proxy UTxO): deno run -A proxy.ts init
-  - Mint via proxy: deno run -A proxy.ts mint <tokenUnit>
-  - Change logic version: deno run -A proxy.ts change-version <tokenUnit>
-
-Other Lucid Evolution examples
-
-- See each example folder under _/offchain/lucid-evolution/_ for the script and available commands (use `deno run -A <script> --help` style inspection).
-- Example files: [auction/offchain/lucid-evolution/auction.ts](auction/offchain/lucid-evolution/auction.ts), [upgradable-proxy/offchain/lucid-evolution/proxy.ts](upgradable-proxy/offchain/lucid-evolution/proxy.ts)
 
 Troubleshooting
 

@@ -1,6 +1,5 @@
 {
   "tasks": {
-    "dev": "deno run --watch main.ts",
     "auction:init": "deno run -A auction.ts init 3000000",
     "auction:bid": "deno run -A auction.ts bid <TX_ID> 6000000",
     "auction:prepare": "deno run -A auction.ts prepare 3"
