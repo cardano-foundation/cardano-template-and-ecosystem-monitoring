@@ -1,0 +1,27 @@
+{
+  "name": "meshjs",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "aiken:build": "cd ../../onchain/aiken && aiken build && cd -",
+    "start": "nodemon --watch './src/**/*.ts' --exec 'node --loader ts-node/esm' ./src/index.ts",
+    "test": "vitest run",
+    "build": "tsc"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "devDependencies": {
+    "nodemon": "^3.1.11",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3",
+    "vitest": "^3.0.0"
+  },
+  "dependencies": {
+    "@meshsdk/core": "npm:@meshsdk/core@1.8.14",
+    "@meshsdk/core-cst": "npm:@meshsdk/core-cst@1.9.0-beta.20",
+    "@meshsdk/common": "npm:@meshsdk/common@1.9.0-beta.20"
+  }
+}
