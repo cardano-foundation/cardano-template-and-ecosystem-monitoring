@@ -1,0 +1,9 @@
+[
+  {
+    "txHash": "73f3672eb851c8df2030642436e1d2e7ebaf4b914635f2165351528471fac07a",
+    "amount": "10000000",
+    "secretHash": "d0be733429432f7f00d425e1ab003412afa75d41fe280d8bb2eb3e82fefc56b6",
+    "expiration": 1767123721095,
+    "ownerPkh": "8c82f683d733a1338837b021198b1bcbf55d0bf10e8f5854b2f1f824"
+  }
+]
