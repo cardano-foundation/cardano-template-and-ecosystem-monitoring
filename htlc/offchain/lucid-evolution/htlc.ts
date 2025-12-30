@@ -1,15 +1,34 @@
-import { Lucid, Koios, Data, generateSeedPhrase, validatorToAddress, Validator, fromText, getAddressDetails, LucidEvolution, TUnsafe } from "@evolution-sdk/lucid";
+import { Lucid, Koios, Data, generateSeedPhrase, validatorToAddress, Validator, fromText, getAddressDetails, LucidEvolution, TUnsafe, applyParamsToScript } from "@evolution-sdk/lucid";
 
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
-const HtlcDatumSchema = Data.Object({
-  owner: Data.Bytes(),
-  recipient: Data.Bytes(),
-  hash: Data.Bytes(),
-  expiration: Data.Integer(),
-});
-type HtlcDatum = Data.Static<typeof HtlcDatumSchema>;
-const HtlcDatum = HtlcDatumSchema as unknown as HtlcDatum;
+const HtlcRedeemer = Data.Enum([
+  Data.Object({ GUESS: Data.Object({ answer: Data.Bytes() }) }),
+  Data.Literal("WITHDRAW"),
+]);
+
+const STORE_FILE = "htlc_store.json";
+
+type StoredHtlc = {
+  txHash: string;
+  amount: string;
+  secretHash: string;
+  expiration: string;
+  ownerPkh: string;
+};
+
+async function loadStore(): Promise<StoredHtlc[]> {
+  try {
+    const data = await Deno.readTextFile(STORE_FILE);
+    return JSON.parse(data);
+  } catch {
+    return [];
+  }
+}
+
+async function saveStore(store: StoredHtlc[]) {
+  await Deno.writeTextFile(STORE_FILE, JSON.stringify(store, null, 2));
+}
 
 async function prepare (amount: number) {
   const lucid = await Lucid(
@@ -34,16 +53,21 @@ function selectWallet (lucid: LucidEvolution, index: number) {
   lucid.selectWallet.fromSeed(mnemonic);
 }
 
-async function setup () {
+async function setup (params?: any[]) {
   const lucid = await Lucid(
     new Koios("https://preprod.koios.rest/api/v1"),
     "Preprod",
   );
   selectWallet(lucid, 0);
 
+  let script = blueprint.validators[0].compiledCode;
+  if (params) {
+    script = applyParamsToScript(script, params);
+  }
+
   const validator: Validator = {
     type: "PlutusV3",
-    script: blueprint.validators[0].compiledCode,
+    script: script,
   };
 
   const scriptAddress = validatorToAddress("Preprod", validator);
@@ -63,38 +87,63 @@ async function sha256 (input: string) {
   return hex;
 }
 
-async function initHtlc(lovelaceAmount: string, secret: string, recipientIndex = 1) {
-  const { lucid, scriptAddress, validator } = await setup();
+function hexToBytes(hex: string): Uint8Array {
+  if (hex.length % 2 !== 0) {
+    hex = '0' + hex;
+  }
+  const len = hex.length / 2;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
+  }
+  return bytes;
+}
+
+async function initHtlc(lovelaceAmount: string, secret: string, recipientIndex = 1, expirationSeconds = 3600) {
+  const lucid = await Lucid(
+    new Koios("https://preprod.koios.rest/api/v1"),
+    "Preprod",
+  );
+  selectWallet(lucid, 0);
 
   const address = await lucid.wallet().address();
   const { paymentCredential } = getAddressDetails(address);
-
-  selectWallet(lucid, recipientIndex);
-  const recipientAddress = await lucid.wallet().address();
-  const { paymentCredential: recipientPaymentCredential } = getAddressDetails(recipientAddress);
+  const ownerPkh = paymentCredential?.hash || '';
 
   const secretHash = await sha256(secret);
-  const datum = Data.to({
-    owner: paymentCredential?.hash || '',
-    recipient: recipientPaymentCredential?.hash || '',
-    hash: secretHash,
-    expiration: BigInt(Date.now() + 60 * 60 * 24 * 2 * 1000),
-  }, HtlcDatum);
+  const expiration = BigInt(Date.now() + expirationSeconds * 1000);
 
-  selectWallet(lucid, 0);
+  const params = [
+    secretHash,
+    expiration,
+    ownerPkh,
+  ];
+
+  const { scriptAddress, validator } = await setup(params);
+
   const tx = await lucid.newTx()
       .pay.ToContract(
         scriptAddress,
-        { kind: "inline", value: datum },
+        { kind: "inline", value: Data.void() },
         { lovelace: BigInt(lovelaceAmount) },
       )
       .addSigner(address)
-      ;
+      .complete();
 
   try {
-    const unsignedTx = await tx.complete();
-    const signedTx = await unsignedTx.sign.withWallet();
+    const signedTx = await tx.sign.withWallet();
     const txHash = await (await signedTx.complete()).submit();
+    
+    const store = await loadStore();
+    store.push({
+      txHash,
+      amount: lovelaceAmount,
+      secretHash,
+      expiration: expiration.toString(),
+      ownerPkh,
+    });
+    await saveStore(store);
+
     console.log(`Successfully locked ${lovelaceAmount} lovelace to ${scriptAddress}.
 See: https://preprod.cexplorer.io/tx/${txHash}`);
     console.log(`Use the following command to claim:
@@ -105,80 +154,58 @@ deno run -A htlc.ts claim ${txHash} <preimage>`);
   }
 }
 
-async function claimHtlc(transactionId: string, preimage: string) {
+async function claimHtlc(transactionId: string, preimage: string, walletIndex = 1) {
   console.log(`Claiming HTLC with transaction ID: "${transactionId}"`);
-  const { lucid, scriptAddress, validator } = await setup();
+  const store = await loadStore();
+  const htlc = store.find((h) => h.txHash === transactionId);
+  if (!htlc) {
+    console.error("HTLC not found in local store.");
+    return;
+  }
 
-  selectWallet(lucid, 1);
+  const params = [
+    htlc.secretHash,
+    BigInt(htlc.expiration),
+    htlc.ownerPkh,
+  ];
+
+  const { lucid, scriptAddress, validator } = await setup(params);
+
+  selectWallet(lucid, walletIndex);
 
   const address = await lucid.wallet().address();
-  const { paymentCredential } = getAddressDetails(address);
   console.log(`Using wallet address: ${address}`);
 
   let utxos = [];
 
   try {
     utxos = await lucid.utxosByOutRef([{ txHash: transactionId, outputIndex: 0 }]);
-    if (utxos.length === 0) {
-      // try other output indexes if the default 0 didn't return anything
-      for (let i = 1; i < 10 && utxos.length === 0; i++) {
-        try {
-          utxos = await lucid.utxosByOutRef([{ txHash: transactionId, outputIndex: i }]);
-        } catch (_) {
-          // ignore and continue
-        }
-      }
-    }
   } catch (error) {
     console.error(`Error fetching UTXOs for transaction ID ${transactionId}:`, error);
     return;
   }
 
   if (utxos.length === 0) {
-    try {
-      const all = await (lucid as any).utxosAt(scriptAddress);
-      if (Array.isArray(all) && all.length > 0) {
-        utxos = all.filter((u: any) => (u.txHash || u.outRef?.txHash) === transactionId);
-      }
-    } catch (_) {
-      // ignore if method not available
-    }
     console.error(`No UTXOs found for transaction ID: ${transactionId}`);
     return;
   }
 
   const utxo = utxos[0];
-  if (!utxo.datum) {
-    console.error(`UTXO with transaction ID ${transactionId} does not have a datum.`);
-    return;
-  }
-
-  const datum = Data.from(utxo.datum, HtlcDatum);
-  const preimageHash = await sha256(preimage);
-  console.log('Script datum:', datum);
 
   // Build redeemer. The on-chain contract expects a constructor 'GUESS' with the answer bytes.
-  // We construct the redeemer as raw bytes of the preimage for the GUESS branch.
-    const preimageBytes = new TextEncoder().encode(preimage);
-    const preimageHex = Array.from(preimageBytes).map((b) => b.toString(16).padStart(2, '0')).join('');
-    const redeemer = Data.to(preimageHex as unknown as TUnsafe<string>, Data.Bytes());
-
-  const assetEntry = Object.values(utxo.assets)[0];
-  const lovelaceAmount = typeof assetEntry === "bigint" ? assetEntry : BigInt((assetEntry as any).coin || 0);
+    const answerBytes = hexToBytes(await sha256(preimage));
+    const answerHex = Array.from(answerBytes).map((b) => b.toString(16).padStart(2, '0')).join('');
+    const redeemer = Data.to({ GUESS: { answer: answerHex } } as any, HtlcRedeemer as any);
 
   const tx = await lucid.newTx()
       .attach.SpendingValidator(validator)
       .collectFrom([utxo], redeemer)
-      .pay.ToAddress(
-        await lucid.wallet().address(),
-        { lovelace: lovelaceAmount }
-      )
+      .validTo(Number(htlc.expiration))
       .addSigner(address)
-      ;
+      .complete();
 
   try {
-    const unsignedTx = await tx.complete();
-    const signedTx = await unsignedTx.sign.withWallet();
+    const signedTx = await tx.sign.withWallet();
     const txHash = await (await signedTx.complete()).submit();
     console.log(`Successfully claimed HTLC with transaction ID ${transactionId}.
 See: https://preprod.cexplorer.io/tx/${txHash}`);
@@ -188,11 +215,24 @@ See: https://preprod.cexplorer.io/tx/${txHash}`);
   }
 }
 
-async function refundHtlc(transactionId: string) {
+async function refundHtlc(transactionId: string, walletIndex = 0) {
   console.log(`Refunding HTLC with transaction ID: "${transactionId}"`);
-  const { lucid, scriptAddress, validator } = await setup();
+  const store = await loadStore();
+  const htlc = store.find((h) => h.txHash === transactionId);
+  if (!htlc) {
+    console.error("HTLC not found in local store.");
+    return;
+  }
 
-  selectWallet(lucid, 0);
+  const params = [
+    htlc.secretHash,
+    BigInt(htlc.expiration),
+    htlc.ownerPkh,
+  ];
+
+  const { lucid, scriptAddress, validator } = await setup(params);
+
+  selectWallet(lucid, walletIndex);
 
   const address = await lucid.wallet().address();
   console.log(`Using wallet address: ${address}`);
@@ -201,54 +241,30 @@ async function refundHtlc(transactionId: string) {
 
   try {
     utxos = await lucid.utxosByOutRef([{ txHash: transactionId, outputIndex: 0 }]);
-    if (utxos.length === 0) {
-      for (let i = 1; i < 10 && utxos.length === 0; i++) {
-        try {
-          utxos = await lucid.utxosByOutRef([{ txHash: transactionId, outputIndex: i }]);
-        } catch (_) {}
-      }
-    }
   } catch (error) {
     console.error(`Error fetching UTXOs for transaction ID ${transactionId}:`, error);
     return;
   }
 
   if (utxos.length === 0) {
-    try {
-      const all = await (lucid as any).utxosAt(scriptAddress);
-      if (Array.isArray(all) && all.length > 0) {
-        utxos = all.filter((u: any) => (u.txHash || u.outRef?.txHash) === transactionId);
-      }
-    } catch (_) {}
     console.error(`No UTXOs found for transaction ID: ${transactionId}`);
     return;
   }
 
   const utxo = utxos[0];
-  if (!utxo.datum) {
-    console.error(`UTXO with transaction ID ${transactionId} does not have a datum.`);
-    return;
-  }
 
-  // For refund we use an empty redeemer (WITHDRAW constructor expected on-chain).
-    const redeemer = Data.void();
-  
-    const assetEntry = Object.values(utxo.assets)[0];
-    const lovelaceAmount = typeof assetEntry === "bigint" ? assetEntry : BigInt((assetEntry as any)?.coin || 0);
-  
+  // For refund we use WITHDRAW redeemer.
+    const redeemer = Data.to("WITHDRAW" as any, HtlcRedeemer as any);
+    
     const tx = await lucid.newTx()
         .attach.SpendingValidator(validator)
         .collectFrom([utxo], redeemer)
-        .pay.ToAddress(
-          await lucid.wallet().address(),
-          { lovelace: lovelaceAmount }
-        )
+        .validFrom(Number(htlc.expiration))
         .addSigner(address)
-        ;
+        .complete();
 
   try {
-    const unsignedTx = await tx.complete();
-    const signedTx = await unsignedTx.sign.withWallet();
+    const signedTx = await tx.sign.withWallet();
     const txHash = await (await signedTx.complete()).submit();
     console.log(`Successfully refunded HTLC with transaction ID ${transactionId}.
 See: https://preprod.cexplorer.io/tx/${txHash}`);
@@ -263,24 +279,33 @@ const isPositiveNumber = (s: string) => Number.isInteger(Number(s)) && Number(s)
 if (Deno.args.length > 0) {
   if (Deno.args[0] === 'init') {
     if (Deno.args.length > 2 && isPositiveNumber(Deno.args[1])) {
-      await initHtlc(Deno.args[1], Deno.args[2], Deno.args.length > 3 ? parseInt(Deno.args[3]) : 1);
+      const amount = Deno.args[1];
+      const secret = Deno.args[2];
+      const recipientIndex = Deno.args.length > 3 ? parseInt(Deno.args[3]) : 1;
+      const expirationSeconds = Deno.args.length > 4 ? parseInt(Deno.args[4]) : 3600;
+      await initHtlc(amount, secret, recipientIndex, expirationSeconds);
     } else {
       console.log('Expected lovelace amount and secret as arguments.');
-      console.log('Example usage: deno run -A htlc.ts init 10000000 mySecret 1');
+      console.log('Example usage: deno run -A htlc.ts init 10000000 mySecret 1 3600');
     }
   } else if (Deno.args[0] === 'claim') {
     if (Deno.args.length > 2 && Deno.args[1].match(/^[0-9a-fA-F]{64}$/)) {
-      await claimHtlc(Deno.args[1], Deno.args[2]);
+      const txHash = Deno.args[1];
+      const preimage = Deno.args[2];
+      const walletIndex = Deno.args.length > 3 ? parseInt(Deno.args[3]) : 1;
+      await claimHtlc(txHash, preimage, walletIndex);
     } else {
       console.log('Expected a valid transaction ID and preimage as arguments.');
-      console.log('Example usage: deno run -A htlc.ts claim 5714bd67aaeb664c3d2060ac34a33b66c2f4ec82e029b526a216024d27a8eaf5 preimage');
+      console.log('Example usage: deno run -A htlc.ts claim 5714bd67aaeb664c3d2060ac34a33b66c2f4ec82e029b526a216024d27a8eaf5 preimage 1');
     }
   } else if (Deno.args[0] === 'refund') {
     if (Deno.args.length > 1 && Deno.args[1].match(/^[0-9a-fA-F]{64}$/)) {
-      await refundHtlc(Deno.args[1]);
+      const txHash = Deno.args[1];
+      const walletIndex = Deno.args.length > 2 ? parseInt(Deno.args[2]) : 0;
+      await refundHtlc(txHash, walletIndex);
     } else {
       console.log('Expected a valid transaction ID as the second argument.');
-      console.log('Example usage: deno run -A htlc.ts refund 5714bd67aaeb664c3d2060ac34a33b66c2f4ec82e029b526a216024d27a8eaf5');
+      console.log('Example usage: deno run -A htlc.ts refund 5714bd67aaeb664c3d2060ac34a33b66c2f4ec82e029b526a216024d27a8eaf5 0');
     }
   } else if (Deno.args[0] === 'prepare') {
     if (Deno.args.length > 1 && isPositiveNumber(Deno.args[1])) {
