@@ -1,8 +1,18 @@
 {
   "tasks": {
-    "dev": "deno run --watch main.ts"
+    "dev": "deno run --watch escrow.ts",
+    "prepare": "deno run -A escrow.ts prepare 5",
+    "balances": "deno run -A escrow.ts balances",
+    "show-addresses": "deno run -A escrow.ts show-addresses",
+    "list-utxos": "deno run -A escrow.ts list-utxos",
+    "transfer": "deno run -A escrow.ts transfer",
+    "initiate": "deno run -A escrow.ts initiate",
+    "deposit": "deno run -A escrow.ts deposit",
+    "complete": "deno run -A escrow.ts complete",
+    "cancel": "deno run -A escrow.ts cancel"
   },
   "imports": {
-    "@std/assert": "jsr:@std/assert@1"
+    "@std/assert": "jsr:@std/assert@1",
+    "@evolution-sdk/lucid": "npm:@evolution-sdk/lucid@^2.0.1"
   }
 }
