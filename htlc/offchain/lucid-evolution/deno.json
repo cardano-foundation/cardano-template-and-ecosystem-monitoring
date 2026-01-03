@@ -3,6 +3,9 @@
     "dev": "deno run -A --watch htlc.ts",
     "run": "deno run -A htlc.ts",
     "prepare": "deno run -A htlc.ts prepare 5",
+    "balances": "deno run -A check_balances.ts",
+    "show-addresses": "deno run -A show_addresses.ts",
+    "fund-collateral": "deno run -A fund_wallet_1.ts",
     "init": "deno run -A htlc.ts init 10000000 mySecret 1",
     "claim": "deno run -A htlc.ts claim <txHash> <preimage>",
     "refund": "deno run -A htlc.ts refund <txHash>"

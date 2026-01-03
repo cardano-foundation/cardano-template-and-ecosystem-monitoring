@@ -7,6 +7,9 @@ This folder contains an off-chain TypeScript CLI using Lucid (via the Evolution 
 **Files:**
 
 - `htlc.ts` — main CLI script with commands: `prepare`, `init`, `claim`, `refund`.
+- `check_balances.ts` — dynamically checks balances for all `wallet_*.txt` files.
+- `show_addresses.ts` — displays addresses for all `wallet_*.txt` files.
+- `fund_wallet_1.ts` — utility to fund Wallet 1 from Wallet 0 for collateral.
 - `deno.json` — convenience tasks for `deno` (run/watch/commands).
 
 **Prerequisites**
@@ -71,8 +74,13 @@ deno run -A htlc.ts refund <txHash>
 
 deno.json tasks
 
-- `deno task dev` — watch and run the file
 - `deno task prepare` — prepares sample wallets (configured in `deno.json`)
+- `deno task balances` — check balances of all prepared wallets
+- `deno task show-addresses` — show addresses of all prepared wallets
+- `deno task fund-collateral` — send 10 ADA from Wallet 0 to Wallet 1
+- `deno task init` — lock 10 ADA with secret "mySecret"
+- `deno task claim` — claim funds (requires editing `deno.json` with txHash)
+- `deno task refund` — refund funds (requires editing `deno.json` with txHash)
 
 Implementation notes & caveats
 

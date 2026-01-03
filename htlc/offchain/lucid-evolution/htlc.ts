@@ -179,7 +179,8 @@ async function claimHtlc(transactionId: string, preimage: string, walletIndex = 
   let utxos = [];
 
   try {
-    utxos = await lucid.utxosByOutRef([{ txHash: transactionId, outputIndex: 0 }]);
+    const allUtxos = await lucid.utxosAt(scriptAddress);
+    utxos = allUtxos.filter((u) => u.txHash === transactionId);
   } catch (error) {
     console.error(`Error fetching UTXOs for transaction ID ${transactionId}:`, error);
     return;
@@ -193,8 +194,7 @@ async function claimHtlc(transactionId: string, preimage: string, walletIndex = 
   const utxo = utxos[0];
 
   // Build redeemer. The on-chain contract expects a constructor 'GUESS' with the answer bytes.
-    const answerBytes = hexToBytes(await sha256(preimage));
-    const answerHex = Array.from(answerBytes).map((b) => b.toString(16).padStart(2, '0')).join('');
+    const answerHex = fromText(preimage);
     const redeemer = Data.to({ GUESS: { answer: answerHex } } as any, HtlcRedeemer as any);
 
   const tx = await lucid.newTx()
@@ -240,7 +240,8 @@ async function refundHtlc(transactionId: string, walletIndex = 0) {
   let utxos = [];
 
   try {
-    utxos = await lucid.utxosByOutRef([{ txHash: transactionId, outputIndex: 0 }]);
+    const allUtxos = await lucid.utxosAt(scriptAddress);
+    utxos = allUtxos.filter((u) => u.txHash === transactionId);
   } catch (error) {
     console.error(`Error fetching UTXOs for transaction ID ${transactionId}:`, error);
     return;
@@ -259,7 +260,7 @@ async function refundHtlc(transactionId: string, walletIndex = 0) {
     const tx = await lucid.newTx()
         .attach.SpendingValidator(validator)
         .collectFrom([utxo], redeemer)
-        .validFrom(Number(htlc.expiration))
+        .validFrom(Number(htlc.expiration) + 1000)
         .addSigner(address)
         .complete();
 
