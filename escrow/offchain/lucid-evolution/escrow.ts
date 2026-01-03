@@ -17,7 +17,8 @@ import {
   saveStore,
   addressToData,
   assetsToMValue,
-  mergeAssets
+  mergeAssets,
+  waitForUtxo
 } from "./lib/utils.ts";
 import { 
   EscrowDatum, 
@@ -53,7 +54,7 @@ async function initiateEscrow(walletIndex: number, assets: Assets) {
         initiator: addressToData(address),
         initiator_assets: assetsToMValue(assets),
       },
-    } as any,
+    } as Data.Static<typeof EscrowDatum>,
     EscrowDatum
   );
 
@@ -63,7 +64,7 @@ async function initiateEscrow(walletIndex: number, assets: Assets) {
     .complete();
 
   try {
-    const signedTx = await (tx as any).sign.withWallet();
+    const signedTx = await tx.sign.withWallet();
     const txHash = await (await signedTx.complete()).submit();
     
     const store = await loadStore();
@@ -90,12 +91,11 @@ async function depositEscrow(txHash: string, walletIndex: number, recipientAsset
   const wallet = await getWallet(lucid, walletIndex);
   const recipientAddr = await wallet.address();
 
-  const utxos = await lucid.utxosAt(scriptAddress);
-  const utxo = utxos.find((u) => u.txHash === txHash);
-  if (!utxo || !utxo.datum) throw new Error("UTXO not found or missing datum");
+  const utxo = await waitForUtxo(lucid, txHash, scriptAddress);
+  if (!utxo.datum) throw new Error("UTXO missing datum");
 
-  const inputDatum = Data.from(utxo.datum, EscrowDatum) as any;
-  if (!inputDatum.Initiation) throw new Error("Contract not in Initiation state");
+  const inputDatum = Data.from(utxo.datum, EscrowDatum) as Data.Static<typeof EscrowDatum>;
+  if (!("Initiation" in inputDatum)) throw new Error("Contract not in Initiation state");
 
   const { initiator, initiator_assets } = inputDatum.Initiation;
 
@@ -105,7 +105,7 @@ async function depositEscrow(txHash: string, walletIndex: number, recipientAsset
         recipient: addressToData(recipientAddr),
         recipient_assets: assetsToMValue(recipientAssets),
       },
-    } as any,
+    },
     EscrowRedeemer
   );
 
@@ -117,7 +117,7 @@ async function depositEscrow(txHash: string, walletIndex: number, recipientAsset
         initiator_assets,
         recipient_assets: assetsToMValue(recipientAssets),
       },
-    } as any,
+    },
     EscrowDatum
   );
 
@@ -158,14 +158,16 @@ async function depositEscrow(txHash: string, walletIndex: number, recipientAsset
 async function completeTrade(txHash: string, initiatorWalletIndex: number, recipientWalletIndex: number) {
   const { lucid, scriptAddress, validator } = await setup();
   
-  const utxos = await lucid.utxosAt(scriptAddress);
-  const utxo = utxos.find((u) => u.txHash === txHash);
-  if (!utxo || !utxo.datum) throw new Error("UTXO not found");
+  // Select a wallet to pay fees (e.g. initiator)
+  await getWallet(lucid, initiatorWalletIndex);
 
-  const datum = Data.from(utxo.datum, EscrowDatum) as any;
-  if (!datum.ActiveEscrow) throw new Error("Escrow is not active");
+  const utxo = await waitForUtxo(lucid, txHash, scriptAddress);
+  if (!utxo.datum) throw new Error("UTXO missing datum");
 
-  const redeemer = Data.to("CompleteTrade" as any, EscrowRedeemer);
+  const datum = Data.from(utxo.datum, EscrowDatum) as Data.Static<typeof EscrowDatum>;
+  if (!("ActiveEscrow" in datum)) throw new Error("Escrow is not active");
+
+  const redeemer = Data.to("CompleteTrade", EscrowRedeemer);
 
   const store = await loadStore();
   const escrow = store.find(e => e.txHash === txHash);
@@ -182,15 +184,17 @@ async function completeTrade(txHash: string, initiatorWalletIndex: number, recip
 
   try {
     // Note: This requires both parties to sign the transaction
-    const txComplete = await tx.complete() as any;
+    const txComplete = tx;
+
+    const txCBOR = txComplete.toCBOR();
 
     await getWallet(lucid, initiatorWalletIndex);
-    const witness1 = await txComplete.partialSign.withWallet();
+    const witness1 = await lucid.fromTx(txCBOR).partialSign.withWallet();
     
     await getWallet(lucid, recipientWalletIndex);
-    const witness2 = await txComplete.partialSign.withWallet();
+    const witness2 = await lucid.fromTx(txCBOR).partialSign.withWallet();
     
-    const signedTx = await txComplete.assemble([witness1, witness2]).complete();
+    const signedTx = await lucid.fromTx(txCBOR).assemble([witness1, witness2]).complete();
     const resultHash = await signedTx.submit();
 
     // Remove from store as it's completed
@@ -212,12 +216,11 @@ async function cancelTrade(txHash: string, walletIndex: number) {
   const wallet = await getWallet(lucid, walletIndex);
   const signerAddr = await wallet.address();
 
-  const utxos = await lucid.utxosAt(scriptAddress);
-  const utxo = utxos.find((u) => u.txHash === txHash);
-  if (!utxo || !utxo.datum) throw new Error("UTXO not found");
+  const utxo = await waitForUtxo(lucid, txHash, scriptAddress);
+  if (!utxo.datum) throw new Error("UTXO missing datum");
 
-  const datum = Data.from(utxo.datum, EscrowDatum) as any;
-  const redeemer = Data.to("CancelTrade" as any, EscrowRedeemer);
+  const datum = Data.from(utxo.datum, EscrowDatum) as Data.Static<typeof EscrowDatum>;
+  const redeemer = Data.to("CancelTrade", EscrowRedeemer);
 
   const store = await loadStore();
   const escrow = store.find(e => e.txHash === txHash);
@@ -228,9 +231,9 @@ async function cancelTrade(txHash: string, walletIndex: number) {
     .attach.SpendingValidator(validator)
     .addSigner(signerAddr);
 
-  if (datum.Initiation) {
+  if ("Initiation" in datum) {
     tx.pay.ToAddress(escrow.initiator, utxo.assets);
-  } else if (datum.ActiveEscrow) {
+  } else if ("ActiveEscrow" in datum) {
     tx.pay.ToAddress(escrow.initiator, escrow.initiatorAssets)
       .pay.ToAddress(escrow.recipient!, escrow.recipientAssets!);
   }

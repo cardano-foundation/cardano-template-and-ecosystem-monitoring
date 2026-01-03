@@ -5,6 +5,7 @@ import {
   generateSeedPhrase,
   Assets,
   getAddressDetails,
+  UTxO,
 } from '@evolution-sdk/lucid';
 import { StoredEscrow } from '../types.ts';
 
@@ -190,7 +191,7 @@ export function assetsToMValue(assets: Assets) {
       assetName = asset.slice(56);
     }
     if (!mValue.has(policyId)) mValue.set(policyId, new Map());
-    mValue.get(policyId)!.set(assetName, BigInt(amount as any));
+    mValue.get(policyId)!.set(assetName, BigInt(amount));
   }
   return mValue;
 }
@@ -201,4 +202,21 @@ export function mergeAssets(a: Assets, b: Assets): Assets {
     res[asset] = (res[asset] ?? 0n) + amount;
   }
   return res;
+}
+
+export async function waitForUtxo(
+  lucid: LucidEvolution,
+  txHash: string,
+  address: string
+): Promise<UTxO> {
+  console.log(`Waiting for UTXO from tx ${txHash} at ${address}...`);
+  while (true) {
+    const utxos = await lucid.utxosAt(address);
+    const utxo = utxos.find((u) => u.txHash === txHash);
+    if (utxo) {
+      console.log('UTXO found!');
+      return utxo;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5000));
+  }
 }
