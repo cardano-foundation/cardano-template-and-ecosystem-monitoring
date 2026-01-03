@@ -87,7 +87,11 @@ async function initHtlc(
 
   const { scriptAddress } = await setup(wallet, params);
 
-  const tx = new Transaction({ initiator: wallet }).sendLovelace(
+  const utxos = await koiosProvider.fetchAddressUTxOs(address);
+
+  const tx = new Transaction({ initiator: wallet, fetcher: koiosProvider })
+    .setTxInputs(utxos)
+    .sendLovelace(
     {
       address: scriptAddress,
       datum: {
@@ -206,8 +210,10 @@ async function refundHtlc(transactionId: string, walletIndex = 0) {
   const address = await wallet.getChangeAddress();
   console.log(`Using wallet address: ${address}`);
 
-  const utxos = await koiosProvider.fetchAddressUTxOs(scriptAddress);
-  const utxo = utxos.find((u) => u.input.txHash === transactionId);
+  const utxos = await koiosProvider.fetchAddressUTxOs(address);
+
+  const scriptUtxos = await koiosProvider.fetchAddressUTxOs(scriptAddress);
+  const utxo = scriptUtxos.find((u) => u.input.txHash === transactionId);
 
   if (!utxo) {
     console.error(`No UTXOs found for transaction ID: ${transactionId}`);
@@ -216,7 +222,7 @@ async function refundHtlc(transactionId: string, walletIndex = 0) {
 
   const collateralUtxos = largestFirst(
     "5000000",
-    await koiosProvider.fetchAddressUTxOs(address)
+    utxos
   );
 
   const redeemer = {
@@ -231,6 +237,7 @@ async function refundHtlc(transactionId: string, walletIndex = 0) {
     ) + 1;
 
   const tx = new Transaction({ initiator: wallet, fetcher: koiosProvider })
+    .setTxInputs(utxos)
     .setTimeToStart(slot.toString())
     .redeemValue({
       value: utxo,
@@ -251,7 +258,6 @@ See: https://preprod.cexplorer.io/tx/${txHash}`);
     console.error("Error while submitting transaction:", error);
     Deno.exit(1);
   }
-}
 }
 
 const isPositiveNumber = (s: string) =>
