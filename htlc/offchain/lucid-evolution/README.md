@@ -1,102 +1,95 @@
-# HTLC Offchain (Lucid Evolution)
+# HTLC Off-chain (Lucid Evolution)
 
-This folder contains an off-chain TypeScript CLI using Lucid (via the Evolution SDK) to interact with the HTLC Plutus validator compiled in `../../onchain/aiken/plutus.json`.
+This folder contains the off-chain implementation of the Hash Time Locked Contract (HTLC) using the Lucid Evolution SDK.
 
-**Purpose:** provide simple developer tooling to prepare test wallets, lock funds into the HTLC, claim with a preimage, and refund after expiration.
+## Prerequisites
 
-**Files:**
+- [Deno](https://deno.land/) installed.
+- A Cardano wallet with some test ADA on the Preprod network.
 
-- `htlc.ts` — main CLI script with commands: `prepare`, `init`, `claim`, `refund`.
-- `check_balances.ts` — dynamically checks balances for all `wallet_*.txt` files.
-- `show_addresses.ts` — displays addresses for all `wallet_*.txt` files.
-- `fund_wallet_1.ts` — utility to fund Wallet 1 from Wallet 0 for collateral.
-- `deno.json` — convenience tasks for `deno` (run/watch/commands).
+## Setup
 
-**Prerequisites**
+1.  **Prepare Wallets**: Generate seed phrases for testing.
 
-- Deno (tested with Deno 2.6.3)
-- Internet access to the configured Koios endpoint (default: Preprod Koios)
-- Testnet tADA for `wallet_0` to cover fees and collateral
+    ```bash
+    deno task prepare
+    ```
 
-Quick setup
+    This will create `wallet_0.txt`, `wallet_1.txt`, etc.
 
-1. Change to this folder:
+2.  **Fund Wallets**: Send some tADA to the addresses generated.
 
-```bash
-cd htlc/offchain/lucid-evolution
-```
+    ```bash
+    deno task show-addresses
+    ```
 
-2. Install any Deno remote dependencies (optional; Deno will fetch on first run):
+    Fund at least `wallet_0` (for locking/refunding) and `wallet_1` (for claiming).
 
-```bash
-deno cache htlc.ts
-```
+3.  **Check Balances**:
 
-3. Prepare seed phrases (creates `wallet_0.txt`, `wallet_1.txt`, ...):
+    ```bash
+    deno task balances
+    ```
 
-```bash
-deno run -A htlc.ts prepare 5
-```
+4.  **Transfer Funds**: If you need to transfer funds between wallets (e.g., for collateral):
+    ```bash
+    deno task transfer
+    ```
+    Or manually:
+    ```bash
+    deno run -A htlc.ts transfer 0 1 10000000
+    ```
 
-4. Fund `wallet_0` (first printed address) with tADA from a faucet or testnet funding service.
+## Usage
 
-Usage
+### 1. Initialize HTLC (Lock Funds)
 
-- Prepare wallets:
-
-```bash
-deno run -A htlc.ts prepare <count>
-```
-
-- Initialize / lock funds to HTLC (owner submits tx; provide lovelace amount and secret preimage; `recipientIndex` picks which prepared wallet is recipient):
+Lock 10 ADA with a secret "mySecret" using `wallet_0`.
 
 ```bash
-deno run -A htlc.ts init <lovelace> <secret> [recipientIndex]
+deno run -A htlc.ts init 10000000 mySecret 0 3600
 ```
 
-Example:
+- `10000000`: Amount in lovelace.
+- `mySecret`: The secret preimage.
+- `0`: Wallet index to use (owner).
+- `3600`: Expiration time in seconds.
+
+### 2. Claim HTLC
+
+Claim the locked funds using the secret preimage and `wallet_1`.
 
 ```bash
-deno run -A htlc.ts init 1000000 mySecret 1
+deno run -A htlc.ts claim <txHash> mySecret 1
 ```
 
-- Claim HTLC (recipient uses preimage to redeem). Provide the tx hash returned by `init`:
+- `<txHash>`: The transaction ID from the `init` step.
+- `mySecret`: The secret preimage.
+- `1`: Wallet index to use (claimer).
+
+### 3. Refund HTLC
+
+Refund the locked funds after expiration using `wallet_0`.
 
 ```bash
-deno run -A htlc.ts claim <txHash> <preimage>
+deno run -A htlc.ts refund <txHash> 0
 ```
 
-- Refund HTLC (owner calls after expiration):
+- `<txHash>`: The transaction ID from the `init` step.
+- `0`: Wallet index to use (owner).
 
-```bash
-deno run -A htlc.ts refund <txHash>
-```
+## Scripts
 
-deno.json tasks
-
-- `deno task prepare` — prepares sample wallets (configured in `deno.json`)
-- `deno task balances` — check balances of all prepared wallets
-- `deno task show-addresses` — show addresses of all prepared wallets
-- `deno task fund-collateral` — send 10 ADA from Wallet 0 to Wallet 1
-- `deno task init` — lock 10 ADA with secret "mySecret"
-- `deno task claim` — claim funds (requires editing `deno.json` with txHash)
-- `deno task refund` — refund funds (requires editing `deno.json` with txHash)
-
-Implementation notes & caveats
-
-- The script uses the `preprod` Koios endpoint by default. You may change the provider URL in `htlc.ts` to target other networks.
-- `prepare` writes `wallet_<n>.txt` files containing mnemonic seed phrases. Keep them secure; these are full-signing keys.
-- `init` selects `wallet_0` to submit transactions. Ensure that file exists and the associated address has tADA.
-- The claim/refund commands locate the script UTXO by tx hash. Some provider responses may return inline datum formats that require retrying different output indexes or listing the script UTXOs; the CLI includes fallbacks but you may need to inspect the transaction on a block explorer if a UTXO isn't found.
-
-Troubleshooting
-
-- Tx submission failing with validity or slot errors: remove hard-coded `validFrom`/`validTo` or ensure system clock and provider are in sync. The current script lets the provider set defaults.
-- `No UTXOs found for transaction ID`:
-  - Check the explorer link printed by `init` to find which output index holds the script UTXO.
-  - Try `deno run -A htlc.ts claim <txHash> <preimage>` again; the script will attempt common fallbacks.
-
-Security
+- `htlc.ts`: Main CLI for HTLC operations.
+  - `init`: Lock funds.
+  - `claim`: Claim funds.
+  - `refund`: Refund funds.
+  - `prepare`: Generate test wallets.
+  - `show-addresses`: Show wallet addresses.
+  - `balances`: Check wallet balances.
+  - `list-utxos`: List active HTLC UTXOs.
+  - `transfer`: Transfer funds between wallets.
+- `lib/utils.ts`: Shared library for wallet management, store, and crypto.
 
 - These scripts are for development and testing only. Do NOT use these mnemonics or the example code on mainnet without proper security and audits.
 

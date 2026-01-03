@@ -1,40 +1,25 @@
 import { Lucid, Koios, Data, generateSeedPhrase, validatorToAddress, Validator, fromText, getAddressDetails, LucidEvolution, TUnsafe, applyParamsToScript } from "@evolution-sdk/lucid";
 
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
+import {
+  getLucid,
+  getWallet,
+  sha256,
+  loadStore,
+  saveStore,
+  showAddresses,
+  checkBalances,
+  transfer,
+  listUtxos,
+} from "./lib/utils.ts";
 
 const HtlcRedeemer = Data.Enum([
   Data.Object({ GUESS: Data.Object({ answer: Data.Bytes() }) }),
   Data.Literal("WITHDRAW"),
 ]);
 
-const STORE_FILE = "htlc_store.json";
-
-type StoredHtlc = {
-  txHash: string;
-  amount: string;
-  secretHash: string;
-  expiration: string;
-  ownerPkh: string;
-};
-
-async function loadStore(): Promise<StoredHtlc[]> {
-  try {
-    const data = await Deno.readTextFile(STORE_FILE);
-    return JSON.parse(data);
-  } catch {
-    return [];
-  }
-}
-
-async function saveStore(store: StoredHtlc[]) {
-  await Deno.writeTextFile(STORE_FILE, JSON.stringify(store, null, 2));
-}
-
 async function prepare (amount: number) {
-  const lucid = await Lucid(
-    new Koios("https://preprod.koios.rest/api/v1"),
-    "Preprod",
-  );
+  const lucid = await getLucid();
 
   const addresses = [];
   for (let i = 0; i < amount; i++) {
@@ -48,17 +33,8 @@ async function prepare (amount: number) {
   console.log(`Make sure to send some tADA to the wallet ${addresses[0]} for fees and collateral.`);
 }
 
-function selectWallet (lucid: LucidEvolution, index: number) {
-  const mnemonic = Deno.readTextFileSync(`wallet_${index}.txt`);
-  lucid.selectWallet.fromSeed(mnemonic);
-}
-
 async function setup (params?: any[]) {
-  const lucid = await Lucid(
-    new Koios("https://preprod.koios.rest/api/v1"),
-    "Preprod",
-  );
-  selectWallet(lucid, 0);
+  const lucid = await getLucid();
 
   let script = blueprint.validators[0].compiledCode;
   if (params) {
@@ -79,34 +55,11 @@ async function setup (params?: any[]) {
   }
 }
 
-async function sha256 (input: string) {
-  const enc = new TextEncoder();
-  const data = enc.encode(input);
-  const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', data));
-  const hex = Array.from(hash).map((b) => b.toString(16).padStart(2, '0')).join('');
-  return hex;
-}
+async function initHtlc(lovelaceAmount: string, secret: string, walletIndex = 0, expirationSeconds = 3600) {
+  const lucid = await getLucid();
+  const wallet = await getWallet(lucid, walletIndex);
 
-function hexToBytes(hex: string): Uint8Array {
-  if (hex.length % 2 !== 0) {
-    hex = '0' + hex;
-  }
-  const len = hex.length / 2;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i++) {
-    bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
-  }
-  return bytes;
-}
-
-async function initHtlc(lovelaceAmount: string, secret: string, recipientIndex = 1, expirationSeconds = 3600) {
-  const lucid = await Lucid(
-    new Koios("https://preprod.koios.rest/api/v1"),
-    "Preprod",
-  );
-  selectWallet(lucid, 0);
-
-  const address = await lucid.wallet().address();
+  const address = await wallet.address();
   const { paymentCredential } = getAddressDetails(address);
   const ownerPkh = paymentCredential?.hash || '';
 
@@ -147,7 +100,7 @@ async function initHtlc(lovelaceAmount: string, secret: string, recipientIndex =
     console.log(`Successfully locked ${lovelaceAmount} lovelace to ${scriptAddress}.
 See: https://preprod.cexplorer.io/tx/${txHash}`);
     console.log(`Use the following command to claim:
-deno run -A htlc.ts claim ${txHash} <preimage>`);
+deno run -A htlc.ts claim ${txHash} <preimage> <walletIndex>`);
   } catch (error) {
     console.error("Error while submitting transaction:", error);
     Deno.exit(1);
@@ -155,7 +108,7 @@ deno run -A htlc.ts claim ${txHash} <preimage>`);
 }
 
 async function claimHtlc(transactionId: string, preimage: string, walletIndex = 1) {
-  console.log(`Claiming HTLC with transaction ID: "${transactionId}"`);
+  console.log(`Claiming HTLC with transaction ID: "${transactionId}" using wallet ${walletIndex}`);
   const store = await loadStore();
   const htlc = store.find((h) => h.txHash === transactionId);
   if (!htlc) {
@@ -171,9 +124,9 @@ async function claimHtlc(transactionId: string, preimage: string, walletIndex = 
 
   const { lucid, scriptAddress, validator } = await setup(params);
 
-  selectWallet(lucid, walletIndex);
+  const wallet = await getWallet(lucid, walletIndex);
 
-  const address = await lucid.wallet().address();
+  const address = await wallet.address();
   console.log(`Using wallet address: ${address}`);
 
   let utxos = [];
@@ -216,7 +169,7 @@ See: https://preprod.cexplorer.io/tx/${txHash}`);
 }
 
 async function refundHtlc(transactionId: string, walletIndex = 0) {
-  console.log(`Refunding HTLC with transaction ID: "${transactionId}"`);
+  console.log(`Refunding HTLC with transaction ID: "${transactionId}" using wallet ${walletIndex}`);
   const store = await loadStore();
   const htlc = store.find((h) => h.txHash === transactionId);
   if (!htlc) {
@@ -232,9 +185,9 @@ async function refundHtlc(transactionId: string, walletIndex = 0) {
 
   const { lucid, scriptAddress, validator } = await setup(params);
 
-  selectWallet(lucid, walletIndex);
+  const wallet = await getWallet(lucid, walletIndex);
 
-  const address = await lucid.wallet().address();
+  const address = await wallet.address();
   console.log(`Using wallet address: ${address}`);
 
   let utxos = [];
@@ -327,9 +280,24 @@ if (Deno.args.length > 0) {
       console.log('Expected a positive number (of seed phrases to prepare) as the second argument.');
       console.log('Example usage: deno run -A htlc.ts prepare 5');
     }
+  } else if (Deno.args[0] === 'show-addresses') {
+    await showAddresses();
+  } else if (Deno.args[0] === 'balances') {
+    await checkBalances();
+  } else if (Deno.args[0] === 'list-utxos') {
+    await listUtxos();
+  } else if (Deno.args[0] === 'transfer') {
+    if (Deno.args.length >= 4) {
+      const from = parseInt(Deno.args[1]);
+      const to = parseInt(Deno.args[2]);
+      const amount = Deno.args[3];
+      await transfer(from, to, amount);
+    } else {
+      console.log('Usage: deno run -A htlc.ts transfer <fromIndex> <toIndex> <amountLovelace>');
+    }
   } else {
-    console.log('Invalid argument. Allowed arguments are "init", "claim", "refund" or "prepare".');
+    console.log('Invalid argument. Allowed arguments are "init", "claim", "refund", "prepare", "show-addresses", "balances", "list-utxos", or "transfer".');
   }
 } else {
-  console.log('Expected an argument. Allowed arguments are "init", "claim", "refund" or "prepare".');
+  console.log('Expected an argument. Allowed arguments are "init", "claim", "refund", "prepare", "show-addresses", "balances", "list-utxos", or "transfer".');
 }
