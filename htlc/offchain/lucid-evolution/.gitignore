@@ -1,5 +1,6 @@
 # Ignore wallet seed files and other secrets
 wallet_*.txt
+htlc_store.json
 .env
 .env.local
 
@@ -24,5 +25,6 @@ node_modules/
 # Do NOT ignore lockfile or import map (keep them committed for reproducible builds)
 # deno.lock
 # import_map.json
-wallet_*.txt
 deno.lock
+
+
