@@ -1,0 +1,17 @@
+meshjs > deno run -A wallet-cli-test.ts create-intent wallet_0.json "addr_test1qqejx57pyvd8dsv6nf75fm6z2f6euhlt5mymkyaycw9wwykqyc88c2p7g4rfprsxm4u208zevvj7h0v5ymjsjkyyzjdse26srh" "10000000" "credit-note"
+Intent address: addr_test1wpfq0vmuw9jjd0hsc4wpnuj8jle8m4j4wzt46r3l5g8nlgg9446xt
+✅ Intent created: Tx Id:  8ba635005a179b7da121e0a1c50c787dd81c1351406563176ca528f9c63c8038
+
+meshjs > deno run -A wallet-cli-test.ts add-funds wallet_0.json 15000000
+Funds address: addr_test1wqmuptvkl8xvllzfyet3d48dehgrp6etggewza7nrydtnrcj9xjaz
+✅ Funds script funded: Tx Id: f3f04d20848bf734ed3e5443a5edbed5fb07e4a24fb3c35704785c91ba37368d
+
+meshjs > deno run -A wallet-cli-test.ts add-funds wallet_0.json 20000000
+Funds address: addr_test1wqmuptvkl8xvllzfyet3d48dehgrp6etggewza7nrydtnrcj9xjaz
+✅ Funds script funded: Tx Id: 916e3495fc08df4e147c774ee6e7a8d8883d323015d960d6f4b37225bad6b425
+
+meshjs > deno run -A wallet-cli-test.ts execute wallet_0.json
+✅ Intent executed: Tx Id: 190faabfe65bf415c2acea700fb623c77d10e3efee6465cf961ee556053d0248
+
+meshjs > deno run -A wallet-cli-test.ts withdraw wallet_0.json
+✅ Withdraw executed: Tx Id:  067b1fce4f7ae85e23fd45ccd9e38c32ab7673370140a962b257f77277cd8d51
