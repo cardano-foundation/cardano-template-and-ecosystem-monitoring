@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+
+# Environment & secrets
+.env
+.env.local
+.env.*.local
+
+# Sensitive data files - NEVER COMMIT!
+offchain/meshjs/data/device-keys.json
+offchain/meshjs/data/device-keys.enc
+offchain/meshjs/data/auth-tokens.json
+offchain/meshjs/data/used-nonces.json
+offchain/meshjs/data/readings/
+offchain/meshjs/data/registry.json
+offchain/meshjs/data/devices.json
+
+# Build outputs
+dist/
+build/
+onchain/aiken/artifacts/
+
+# IDE
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Aiken build cache
+onchain/aiken/.aiken/

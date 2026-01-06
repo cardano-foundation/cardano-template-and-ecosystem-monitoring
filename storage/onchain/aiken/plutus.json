@@ -1,0 +1,117 @@
+{
+  "preamble": {
+    "title": "iot-sentinel/storage",
+    "description": "IoT Sentinel - 3-Phase Distribution Transformer Monitoring System for Cardano",
+    "version": "0.0.1",
+    "plutusVersion": "v3",
+    "compiler": {
+      "name": "Aiken",
+      "version": "v1.1.19+e525483"
+    },
+    "license": "Apache-2.0"
+  },
+  "validators": [
+    {
+      "title": "storage.storage.spend",
+      "datum": {
+        "title": "datum",
+        "schema": {
+          "$ref": "#/definitions/types~1IoTRecord"
+        }
+      },
+      "redeemer": {
+        "title": "redeemer",
+        "schema": {
+          "$ref": "#/definitions/types~1StorageAction"
+        }
+      },
+      "compiledCode": "5901f401010029800aba2aba1aab9faab9eaab9dab9a48888896600264653001300700198039804000cdc3a400530070024888966002600460106ea800e26466453001159800980098059baa0028cc004c038c030dd50014dd618071807980798079807980798079807980798061baa004911919800800801912cc00400629422b30013371e6eb8c04800400e2946266004004602600280710114c02cdd5003c8c03cc040c040c040c04000522222598009803001456600330013371e6eb8c04cc050c044dd5002a4500a50a51403d159800acc004cdc4a40006eb4c004c044dd5002c4cdc49bad30013011375400a90084528201e8acc004cdc4240006eb4c04cc050c050c044dd5002c6600266e3cdd71809980a180a180a18089baa00548900a50a51403d14a0807a294100f4528201e8acc004c02800a2b300133003004375c602660226ea80162b30013371290001bad30013011375400b1337126eb4c004c044dd5002a402114a0807a294100f44cc00c010dd7180998089baa005403c8079164029300b375400f300e003488966002600800515980098079baa00a801c590104566002601000515980098079baa00a801c59010456600266e1d20040028acc004c03cdd5005400e2c80822c806900d201a180618068009b8748000c024dd5001c590070c01c004c00cdd5003c52689b2b200201",
+      "hash": "d3de40a4e9083f688125c9c1239a547cfeaa7cde1eb1aac9e2f22cb4"
+    },
+    {
+      "title": "storage.storage.else",
+      "redeemer": {
+        "schema": {}
+      },
+      "compiledCode": "5901f401010029800aba2aba1aab9faab9eaab9dab9a48888896600264653001300700198039804000cdc3a400530070024888966002600460106ea800e26466453001159800980098059baa0028cc004c038c030dd50014dd618071807980798079807980798079807980798061baa004911919800800801912cc00400629422b30013371e6eb8c04800400e2946266004004602600280710114c02cdd5003c8c03cc040c040c040c04000522222598009803001456600330013371e6eb8c04cc050c044dd5002a4500a50a51403d159800acc004cdc4a40006eb4c004c044dd5002c4cdc49bad30013011375400a90084528201e8acc004cdc4240006eb4c04cc050c050c044dd5002c6600266e3cdd71809980a180a180a18089baa00548900a50a51403d14a0807a294100f4528201e8acc004c02800a2b300133003004375c602660226ea80162b30013371290001bad30013011375400b1337126eb4c004c044dd5002a402114a0807a294100f44cc00c010dd7180998089baa005403c8079164029300b375400f300e003488966002600800515980098079baa00a801c590104566002601000515980098079baa00a801c59010456600266e1d20040028acc004c03cdd5005400e2c80822c806900d201a180618068009b8748000c024dd5001c590070c01c004c00cdd5003c52689b2b200201",
+      "hash": "d3de40a4e9083f688125c9c1239a547cfeaa7cde1eb1aac9e2f22cb4"
+    }
+  ],
+  "definitions": {
+    "ByteArray": {
+      "dataType": "bytes"
+    },
+    "Int": {
+      "dataType": "integer"
+    },
+    "aiken/crypto/VerificationKeyHash": {
+      "title": "VerificationKeyHash",
+      "dataType": "bytes"
+    },
+    "types/IoTRecord": {
+      "title": "IoTRecord",
+      "description": "IoTRecord - The datum structure stored on-chain\n This represents the \"proof of existence\" for IoT sensor readings",
+      "anyOf": [
+        {
+          "title": "IoTRecord",
+          "dataType": "constructor",
+          "index": 0,
+          "fields": [
+            {
+              "title": "owner",
+              "description": "The public key hash of the device owner (who can spend/update)",
+              "$ref": "#/definitions/aiken~1crypto~1VerificationKeyHash"
+            },
+            {
+              "title": "device_id",
+              "description": "Unique identifier for the monitoring device (e.g., \"TRAFO-SINJAI-01\")",
+              "$ref": "#/definitions/ByteArray"
+            },
+            {
+              "title": "timestamp",
+              "description": "POSIX timestamp when the reading was taken",
+              "$ref": "#/definitions/Int"
+            },
+            {
+              "title": "data_hash",
+              "description": "SHA-256 hash of the complete JSON sensor data\n This hash proves the existence of the off-chain data at a specific time",
+              "$ref": "#/definitions/ByteArray"
+            },
+            {
+              "title": "status_code",
+              "description": "Status code (0-8) representing the transformer condition\n See StatusCode type for detailed meanings",
+              "$ref": "#/definitions/Int"
+            }
+          ]
+        }
+      ]
+    },
+    "types/StorageAction": {
+      "title": "StorageAction",
+      "description": "Redeemer actions for the storage validator",
+      "anyOf": [
+        {
+          "title": "Lock",
+          "description": "Lock new sensor data to the contract",
+          "dataType": "constructor",
+          "index": 0,
+          "fields": []
+        },
+        {
+          "title": "Update",
+          "description": "Update existing record (requires owner signature)",
+          "dataType": "constructor",
+          "index": 1,
+          "fields": []
+        },
+        {
+          "title": "Spend",
+          "description": "Spend/retrieve the UTxO (requires owner signature)",
+          "dataType": "constructor",
+          "index": 2,
+          "fields": []
+        }
+      ]
+    }
+  }
+}

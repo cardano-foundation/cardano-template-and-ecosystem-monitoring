@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+
+# Environment & secrets
+.env
+.env.local
+.env.*.local
+
+# Sensitive data files - NEVER COMMIT!
+data/device-keys.json
+data/device-keys.enc
+data/auth-tokens.json
+data/used-nonces.json
+
+# Keep readings but ignore if contains sensitive patterns
+# data/readings/
+
+# Build outputs
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# TypeScript cache
+*.tsbuildinfo
