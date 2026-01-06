@@ -22,122 +22,118 @@ This directory contains the off-chain code for interacting with the Escrow smart
     cd escrow/offchain/lucid-evolution
     ```
 
-## Usage
+## Wallet Management
 
-You can run commands using `deno task <command>`.
+Before running scenarios, you need wallets with funds.
 
-### 1. Prepare Wallets
-
-Generates new wallet seed phrases and saves them to `wallet_N.txt` files.
-
-```bash
-deno task prepare <count>
-# Example: Generate 5 wallets
-deno task prepare 5
-```
-
-> **Important**: After preparing, you must fund the first wallet (`wallet_0.txt`) with tADA from the [Cardano Testnet Faucet](https://docs.cardano.org/cardano-testnet/tools/faucet).
-
-### 2. Check Balances
-
-View the address and balance of your generated wallets.
-
-```bash
-deno task balances
-```
-
-### 3. Initiate Escrow
-
-The initiator locks assets into the contract.
-
-```bash
-deno task initiate <walletIndex> <lovelaceAmount>
-# Example: Wallet 1 initiates with 10 ADA
-deno task initiate 1 10000000
-```
-
-### 4. List Active Escrows
-
-View the status of all locally tracked escrows and check if they exist on-chain.
-
-```bash
-deno task list-utxos
-```
-
-### 5. Deposit (Recipient)
-
-The recipient deposits their side of the trade.
-
-```bash
-deno task deposit <txHash> <walletIndex> <lovelaceAmount>
-# Example: Wallet 0 deposits 5 ADA to the escrow with specific TxHash
-deno task deposit <txHash> 0 5000000
-```
-
-### 6. Complete Trade
-
-Finalize the trade. This swaps the assets between the initiator and the recipient.
-
-```bash
-deno task complete <txHash>
-```
-
-### 7. Cancel Trade
-
-Cancel the escrow and refund the assets to the initiator (if in Initiation state) or both parties (if in Active state).
-
-```bash
-deno task cancel <txHash> <walletIndex>
-# Example: Wallet 1 cancels the trade
-deno task cancel <txHash> 1
-```
-
-## Testing Workflow
-
-Follow these steps to test the full lifecycle of the contract:
-
-1.  **Prepare and Fund**:
-
+1.  **Generate Wallets**: Creates local `wallet_N.txt` files.
     ```bash
     deno task prepare 5
-    # Fund wallet_0 address with tADA from faucet
-    deno task balances # Verify funds
     ```
-
-2.  **Distribute Funds** (Optional helper):
-    If you need to send funds from Wallet 0 to Wallet 1:
-
+2.  **Fund Wallet 0**:
+    - Run `deno task balances` to get the address of **Wallet 0**.
+    - Request tADA from the [Cardano Testnet Faucet](https://docs.cardano.org/cardano-testnet/tools/faucet) to that address.
+3.  **Distribute Funds**:
+    - Send some ADA to **Wallet 1** (and others) so they can act as counterparties.
     ```bash
-    deno task transfer 0 1 20000000 # Send 20 ADA to Wallet 1
+    # Send 50 ADA from Wallet 0 to Wallet 1
+    deno task transfer 0 1 50000000
     ```
 
-3.  **Initiate**:
+## Test Scenarios
+
+There are three main scenarios to test the contract logic.
+
+### Scenario A: Successful Trade (Happy Path)
+
+In this scenario, two parties successfully exchange assets.
+
+1.  **Initiate Escrow (Wallet 1)**
+
+    - **Action**: Wallet 1 sends 10 ADA to the script address.
+    - **On-Chain**: A UTXO is created at the script address with the `Initiation` datum state, containing the Initiator's public key hash and asset details.
 
     ```bash
     deno task initiate 1 10000000
-    # Copy the TxHash from the output
     ```
 
-4.  **Verify State**:
+    - _Copy the **TxHash** from the output for the next steps._
+
+2.  **Deposit (Wallet 0)**
+
+    - **Action**: Wallet 0 finds the UTXO and deposits 5 ADA.
+    - **On-Chain**: The previous UTXO is spent. A new UTXO is created at the same script address containing both amounts (15 ADA) with the `ActiveEscrow` datum state, now recording both parties' details.
 
     ```bash
-    deno task list-utxos
+    deno task deposit <TxHash> 0 5000000
     ```
 
-5.  **Deposit**:
+3.  **Complete Trade**
+    - **Action**: Both parties sign the transaction (simulated in script).
+    - **On-Chain**: The contract validates the signatures and ensures assets are distributed according to the agreement (Wallet 1 gets 5 ADA, Wallet 0 gets 10 ADA).
+    ```bash
+    deno task complete <TxHash>
+    ```
+
+---
+
+### Scenario B: Cancellation BEFORE Deposit
+
+The initiator changes their mind before anyone accepts the offer.
+
+1.  **Initiate Escrow (Wallet 1)**
 
     ```bash
-    deno task deposit <TxHash_From_Step_3> 0 5000000
+    deno task initiate 1 10000000
     ```
 
-6.  **Complete**:
+    - _Copy the **TxHash**._
+
+2.  **Cancel (Wallet 1)**
+    - **Action**: Wallet 1 spends the UTXO to refund themselves.
+    - **On-Chain**: The contract checks if the spender is the `Initiator` recorded in the datum.
+    - **Result**: 10 ADA is returned to Wallet 1.
+    ```bash
+    deno task cancel <TxHash> 1
+    ```
+
+---
+
+### Scenario C: Cancellation AFTER Deposit
+
+The trade is active, but the parties decide to cancel (or it expires/is faulty).
+
+1.  **Initiate Escrow (Wallet 1)**
 
     ```bash
-    deno task complete <TxHash_From_Step_3>
+    deno task initiate 1 10000000
     ```
 
-7.  **Cancel (Alternative Path)**:
-    If you want to test cancellation instead of completion:
+    - _Copy the **TxHash**._
+
+2.  **Deposit (Wallet 0)**
+
     ```bash
-    deno task cancel <TxHash_From_Step_3> 1
+    deno task deposit <TxHash> 0 5000000
     ```
+
+3.  **Cancel (Wallet 1)**
+    - **Action**: Wallet 1 triggers a cancellation.
+    - **On-Chain**: The contract validates the refund logic, ensuring each party gets back exactly what they contributed.
+    - **Result**: Wallet 1 gets their original 10 ADA back. Wallet 0 gets their original 5 ADA back.
+    ```bash
+    deno task cancel <TxHash> 1
+    ```
+
+## Command Reference
+
+| Command      | Description              | Usage                                            |
+| :----------- | :----------------------- | :----------------------------------------------- |
+| `prepare`    | Generate wallets         | `deno task prepare <count>`                      |
+| `balances`   | Check wallet balances    | `deno task balances`                             |
+| `transfer`   | Send ADA between wallets | `deno task transfer <from> <to> <lovelace>`      |
+| `initiate`   | Start a new escrow       | `deno task initiate <wallet> <lovelace>`         |
+| `deposit`    | Join an existing escrow  | `deno task deposit <txHash> <wallet> <lovelace>` |
+| `complete`   | Finalize and swap assets | `deno task complete <txHash>`                    |
+| `cancel`     | Refund assets            | `deno task cancel <txHash> <wallet>`             |
+| `list-utxos` | Check status of escrows  | `deno task list-utxos`                           |

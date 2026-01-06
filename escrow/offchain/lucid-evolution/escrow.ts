@@ -54,7 +54,7 @@ async function initiateEscrow(walletIndex: number, assets: Assets) {
         initiator: addressToData(address),
         initiator_assets: assetsToMValue(assets),
       },
-    } as Data.Static<typeof EscrowDatum>,
+    } as any,
     EscrowDatum
   );
 
@@ -94,7 +94,7 @@ async function depositEscrow(txHash: string, walletIndex: number, recipientAsset
   const utxo = await waitForUtxo(lucid, txHash, scriptAddress);
   if (!utxo.datum) throw new Error("UTXO missing datum");
 
-  const inputDatum = Data.from(utxo.datum, EscrowDatum) as Data.Static<typeof EscrowDatum>;
+  const inputDatum = Data.from(utxo.datum, EscrowDatum) as any;
   if (!("Initiation" in inputDatum)) throw new Error("Contract not in Initiation state");
 
   const { initiator, initiator_assets } = inputDatum.Initiation;
@@ -105,7 +105,7 @@ async function depositEscrow(txHash: string, walletIndex: number, recipientAsset
         recipient: addressToData(recipientAddr),
         recipient_assets: assetsToMValue(recipientAssets),
       },
-    },
+    } as any,
     EscrowRedeemer
   );
 
@@ -117,7 +117,7 @@ async function depositEscrow(txHash: string, walletIndex: number, recipientAsset
         initiator_assets,
         recipient_assets: assetsToMValue(recipientAssets),
       },
-    },
+    } as any,
     EscrowDatum
   );
 
@@ -164,10 +164,10 @@ async function completeTrade(txHash: string, initiatorWalletIndex: number, recip
   const utxo = await waitForUtxo(lucid, txHash, scriptAddress);
   if (!utxo.datum) throw new Error("UTXO missing datum");
 
-  const datum = Data.from(utxo.datum, EscrowDatum) as Data.Static<typeof EscrowDatum>;
+  const datum = Data.from(utxo.datum, EscrowDatum);
   if (!("ActiveEscrow" in datum)) throw new Error("Escrow is not active");
 
-  const redeemer = Data.to("CompleteTrade", EscrowRedeemer);
+  const redeemer = Data.to("CompleteTrade", EscrowRedeemer as any);
 
   const store = await loadStore();
   const escrow = store.find(e => e.txHash === txHash);
@@ -219,8 +219,8 @@ async function cancelTrade(txHash: string, walletIndex: number) {
   const utxo = await waitForUtxo(lucid, txHash, scriptAddress);
   if (!utxo.datum) throw new Error("UTXO missing datum");
 
-  const datum = Data.from(utxo.datum, EscrowDatum) as Data.Static<typeof EscrowDatum>;
-  const redeemer = Data.to("CancelTrade", EscrowRedeemer);
+  const datum = Data.from(utxo.datum, EscrowDatum);
+  const redeemer = Data.to("CancelTrade", EscrowRedeemer as any);
 
   const store = await loadStore();
   const escrow = store.find(e => e.txHash === txHash);
