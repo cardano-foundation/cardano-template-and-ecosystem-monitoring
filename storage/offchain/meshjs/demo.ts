@@ -1,7 +1,7 @@
-// IoT Sentinel - Complete Demo with ZK Authentication
+// IoT Sentinel - Complete Demo with Device Authentication
 // 1. Generate sensor data from IoT device
-// 2. Create ZK proof (device signs data)
-// 3. Verify ZK proof (system validates)
+// 2. Create digital signature (device signs data)
+// 3. Verify signature (system validates)
 // 4. Submit to Cardano blockchain
 
 import { BlockfrostProvider, MeshWallet } from '@meshsdk/core';
@@ -20,7 +20,7 @@ import {
 import {
   registerDevice, createAuthenticatedData, verifyAuthenticatedData,
   isDeviceRegistered, loadDeviceRegistry, printDeviceRegistry,
-} from './lib/zk-auth';
+} from './lib/device-auth';
 import {
   getDeviceKeySecure, setDeviceKeySecure, printSecurityStatus,
 } from './lib/secure-storage';
@@ -38,7 +38,7 @@ const DEVICE_ID = 'TRAFO-SINJAI-01';
 function printBanner(): void {
   console.log('\n========================================');
   console.log('  IoT SENTINEL - Complete Demo');
-  console.log('  ZK Auth + Blockchain Storage');
+  console.log('  Device Auth + Blockchain Storage');
   console.log('========================================\n');
 }
 
@@ -95,7 +95,7 @@ function ensureDeviceRegistered(): string {
 }
 
 // Step 2: Generate and sign sensor data
-function generateAndSignData(privateKey: string): { data: SensorData; zkProof: any } | null {
+function generateAndSignData(privateKey: string): { data: SensorData; signatureProof: any } | null {
   console.log('\nSTEP 2: IoT Device - Generate & Sign Data');
   console.log('------------------------------------------');
   
@@ -105,21 +105,21 @@ function generateAndSignData(privateKey: string): { data: SensorData; zkProof: a
   console.log(`  Current R/S/T: ${sensorData.phase_current.R}/${sensorData.phase_current.S}/${sensorData.phase_current.T} A`);
   console.log(`  Temperature: ${sensorData.temperature} C`);
   
-  console.log('\nCreating ZK proof...');
+  console.log('\nCreating digital signature...');
   const authData = createAuthenticatedData(DEVICE_ID, privateKey, sensorData);
-  console.log(`  Data hash: ${authData.zkProof.dataHash.substring(0, 32)}...`);
-  console.log(`  Nonce: ${authData.zkProof.nonce.substring(0, 16)}...`);
-  console.log(`  Signature: ${authData.zkProof.signature.substring(0, 32)}...`);
+  console.log(`  Data hash: ${authData.signatureProof.dataHash.substring(0, 32)}...`);
+  console.log(`  Nonce: ${authData.signatureProof.nonce.substring(0, 16)}...`);
+  console.log(`  Signature: ${authData.signatureProof.signature.substring(0, 32)}...`);
   console.log('Data signed with device private key');
   
   return authData;
 }
 
-// Step 3: Verify ZK proof
-function verifyZKProof(authData: { data: SensorData; zkProof: any }): boolean {
-  console.log('\nSTEP 3: System - Verify ZK Proof');
-  console.log('--------------------------------');
-  console.log('Verifying with PUBLIC key only (zero-knowledge):');
+// Step 3: Verify digital signature
+function verifySignature(authData: { data: SensorData; signatureProof: any }): boolean {
+  console.log('\nSTEP 3: System - Verify Digital Signature');
+  console.log('-----------------------------------------');
+  console.log('Verifying with PUBLIC key only (zero-exposure):');
   console.log('  - Checking device registration...');
   console.log('  - Verifying data hash...');
   console.log('  - Checking timestamp...');
@@ -183,9 +183,9 @@ async function runFullDemo(): Promise<void> {
   printBanner();
   
   console.log('This demo shows the complete flow:');
-  console.log('1. Device registration (ZK keypair)');
+  console.log('1. Device registration (cryptographic keypair)');
   console.log('2. Sensor data collection & signing');
-  console.log('3. ZK proof verification');
+  console.log('3. Digital signature verification');
   console.log('4. Status analysis & local storage');
   console.log('5. Blockchain submission\n');
   console.log('========================================\n');
@@ -206,8 +206,8 @@ async function runFullDemo(): Promise<void> {
     return;
   }
   
-  // Step 3: Verify ZK proof
-  const isValid = verifyZKProof(authData);
+  // Step 3: Verify signature
+  const isValid = verifySignature(authData);
   if (!isValid) {
     console.log('\nData rejected - not from legitimate device!');
     return;

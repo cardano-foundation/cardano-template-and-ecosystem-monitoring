@@ -1,16 +1,16 @@
-// IoT Sentinel - Zero Knowledge Authentication Demo
-// Demonstrates how ZK proofs ensure data comes from legitimate IoT devices
+// IoT Sentinel - Cryptographic Device Authentication Demo
+// Demonstrates how digital signatures ensure data comes from legitimate IoT devices
 
 import { 
   registerDevice, 
   createAuthenticatedData, 
   verifyAuthenticatedData,
-  verifyZKProof,
-  createZKProof,
+  verifySignatureProof,
+  createSignatureProof,
   printDeviceRegistry,
   loadDeviceRegistry,
   isDeviceRegistered
-} from './lib/zk-auth';
+} from './lib/device-auth';
 import { SensorData } from './lib/types';
 import { analyzeStatus, printStatus } from './lib/analyzer';
 import { saveSensorReading, addToRegistry, hashSensorData, printRegistrySummary } from './lib/data-manager';
@@ -52,7 +52,7 @@ function generateSensorData(deviceId: string): SensorData {
 
 async function main(): Promise<void> {
   console.log('\n========================================');
-  console.log('  IoT SENTINEL - ZK Authentication Demo');
+  console.log('  IoT SENTINEL - Device Auth Demo');
   console.log('========================================\n');
 
   const args = process.argv.slice(2);
@@ -103,7 +103,7 @@ async function demoSendData(): Promise<void> {
   
   // Check device is registered
   if (!isDeviceRegistered(deviceId)) {
-    console.log(`Device ${deviceId} not registered. Run: npm run zk:register`);
+    console.log(`Device ${deviceId} not registered. Run: npm run auth:register`);
     return;
   }
   
@@ -112,7 +112,7 @@ async function demoSendData(): Promise<void> {
   const privateKey = keys[deviceId];
   
   if (!privateKey) {
-    console.log('Private key not found. Run: npm run zk:register');
+    console.log('Private key not found. Run: npm run auth:register');
     return;
   }
   
@@ -124,20 +124,20 @@ async function demoSendData(): Promise<void> {
   console.log(`   Temperature: ${sensorData.temperature} C`);
   console.log(`   Voltage R/S/T: ${sensorData.phase_voltage.R}/${sensorData.phase_voltage.S}/${sensorData.phase_voltage.T} V`);
   
-  // Create ZK proof
-  console.log('\n2. Creating ZK proof...');
+  // Create digital signature
+  console.log('\n2. Creating digital signature...');
   const authData = createAuthenticatedData(deviceId, privateKey, sensorData);
-  console.log(`   Data hash: ${authData.zkProof.dataHash.substring(0, 32)}...`);
-  console.log(`   Nonce: ${authData.zkProof.nonce}`);
-  console.log(`   Signature: ${authData.zkProof.signature.substring(0, 32)}...`);
+  console.log(`   Data hash: ${authData.signatureProof.dataHash.substring(0, 32)}...`);
+  console.log(`   Nonce: ${authData.signatureProof.nonce}`);
+  console.log(`   Signature: ${authData.signatureProof.signature.substring(0, 32)}...`);
   
   console.log('\n3. Sending to system...');
-  console.log('   [Data + ZK Proof transmitted]\n');
+  console.log('   [Data + Signature transmitted]\n');
   
   console.log('=== SYSTEM/VALIDATOR SIDE ===\n');
   
-  // Verify ZK proof
-  console.log('4. Verifying ZK proof...');
+  // Verify signature
+  console.log('4. Verifying digital signature...');
   console.log('   - Checking device registration');
   console.log('   - Verifying data hash');
   console.log('   - Checking timestamp');
@@ -184,7 +184,7 @@ async function demoFakeDevice(): Promise<void> {
   console.log(`   Fake current: ${fakeData.phase_current.R} A (real might be 110 A)`);
   
   // Attacker tries to create fake proof with random signature
-  console.log('\n2. Attacker creates fake ZK proof...');
+  console.log('\n2. Attacker creates fake signature...');
   const fakeProof = {
     deviceId: 'TRAFO-SINJAI-01',
     dataHash: require('crypto').createHash('sha256').update(JSON.stringify(fakeData)).digest('hex'),
@@ -199,9 +199,9 @@ async function demoFakeDevice(): Promise<void> {
   
   console.log('=== SYSTEM/VALIDATOR SIDE ===\n');
   
-  console.log('4. Verifying ZK proof...');
+  console.log('4. Verifying signature...');
   
-  const result = verifyZKProof(fakeProof, fakeData);
+  const result = verifySignatureProof(fakeProof, fakeData);
   
   console.log(`\n5. Verification result: ${result.valid ? '[VALID]' : '[REJECTED]'}`);
   console.log(`   ${result.reason}`);
@@ -221,7 +221,7 @@ async function demoTamperedData(): Promise<void> {
   const deviceId = 'TRAFO-SINJAI-01';
   
   if (!isDeviceRegistered(deviceId)) {
-    console.log(`Device ${deviceId} not registered. Run: npm run zk:register`);
+    console.log(`Device ${deviceId} not registered. Run: npm run auth:register`);
     return;
   }
   
@@ -229,7 +229,7 @@ async function demoTamperedData(): Promise<void> {
   const privateKey = keys[deviceId];
   
   if (!privateKey) {
-    console.log('Private key not found. Run: npm run zk:register');
+    console.log('Private key not found. Run: npm run auth:register');
     return;
   }
   
@@ -249,9 +249,9 @@ async function demoTamperedData(): Promise<void> {
   console.log(`   Temperature: ${originalData.temperature} C (HIGH!)}`);
   console.log(`   Current R: ${originalData.phase_current.R} A (OVERLOAD!)`);
   
-  // Device creates valid proof
+  // Device creates valid signature
   const authData = createAuthenticatedData(deviceId, privateKey, originalData);
-  console.log('\n2. Device creates valid ZK proof and sends...');
+  console.log('\n2. Device creates valid signature and sends...');
   
   console.log('\n=== MAN-IN-THE-MIDDLE ATTACK ===\n');
   
@@ -271,17 +271,17 @@ async function demoTamperedData(): Promise<void> {
   
   console.log('=== SYSTEM/VALIDATOR SIDE ===\n');
   
-  console.log('5. Verifying ZK proof against received data...');
+  console.log('5. Verifying signature against received data...');
   
   // System verifies - will fail because data doesn't match proof!
-  const result = verifyZKProof(authData.zkProof, tamperedData);
+  const result = verifySignatureProof(authData.signatureProof, tamperedData);
   
   console.log(`\n6. Verification result: ${result.valid ? '[VALID]' : '[REJECTED]'}`);
   console.log(`   ${result.reason}`);
   
   console.log('\n========================================');
   console.log('TAMPERING DETECTED!');
-  console.log('The ZK proof was for original data.');
+  console.log('The signature was for original data.');
   console.log('Modified data produces different hash.');
   console.log('System rejects the tampered data.');
   console.log('========================================\n');
@@ -289,22 +289,22 @@ async function demoTamperedData(): Promise<void> {
 
 // Full demo showing all scenarios
 async function demoFull(): Promise<void> {
-  console.log('Zero-Knowledge Authentication Flow:\n');
+  console.log('Cryptographic Device Authentication Flow:\n');
   console.log('1. IoT device has PRIVATE key (secret, never shared)');
   console.log('2. System stores PUBLIC key (can verify signatures)');
   console.log('3. Device signs data with private key');
   console.log('4. System verifies signature with public key');
   console.log('5. System accepts data ONLY if signature valid\n');
   
-  console.log('This is "Zero-Knowledge" because:');
-  console.log('- System never knows the private key');
-  console.log('- Yet can verify data came from legitimate device\n');
+  console.log('This is "Zero-Exposure" because:');
+  console.log('- Private key never leaves the device');
+  console.log('- System verifies using public key only\n');
   
   console.log('Available demos:\n');
-  console.log('  npm run zk:register  - Register new IoT device');
-  console.log('  npm run zk:send      - Send authenticated data');
-  console.log('  npm run zk:fake      - Fake device attack (will fail)');
-  console.log('  npm run zk:tamper    - Data tampering attack (will fail)\n');
+  console.log('  npm run auth:register  - Register new IoT device');
+  console.log('  npm run auth:send      - Send authenticated data');
+  console.log('  npm run auth:fake      - Fake device attack (will fail)');
+  console.log('  npm run auth:tamper    - Data tampering attack (will fail)\n');
   
   printDeviceRegistry();
 }

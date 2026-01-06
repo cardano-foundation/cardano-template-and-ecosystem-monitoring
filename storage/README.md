@@ -3,8 +3,7 @@
 A proof-of-existence system for 3-phase distribution transformer monitoring data, storing sensor data hashes on the Cardano blockchain.
 
 **Category**: Storage  
-**Holiday Challenge 2025**  
-**AI Assisted**: Developed with GitHub Copilot guidance
+**Holiday Challenge 2025**
 
 ## What It Does
 
@@ -39,8 +38,10 @@ cp .env.example .env
 ### Run
 
 ```bash
-npm run dev             # Complete demo (ZK + blockchain)
+npm run dev             # Complete demo (device auth + blockchain)
 ```
+
+> **Note**: The `data/` folder is auto-generated on first run. Device registration, sensor readings, and all necessary files are created automatically when you execute the demo.
 
 ## Demo Execution Guide
 
@@ -54,20 +55,20 @@ npm run dev
 ```
 
 This demonstrates the full flow:
-- STEP 1: Device registration check (ZK keypair)
+- STEP 1: Device registration check (Ed25519 keypair)
 - STEP 2: Sensor data collection & signing with private key
-- STEP 3: ZK proof verification using public key only
+- STEP 3: Digital signature verification using public key only
 - STEP 4: Status analysis & local storage
 - STEP 5: Blockchain submission
 
-### 2. ZK Attack Simulations
+### 2. Security Attack Simulations
 
 ```bash
 # Fake device trying to inject data (will be rejected)
-npm run zk:fake
+npm run auth:fake
 
 # Man-in-the-middle tampering attack (will be rejected)
-npm run zk:tamper
+npm run auth:tamper
 ```
 
 ### 3. Blockchain Verification
@@ -98,13 +99,13 @@ Device TRAFO-SINJAI-01 already registered
 
 STEP 2: IoT Device - Generate & Sign Data
 ------------------------------------------
-Creating ZK proof...
+Creating digital signature...
   Data hash: 4c9254dcf13654933cec86f8...
   Signature: bxU81vNKWvOExp1UYKmh9On7...
 
-STEP 3: System - Verify ZK Proof
---------------------------------
-[VERIFIED] ZK proof verified - data is from legitimate IoT device
+STEP 3: System - Verify Digital Signature
+-----------------------------------------
+[VERIFIED] Signature verified - data is from legitimate IoT device
 
 STEP 4: Analyze Status & Save
 -----------------------------
@@ -131,7 +132,7 @@ STEP 5: Submit to Cardano Blockchain
 ## Commands
 
 ```bash
-npm run dev                    # Complete demo (ZK auth + blockchain)
+npm run dev                    # Complete demo (device auth + blockchain)
 npm run batch                  # Submit all pending records to blockchain
 npm run add                    # Add random sensor reading
 npm run add:overload           # Add overload scenario
@@ -184,9 +185,9 @@ Validator actions: Lock (store), Update (owner only), Spend (owner only)
 
 The `--blockchain` flag fetches directly from chain, so even if local registry.json is modified, tampering is detected.
 
-## Zero-Knowledge Device Authentication
+## Cryptographic Device Authentication
 
-The system includes ZK authentication to ensure data comes from legitimate IoT devices without revealing the secret key.
+The system uses Ed25519 digital signatures to ensure data comes from legitimate IoT devices without exposing the private key (zero-exposure principle).
 
 ### How It Works
 
@@ -204,19 +205,19 @@ The system includes ZK authentication to ensure data comes from legitimate IoT d
    - Verifies signature matches data
    - Accepts only if valid
 
-### Why "Zero-Knowledge"?
+### Why "Zero-Exposure"?
 
-- System never knows the private key
-- Yet can verify data came from legitimate device
-- Device proves "I have the key" without revealing it
+- Private key never leaves the IoT device
+- System verifies using public key only
+- Device proves authenticity without exposing secrets
 
-### ZK Commands
+### Device Auth Commands
 
 ```bash
-npm run zk:register  # Register new IoT device (generate keypair)
-npm run zk:send      # Send authenticated data from device
-npm run zk:fake      # Demo: Fake device attack (will fail)
-npm run zk:tamper    # Demo: Data tampering attack (will fail)
+npm run auth:register  # Register new IoT device (generate keypair)
+npm run auth:send      # Send authenticated data from device
+npm run auth:fake      # Demo: Fake device attack (will fail)
+npm run auth:tamper    # Demo: Data tampering attack (will fail)
 ```
 
 ### Attack Scenarios
@@ -232,9 +233,9 @@ npm run zk:tamper    # Demo: Data tampering attack (will fail)
 
 ### Files
 
-- `lib/zk-auth.ts` - ZK authentication library
+- `lib/device-auth.ts` - Device authentication library
 - `lib/secure-storage.ts` - Encrypted key storage & anti-replay
-- `zk-demo.ts` - Demo script for all scenarios
+- `auth-demo.ts` - Demo script for all scenarios
 - `data/devices.json` - Registered device public keys
 - `data/device-keys.enc` - AES-256 encrypted private keys
 
@@ -244,7 +245,7 @@ npm run zk:tamper    # Demo: Data tampering attack (will fail)
 - **Owner-only operations**: Update/spend requires owner signature
 - **Immutable timestamps**: Cannot be altered after submission
 - **Off-chain privacy**: Sensitive data stays local
-- **ZK device authentication**: Ed25519 signatures verify device identity
+- **Device authentication**: Ed25519 signatures verify device identity
 - **Encrypted key storage**: Private keys protected with AES-256-GCM
 - **Anti-replay protection**: Nonce tracking prevents replay attacks
 - **Re-registration protection**: Auth token required for key rotation
@@ -255,6 +256,10 @@ npm run zk:tamper    # Demo: Data tampering attack (will fail)
 - [Aiken](https://aiken-lang.org)
 - [MeshJS](https://meshjs.dev)
 - [Blockfrost](https://blockfrost.io)
+
+## AI Assisted
+
+This project was developed with the assistance of AI coding tools.
 
 ## License
 

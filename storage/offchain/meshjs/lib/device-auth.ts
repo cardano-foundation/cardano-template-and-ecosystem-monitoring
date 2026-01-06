@@ -1,5 +1,5 @@
-// Zero-Knowledge Device Authentication
-// Ensures data comes from legitimate IoT device without revealing secret key
+// Cryptographic Device Authentication (Zero-Exposure)
+// Ensures data comes from legitimate IoT device without exposing the private key
 
 import { generateKeyPairSync, sign, verify, createHash, randomBytes } from 'crypto';
 import * as fs from 'fs';
@@ -27,8 +27,8 @@ export interface DeviceRegistration {
   description: string;
 }
 
-// ZK Proof attached to each sensor reading
-export interface ZKProof {
+// Digital signature proof attached to each sensor reading
+export interface SignatureProof {
   deviceId: string;
   dataHash: string;        // Hash of sensor data
   nonce: string;           // Random value to prevent replay attacks
@@ -36,10 +36,10 @@ export interface ZKProof {
   signature: string;       // Digital signature (proves device has private key)
 }
 
-// Sensor data with ZK proof attached
+// Sensor data with signature proof attached
 export interface AuthenticatedSensorData {
   data: any;
-  zkProof: ZKProof;
+  signatureProof: SignatureProof;
 }
 
 // Device registry
@@ -135,12 +135,12 @@ export function isDeviceRegistered(deviceId: string): boolean {
 // === IoT DEVICE SIDE ===
 // These functions run on the IoT device
 
-// Create ZK proof for sensor data (runs on IoT device)
-export function createZKProof(
+// Create digital signature proof for sensor data (runs on IoT device)
+export function createSignatureProof(
   deviceId: string,
   privateKey: string,
   sensorData: any
-): ZKProof {
+): SignatureProof {
   // Hash the sensor data
   const dataHash = createHash('sha256')
     .update(JSON.stringify(sensorData))
@@ -153,7 +153,7 @@ export function createZKProof(
   // Create message to sign: dataHash + nonce + timestamp
   const message = `${dataHash}:${nonce}:${timestamp}`;
   
-  // Sign with private key (ZK: proves we have the key without revealing it)
+  // Sign with private key (proves we have the key without exposing it)
   const signature = sign(
     null,
     Buffer.from(message),
@@ -175,15 +175,15 @@ export function createAuthenticatedData(
   privateKey: string,
   sensorData: any
 ): AuthenticatedSensorData {
-  const zkProof = createZKProof(deviceId, privateKey, sensorData);
-  return { data: sensorData, zkProof };
+  const signatureProof = createSignatureProof(deviceId, privateKey, sensorData);
+  return { data: sensorData, signatureProof };
 }
 
 // === SYSTEM/VALIDATOR SIDE ===
 // These functions run on the receiving system
 
-// Verify ZK proof (without knowing private key!)
-export function verifyZKProof(proof: ZKProof, sensorData: any): {
+// Verify digital signature (without knowing private key - zero exposure)
+export function verifySignatureProof(proof: SignatureProof, sensorData: any): {
   valid: boolean;
   reason: string;
 } {
@@ -218,7 +218,7 @@ export function verifyZKProof(proof: ZKProof, sensorData: any): {
   // Recreate the signed message
   const message = `${proof.dataHash}:${proof.nonce}:${proof.timestamp}`;
   
-  // Verify signature using public key (ZK: we don't know private key!)
+  // Verify signature using public key (zero-exposure: we don't know private key)
   try {
     const isValid = verify(
       null,
@@ -236,7 +236,7 @@ export function verifyZKProof(proof: ZKProof, sensorData: any): {
       markNonceUsed(proof.nonce, proof.deviceId, proof.timestamp);
     }
     
-    return { valid: true, reason: 'ZK proof verified - data is from legitimate IoT device' };
+    return { valid: true, reason: 'Signature verified - data is from legitimate IoT device' };
   } catch (error) {
     return { valid: false, reason: `Signature verification failed: ${error}` };
   }
@@ -247,7 +247,7 @@ export function verifyAuthenticatedData(authData: AuthenticatedSensorData): {
   valid: boolean;
   reason: string;
 } {
-  return verifyZKProof(authData.zkProof, authData.data);
+  return verifySignatureProof(authData.signatureProof, authData.data);
 }
 
 // Generate re-registration token (required before re-registering)
