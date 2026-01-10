@@ -65,10 +65,7 @@ deno run -A wallet.ts withdraw <wallet.json>
 ### 1. Create a payment intent
 
 ```sh
-deno run -A wallet-cli-test.ts create-intent wallet_0.json \
-  "addr_test1qqejx57pyvd8dsv6nf75fm6z2f6euhlt5mymkyaycw9wwykqyc88c2p7g4rfprsxm4u208zevvj7h0v5ymjsjkyyzjdse26srh" \
-  10000000 \
-  "credit-note"
+deno run -A wallet-cli-test.ts create-intent wallet_0.json "addr_test1qqejx57pyvd8dsv6nf75fm6z2f6euhlt5mymkyaycw9wwykqyc88c2p7g4rfprsxm4u208zevvj7h0v5ymjsjkyyzjdse26srh" 10000000 "credit-note"
 ```
 
 Output:
@@ -82,12 +79,13 @@ Intent address: addr_test1wpfq0vmuw9jjd0hsc4wpnuj8jle8m4j4wzt46r3l5g8nlgg9446xt
 
 ### 2. Fund the wallet
 
-```sh
-deno run -A wallet-cli-test.ts add-funds wallet_0.json 15000000
-```
 
 ```sh
 deno run -A wallet-cli-test.ts add-funds wallet_0.json 20000000
+```
+
+```sh
+deno run -A wallet-cli-test.ts add-funds wallet_0.json 30000000
 ```
 
 Output:
@@ -113,7 +111,7 @@ Output:
 
 ---
 
-### 4. Withdraw all funds
+### 4. Withdraw all funds on script
 
 ```sh
 deno run -A wallet-cli-test.ts withdraw wallet_0.json

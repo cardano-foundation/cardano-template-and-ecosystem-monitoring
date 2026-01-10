@@ -252,7 +252,7 @@ export async function executeIntent(walletFile: string) {
         throw new Error("Missing funds or intent UTxO");
     }
 
-    const fundsUtxo = fundsUtxos[0];
+    const fundsUtxo = fundsUtxos[0]; // For simplicity assuming that one utxo has sufficient funds to clear the payment intent
     if (!fundsUtxo.output.plutusData) {
         throw new Error("Funds UTxO inline datum missing");
     }
