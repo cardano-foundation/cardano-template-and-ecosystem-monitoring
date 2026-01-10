@@ -15,8 +15,21 @@ import {
   getScriptAddress,
   decodeDatum,
   scriptCbor,
-  isPositiveNumber,
 } from './lib/utils.ts';
+
+// --- Store ---
+const STORE_FILE = 'store.json';
+async function saveStore(data: any) {
+  await Deno.writeTextFile(STORE_FILE, JSON.stringify(data, null, 2));
+}
+async function loadStore() {
+  try {
+    const data = await Deno.readTextFile(STORE_FILE);
+    return JSON.parse(data);
+  } catch {
+    return {};
+  }
+}
 
 // --- Configuration ---
 const blockchainProvider = koiosProvider;
@@ -38,7 +51,8 @@ async function initSubscription(feeAmount: string) {
 
   // SubscriptionDatum: merchant, subscriber, fee, last_claim, period
   // We use current time for last_claim initially to start the period.
-  const now = Date.now();
+  // Backdate by 6 hours to accommodate potential node sync lag (ensure period is passed relative to node time)
+  const now = Date.now() - 6 * 60 * 60 * 1000;
 
   const datum = mConStr0([
     merPkh,
@@ -63,6 +77,7 @@ async function initSubscription(feeAmount: string) {
   const signedTx = await subscriber.signTx(tx);
   const txHash = await subscriber.submitTx(signedTx);
   console.log(`Subscription started. TX: ${txHash}`);
+  await saveStore({ lastTxHash: txHash });
 }
 
 /**
@@ -82,6 +97,17 @@ async function collectFee(txHash: string) {
 
   // Use system time for logic checks
   const currentTime = Date.now();
+
+  const tipRes = await fetch('https://preprod.koios.rest/api/v1/tip');
+  const tip = await tipRes.json();
+  // Koios tip might be ahead of the validation node if lagging.
+  // Use a conservative slot (e.g., from 6 hours ago) to ensure invalidBefore < NodeCurrentSlot
+  // 1 second = 1 slot. 6 hours = 21600 seconds.
+  const currentSlot = Number(tip[0].abs_slot) - 21600;
+  console.log(
+    'Using conservatively backdated Slot for construction:',
+    currentSlot
+  );
 
   if (BigInt(currentTime) < datum.last_claim + datum.period) {
     console.warn(
@@ -136,13 +162,14 @@ async function collectFee(txHash: string) {
       collateral.output.address
     )
     .selectUtxosFrom(await merchant.getUtxos())
-    // .invalidBefore(currentSlot)
-    // .invalidHereafter(currentSlot + 300) // 5 minutes validity
+    .invalidBefore(currentSlot - 60)
+    .invalidHereafter(currentSlot + 300) // 5 minutes validity
     .complete();
 
   const signedTx = await merchant.signTx(tx);
   const txHashRes = await merchant.submitTx(signedTx);
   console.log(`Fee collected. TX: ${txHashRes}`);
+  await saveStore({ lastTxHash: txHashRes });
 }
 
 /**
@@ -271,22 +298,49 @@ if (args.length > 0) {
       console.log('Usage: deno run -A main.ts init <fee_lovelace>');
     }
   } else if (cmd === 'collect') {
-    if (args.length > 1) {
-      await collectFee(args[1]);
+    let txHash = args.length > 1 ? args[1] : undefined;
+    if (!txHash) {
+      const store = await loadStore();
+      if (store.lastTxHash) {
+        txHash = store.lastTxHash;
+        console.log(`Using stored TX Hash: ${txHash}`);
+      }
+    }
+    if (txHash) {
+      await collectFee(txHash);
     } else {
       console.log('Usage: deno run -A main.ts collect <tx_hash>');
+      console.log('Or ensure a valid TX hash is in store.json');
     }
   } else if (cmd === 'cancel') {
-    if (args.length > 1) {
-      await cancelSubscription(args[1]);
+    let txHash = args.length > 1 ? args[1] : undefined;
+    if (!txHash) {
+      const store = await loadStore();
+      if (store.lastTxHash) {
+        txHash = store.lastTxHash;
+        console.log(`Using stored TX Hash: ${txHash}`);
+      }
+    }
+    if (txHash) {
+      await cancelSubscription(txHash);
     } else {
       console.log('Usage: deno run -A main.ts cancel <tx_hash>');
+      console.log('Or ensure a valid TX hash is in store.json');
     }
   } else if (cmd === 'close') {
-    if (args.length > 1) {
-      await closeSubscription(args[1]);
+    let txHash = args.length > 1 ? args[1] : undefined;
+    if (!txHash) {
+      const store = await loadStore();
+      if (store.lastTxHash) {
+        txHash = store.lastTxHash;
+        console.log(`Using stored TX Hash: ${txHash}`);
+      }
+    }
+    if (txHash) {
+      await closeSubscription(txHash);
     } else {
       console.log('Usage: deno run -A main.ts close <tx_hash>');
+      console.log('Or ensure a valid TX hash is in store.json');
     }
   } else if (cmd === 'prepare') {
     const count = args.length > 1 ? parseInt(args[1]) : 2;

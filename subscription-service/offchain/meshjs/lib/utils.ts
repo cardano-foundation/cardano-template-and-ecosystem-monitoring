@@ -5,7 +5,12 @@ import blueprint from '../../../onchain/aiken/plutus.json' with { type: 'json' }
 export const koiosProvider = new KoiosProvider('preprod');
 
 // Compiled Script from subscription.ak (plutus.json)
-export const scriptCbor = blueprint.validators[0].compiledCode;
+const scriptCborRaw = blueprint.validators[0].compiledCode;
+
+// MeshSDK V3 workaround: Double wrap the script
+// scriptCborRaw is Single Wrapped (Bytes 1430 -> 1433 total).
+// Wrap again with 59 0599 (header for 1433 bytes).
+export const scriptCbor = "590599" + scriptCborRaw;
 
 const script = {
   code: scriptCbor,
@@ -18,7 +23,7 @@ export const getScriptAddress = () => {
 
 export function decodeDatum(datumCbor: string) {
   const data: any = deserializeDatum(datumCbor);
-  if (data.constructor !== 0) throw new Error("Invalid datum constructor");
+  if (Number(data.constructor) !== 0) throw new Error("Invalid datum constructor");
   const fields = data.fields;
   return {
     merchant: fields[0].bytes,   // PaymentKeyHash
