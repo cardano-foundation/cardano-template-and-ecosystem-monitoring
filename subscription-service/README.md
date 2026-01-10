@@ -132,12 +132,9 @@ service_identifier: Optional service hash
 subscription-service/
 ├── onchain/
 │   └── aiken/          # Smart contract validator
-├── offchain/
-│   ├── meshjs/         # JavaScript/TypeScript wallet integration
-│   ├── nextjs/         # Frontend application example
-│   └── python/         # Alternative backend integration
-└── docs/
-    └── integration.md  # Service provider access patterns
+└── offchain/
+    ├── meshjs/         # JavaScript/TypeScript wallet integration
+    └── nextjs/         # Frontend application example
 ```
 
 ### Implementation Flexibility
