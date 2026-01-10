@@ -1,0 +1,11 @@
+editable-nft\offchain\meshjs> deno run -A editable-nft-cli-test.ts mint wallet_0.json "firefly" "crafted-by-alice"
+ownerPkh:  72b46a9927fd32da5c2f11365b6f20f9af930e63974e4f8935064215
+📦 NFT minted: Tx Id: 14e6306e028e1465fdba101528c493ec118331848c26b88d2c89b57bd7e469ea
+policyId : 2868ca31fcd7549f568083411b68f15e9668e09a723a25d36f75ab24
+assetName: 66697265666c79
+
+editable-nft\offchain\meshjs> deno run -A editable-nft-cli-test.ts update wallet_0.json 2868ca31fcd7549f568083411b68f15e9668e09a723a25d36f75ab24 "firefly" 332353c1231a76c19a9a7d44ef4252759e5feba6c9bb13a4c38ae712 "level-boost-2"
+✏️ NFT state updated: Tx Id: acefcbd7044dd256a8c1c9b82305cf7fc3bf034a01f8e7cd7b70012bee8e12f1
+
+editable-nft\offchain\meshjs> deno run -A editable-nft-cli-test.ts seal wallet_1.json 2868ca31fcd7549f568083411b68f15e9668e09a723a25d36f75ab24 "firefly" "level-boost-2"
+🔒 NFT sealed: Tx Id: 014ea42b96d02ea328405f3f637efe90e96db9e7c25305d5890f95b0a8f9e10c
