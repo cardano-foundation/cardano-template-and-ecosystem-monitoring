@@ -1,0 +1,7 @@
+{
+  "nodeModulesDir": "auto",
+  "imports": {
+    "@evolution-sdk/lucid": "npm:@evolution-sdk/lucid@2.0.1"
+  },
+  "allowScripts": ["npm:cbor-extract", "npm:libsodium-wrappers-sumo"]
+}
