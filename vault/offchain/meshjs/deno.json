@@ -1,8 +1,18 @@
 {
   "tasks": {
-    "dev": "deno run --watch main.ts"
+    "dev": "deno run --watch vault.ts",
+    "init": "deno run -A vault.ts init",
+    "lock": "deno run -A vault.ts lock",
+    "withdraw": "deno run -A vault.ts withdraw",
+    "finalize": "deno run -A vault.ts finalize",
+    "cancel": "deno run -A vault.ts cancel",
+    "prepare": "deno run -A vault.ts prepare"
   },
   "imports": {
+    "@meshsdk/common": "npm:@meshsdk/common@^1.9.0-beta.94",
+    "@meshsdk/core": "npm:@meshsdk/core@^1.9.0-beta.94",
+    "@meshsdk/core-cst": "npm:@meshsdk/core-cst@^1.9.0-beta.94",
     "@std/assert": "jsr:@std/assert@1"
-  }
+  },
+  "nodeModulesDir": "auto"
 }
