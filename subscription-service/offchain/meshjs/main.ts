@@ -76,7 +76,9 @@ async function initSubscription(feeAmount: string) {
 
   const signedTx = await subscriber.signTx(tx);
   const txHash = await subscriber.submitTx(signedTx);
-  console.log(`Subscription started. TX: ${txHash}`);
+  console.log(
+    `Subscription started. TX: https://preprod.cardanoscan.io/transaction/${txHash}`
+  );
   await saveStore({ lastTxHash: txHash });
 }
 
@@ -95,32 +97,45 @@ async function collectFee(txHash: string) {
 
   const datum = decodeDatum(utxo.output.plutusData);
 
-  // Use system time for logic checks
-  const currentTime = Date.now();
-
   const tipRes = await fetch('https://preprod.koios.rest/api/v1/tip');
   const tip = await tipRes.json();
-  // Koios tip might be ahead of the validation node if lagging.
-  // Use a conservative slot (e.g., from 6 hours ago) to ensure invalidBefore < NodeCurrentSlot
-  // 1 second = 1 slot. 6 hours = 21600 seconds.
-  const currentSlot = Number(tip[0].abs_slot) - 21600;
-  console.log(
-    'Using conservatively backdated Slot for construction:',
-    currentSlot
-  );
+  const currentSlot = Number(tip[0].abs_slot);
+  const blockTime = Number(tip[0].block_time); // Unix seconds
+  console.log('Current Slot (Koios Tip):', currentSlot);
 
-  if (BigInt(currentTime) < datum.last_claim + datum.period) {
+  // Calculate System Start (Approx) - Preprod uses 1s slots
+  const systemStart = blockTime - currentSlot;
+
+  // Strategy for Lagging vs Synced Nodes:
+  // Create a wide validity window that satisfies the Contract AND both Node states.
+  // 1. Contract requires: invalidBefore >= last_claim + 60s.
+  //    (We assume last_claim was backdated by 6h in INIT).
+  // 2. Lagging Node (T-4h) requires: invalidBefore <= T-4h.
+  // 3. Synced Node (T) requires: invalidHereafter > T.
+
+  // Set invalidBefore to ~6h ago (plus small buffer for period).
+  const startSlot = currentSlot - 21600 + 300; // 6h ago + 5 mins
+  // Set invalidHereafter to future.
+  const endSlot = currentSlot + 600; // 10 mins future
+
+  // Calculate Time for startSlot to synchronize with Datum
+  const startSlotTime = (systemStart + startSlot) * 1000;
+
+  console.log(`Validity Range: [${startSlot}, ${endSlot}]`);
+  console.log(`Start Slot Time (Calculated): ${startSlotTime}`);
+
+  if (BigInt(startSlotTime) < datum.last_claim + datum.period) {
     console.warn(
-      'Warning: Period might not have passed based on latest block time.'
+      'Warning: Period might not have passed based on calculated slot time.'
     );
   }
 
-  // New datum: update last_claim to the lower bound of validity range (currentTime)
+  // New datum: update last_claim to the lower bound of validity range (startSlotTime)
   const newDatum = mConStr0([
     datum.merchant,
     datum.subscriber,
     datum.fee,
-    BigInt(currentTime),
+    BigInt(startSlotTime),
     datum.period,
   ]);
 
@@ -162,13 +177,15 @@ async function collectFee(txHash: string) {
       collateral.output.address
     )
     .selectUtxosFrom(await merchant.getUtxos())
-    .invalidBefore(currentSlot - 60)
-    .invalidHereafter(currentSlot + 300) // 5 minutes validity
+    .invalidBefore(startSlot)
+    .invalidHereafter(endSlot)
     .complete();
 
   const signedTx = await merchant.signTx(tx);
   const txHashRes = await merchant.submitTx(signedTx);
-  console.log(`Fee collected. TX: ${txHashRes}`);
+  console.log(
+    `Fee collected. TX: https://preprod.cardanoscan.io/transaction/${txHashRes}`
+  );
   await saveStore({ lastTxHash: txHashRes });
 }
 
@@ -217,7 +234,9 @@ async function cancelSubscription(txHash: string) {
 
   const signedTx = await subscriber.signTx(tx);
   const txHashRes = await subscriber.submitTx(signedTx);
-  console.log(`Subscription cancelled. TX: ${txHashRes}`);
+  console.log(
+    `Subscription cancelled. TX: https://preprod.cardanoscan.io/transaction/${txHashRes}`
+  );
 }
 
 /**
@@ -279,7 +298,9 @@ async function closeSubscription(txHash: string) {
 
   const signedTx = await merchant.signTx(tx);
   const txHashRes = await merchant.submitTx(signedTx);
-  console.log(`Subscription closed by merchant. TX: ${txHashRes}`);
+  console.log(
+    `Subscription closed by merchant. TX: https://preprod.cardanoscan.io/transaction/${txHashRes}`
+  );
 }
 
 // --- CLI Runner ---
@@ -303,7 +324,9 @@ if (args.length > 0) {
       const store = await loadStore();
       if (store.lastTxHash) {
         txHash = store.lastTxHash;
-        console.log(`Using stored TX Hash: ${txHash}`);
+        console.log(
+          `Using stored TX Hash: https://preprod.cardanoscan.io/transaction/${txHash}`
+        );
       }
     }
     if (txHash) {
@@ -318,7 +341,9 @@ if (args.length > 0) {
       const store = await loadStore();
       if (store.lastTxHash) {
         txHash = store.lastTxHash;
-        console.log(`Using stored TX Hash: ${txHash}`);
+        console.log(
+          `Using stored TX Hash: https://preprod.cardanoscan.io/transaction/${txHash}`
+        );
       }
     }
     if (txHash) {
@@ -333,7 +358,9 @@ if (args.length > 0) {
       const store = await loadStore();
       if (store.lastTxHash) {
         txHash = store.lastTxHash;
-        console.log(`Using stored TX Hash: ${txHash}`);
+        console.log(
+          `Using stored TX Hash: https://preprod.cardanoscan.io/transaction/${txHash}`
+        );
       }
     }
     if (txHash) {

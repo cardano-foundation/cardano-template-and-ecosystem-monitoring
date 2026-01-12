@@ -1,6 +1,7 @@
 # Ignore wallet seed files and other secrets
 wallet_*.txt
 *_store.json
+store.json
 .env
 .env.local
 *.key
