@@ -9,8 +9,10 @@ import {
   toUnit,
   fromText,
   getAddressDetails,
+  credentialToAddress,
   Data,
   LucidEvolution,
+  Constr,
 } from '@evolution-sdk/lucid';
 
 // Blueprint is loaded lazily inside setup() to allow running commands
@@ -109,7 +111,7 @@ async function initAuction(startingBidLovelace: string) {
       seller: sellerPc?.hash || '',
       highest_bidder: '',
       highest_bid: BigInt(startingBidLovelace),
-      expiration: BigInt(Date.now() + 3 * 24 * 60 * 60 * 1000), // +3 days
+      expiration: BigInt(Date.now() + 1000 * 60 * 16), // +16 minutes (matches MeshJS test)
       asset_policy: policy,
       asset_name: fromText(assetNameText),
     },
@@ -160,9 +162,14 @@ async function bidAuction(auctionTxId: string, newBidLovelace: string) {
 
   let utxos: any[] = [];
   try {
-    utxos = await lucid.utxosByOutRef([
-      { txHash: auctionTxId, outputIndex: 0 },
-    ]);
+    // utxos = await lucid.utxosByOutRef([
+    //   { txHash: auctionTxId, outputIndex: 0 },
+    // ]);
+    // Fallback to utxosAt to avoid Koios schema parsing issues with utxosByOutRef
+    const scriptUtxos = await lucid.utxosAt(scriptAddress);
+    utxos = scriptUtxos.filter(
+      (u) => u.txHash === auctionTxId && u.outputIndex === 0
+    );
   } catch (error) {
     console.error(
       `Error fetching UTXOs for transaction ID ${auctionTxId}:`,
@@ -201,6 +208,25 @@ async function bidAuction(auctionTxId: string, newBidLovelace: string) {
 
   const datum = Data.to(auction, AuctionDatum);
 
+  const previousBidder = utxo.datum
+    ? (Data.from(utxo.datum, AuctionDatum) as any).highest_bidder
+    : '';
+  const sellerHash = (Data.from(utxo.datum!, AuctionDatum) as any).seller;
+
+  let refundAddress: string;
+  if (previousBidder && previousBidder.length > 0) {
+    refundAddress = credentialToAddress('Preprod', {
+      type: 'Key',
+      hash: previousBidder,
+    });
+  } else {
+    // If no previous bidder, refund the seller who put up the initial liquidity
+    refundAddress = credentialToAddress('Preprod', {
+      type: 'Key',
+      hash: sellerHash,
+    });
+  }
+
   const tx = await lucid
     .newTx()
     .attach.SpendingValidator(validator)
@@ -213,6 +239,7 @@ async function bidAuction(auctionTxId: string, newBidLovelace: string) {
         [unit]: 1n,
       }
     )
+    .pay.ToAddress(refundAddress, { lovelace: currentBid }) // Refund previous bidder or seller
     .addSigner(bidderAddress)
     .validFrom(Date.now() - 60_000)
     .validTo(Date.now() + 600_000);
@@ -226,6 +253,99 @@ async function bidAuction(auctionTxId: string, newBidLovelace: string) {
     );
   } catch (error) {
     console.error('Error while submitting bid transaction:', error);
+    Deno.exit(1);
+  }
+}
+
+async function closeAuction(auctionTxId: string) {
+  console.log(`Closing auction UTXO from tx: ${auctionTxId}`);
+  const { lucid, scriptAddress, validator } = await setup();
+  selectWallet(lucid, 0); // Seller closes? Anyone can close usually if expired.
+  const address = await lucid.wallet().address();
+
+  let utxos: any[] = [];
+  try {
+    // utxos = await lucid.utxosByOutRef([
+    //   { txHash: auctionTxId, outputIndex: 0 },
+    // ]);
+    const scriptUtxos = await lucid.utxosAt(scriptAddress);
+    utxos = scriptUtxos.filter(
+      (u) => u.txHash === auctionTxId && u.outputIndex === 0
+    );
+  } catch (error) {
+    console.error(`Error fetching UTXOs:`, error);
+    return;
+  }
+
+  if (utxos.length === 0) {
+    console.error(`No UTXOs found for transaction ID: ${auctionTxId}`);
+    return;
+  }
+
+  const utxo = utxos[0];
+  if (!utxo.datum) {
+    console.error(`UTXO ${auctionTxId} has no inline datum.`);
+    return;
+  }
+
+  const auction = Data.from(utxo.datum, AuctionDatum) as any;
+  const expiration = Number(auction.expiration);
+  const now = Date.now();
+
+  if (now < expiration) {
+    console.error(
+      `Auction has not expired yet. Expiration: ${new Date(
+        expiration
+      ).toLocaleString()}, Now: ${new Date(now).toLocaleString()}`
+    );
+    return;
+  }
+
+  const policy = validatorToScriptHash(validator);
+  const unit = toUnit(policy, auction.asset_name);
+  const highestBid = BigInt(auction.highest_bid);
+  const highestBidder = auction.highest_bidder;
+  const seller = auction.seller;
+
+  const sellerAddress = credentialToAddress('Preprod', {
+    type: 'Key',
+    hash: seller,
+  });
+
+  const tx = lucid
+    .newTx()
+    .attach.SpendingValidator(validator)
+    .collectFrom([utxo], Data.to(new Constr(2, []))); // END = Index 2
+
+  if (highestBidder && highestBidder.length > 0) {
+    const winnerAddress = credentialToAddress('Preprod', {
+      type: 'Key',
+      hash: highestBidder,
+    });
+    console.log(`Winner identified: ${winnerAddress}`);
+    console.log(`Sending NFT to Winner and ${highestBid} ADA to Seller.`);
+
+    tx.pay
+      .ToAddress(winnerAddress, { [unit]: 1n })
+      .pay.ToAddress(sellerAddress, { lovelace: highestBid });
+  } else {
+    console.log(`No bids. Returning NFT to Seller.`);
+    tx.pay.ToAddress(sellerAddress, { [unit]: 1n });
+  }
+
+  tx.addSigner(address)
+    .validFrom(Date.now() - 60_000)
+    .validTo(Date.now() + 600_000);
+
+  try {
+    const unsignedTx = await tx.complete();
+    const signedTx = await unsignedTx.sign.withWallet();
+    const txHash = await (await signedTx.complete()).submit();
+    console.log(
+      `Auction closed successfully.\nSee: https://preprod.cexplorer.io/tx/${txHash}`
+    );
+  } catch (error) {
+    console.error('Error while submitting close transaction:', error);
     Deno.exit(1);
   }
 }
@@ -276,9 +396,17 @@ if (Deno.args.length > 0) {
         'Usage: deno run -A auction.ts bid <TX_ID> <NEW_BID_LOVELACE>'
       );
     }
+  } else if (Deno.args[0] === 'close') {
+    if (Deno.args.length > 1 && isTxId(Deno.args[1])) {
+      await closeAuction(Deno.args[1]);
+    } else {
+      console.log('Usage: deno run -A auction.ts close <TX_ID>');
+    }
   } else {
-    console.log('Invalid argument. Allowed arguments: prepare, init, bid.');
+    console.log(
+      'Invalid argument. Allowed arguments: prepare, init, bid, close.'
+    );
   }
 } else {
-  console.log('Expected an argument. Allowed: prepare, init, bid.');
+  console.log('Expected an argument. Allowed: prepare, init, bid, close.');
 }

@@ -177,9 +177,12 @@ export class AuctionContract {
     console.log(`Submitting transaction...`);
     const txHash = await this.wallet.submitTx(signedTx);
     
-    console.log(`Auction initialized.`);
-    console.log(`Transaction ID: ${txHash}`);
-    console.log(`Script Address: ${this.scriptAddress}`);
+    console.log(
+      `Auction initialized at ${this.scriptAddress} with starting bid ${startingBid} lovelace.\nSee: https://preprod.cexplorer.io/tx/${txHash}`
+    );
+    console.log(
+      `To bid: deno run -A auction.ts bid ${txHash} <newBidLovelace>`
+    );
     return txHash;
   }
 
@@ -254,9 +257,8 @@ export class AuctionContract {
         walletUtxos = walletUtxos.filter(u => u.input.txHash !== collateral.input.txHash || u.input.outputIndex !== collateral.input.outputIndex);
     }
     
-    console.log(`Placing bid: ${newBidAmount} ADA`);
-    //console.log(`Wallet UTXOs Available (filtered): ${walletUtxos.length}`);
-    //walletUtxos.forEach(u => console.log(`W:`, JSON.stringify(u.output.amount)));
+    console.log(`Placing bid on auction UTXO from tx: ${auctionTxHash}`);
+    console.log(`Using bidder address: ${address}`);
 
     txBuilder
       .selectUtxosFrom(walletUtxos)
@@ -303,10 +305,11 @@ export class AuctionContract {
     const unsignedTx = await txBuilder.complete();
     const signedTx = await this.wallet.signTx(unsignedTx);
     
-    console.log(`Submitting Bid Tx...`);
+    // console.log(`Submitting Bid Tx...`);
     const txHash = await this.wallet.submitTx(signedTx);
-    console.log(`Bid Placed.`);
-    console.log(`Transaction ID: ${txHash}`);
+    console.log(
+      `Successfully placed bid of ${newBidAmount} lovelace.\nSee: https://preprod.cexplorer.io/tx/${txHash}`
+    );
     return txHash;
   }
 
@@ -331,13 +334,13 @@ export class AuctionContract {
     const highestBid = Number(fields[2].int);
     // @ts-ignore type check
     const expiration = Number(fields[3].int);
-    console.log(`Closing Auction...`);
+    console.log(`Closing auction UTXO from tx: ${auctionTxHash}`);
 
     const currentSlot = await this.getCurrentSlot();
     const expirationSlot = getSlotFromTime(expiration);
     
     if (currentSlot < expirationSlot) {
-        throw new Error(`Auction not yet expired. Current Slot: ${currentSlot}, Expiration Slot: ${expirationSlot}`);
+        throw new Error(`Auction has not expired yet. Expiration: ${new Date(expiration).toLocaleString()}`);
     }
 
     const txBuilder = new MeshTxBuilder({ fetcher: this.provider, submitter: this.provider, evaluator: this.provider });
@@ -408,10 +411,10 @@ export class AuctionContract {
     const unsignedTx = await txBuilder.complete();
     const signedTx = await this.wallet.signTx(unsignedTx);
     
-    console.log(`Submitting Close Tx...`);
     const txHash = await this.wallet.submitTx(signedTx);
-    console.log(`Auction Closed.`);
-    console.log(`Transaction ID: ${txHash}`);
+    console.log(
+      `Auction closed successfully.\nSee: https://preprod.cexplorer.io/tx/${txHash}`
+    );
     return txHash;
   }
 }

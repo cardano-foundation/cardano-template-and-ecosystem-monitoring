@@ -169,6 +169,20 @@ validator auction {
 
         let has_auction_asset_out = list.has(list.map(policies(out_value), fn(policy) { policy }), asset_policy)
 
+        let check_refund =
+          if highest_bidder == "" {
+            True
+          } else {
+            list.any(
+              outputs,
+              fn(output) {
+                output.address == from_verification_key(highest_bidder) && lovelace_of(
+                  output.value,
+                ) == highest_bid
+              },
+            )
+          }
+
         and {
           // Auction not expired.
           valid_before(validity_range, expiration),
@@ -183,6 +197,8 @@ validator auction {
           // Auctioned asset stays at script.
           has_auction_asset_in,
           has_auction_asset_out,
+          // Previous bidder is refunded.
+          check_refund,
           // Datum expiration unchanged.
           new_datum.expiration == expiration,
           // Value at script non-decreasing in lovelace.
@@ -198,41 +214,75 @@ validator auction {
 
       END -> {
         // Precompute helper lists outside `and {}`.
-        let outputs_with_asset = list.filter(outputs, fn(o) { list.has(list.map(policies(o.value), fn(policy) { policy }), asset_policy) })
-
-        let seller_outputs = list.filter(outputs, fn(o) { o.address == from_verification_key(seller) })
+        let outputs_with_asset =
+          list.filter(
+            outputs,
+            fn(o) {
+              list.has(
+                list.map(policies(o.value), fn(policy) { policy }),
+                asset_policy,
+              )
+            },
+          )
 
         let addresses_mapped = list.map(outputs, fn(o) { o.address })
 
         expect Some(item_out) = list.head(outputs_with_asset)
-        expect Some(seller_out) = list.head(seller_outputs)
 
         let has_continuing_auction = list.has(addresses_mapped, script_address)
 
         let check_no_continuing = !has_continuing_auction
         let check_asset_count = list.length(outputs_with_asset) == 1
-        let check_seller_count = list.length(seller_outputs) == 1
-        let check_item_to_winner =
-          item_out.address == from_verification_key(highest_bidder)
-        let check_seller_no_datum = seller_out.datum == NoDatum
-        let check_has_bidder = highest_bidder != ""
 
-        and {
-          // 1. Auction expired.
-          valid_after(validity_range, expiration),
-          // 2. Exactly two outputs (winner + seller).
-          list.length(outputs) == 2,
-          // 3. No continuing auction at script address.
-          check_no_continuing,
-          // 4. Exactly one asset-carrying output and one seller output.
-          check_asset_count,
-          check_seller_count,
-          // 5. Item goes to highest bidder.
-          check_item_to_winner,
-          // 6. Seller output has no datum.
-          check_seller_no_datum,
-          // 7. Someone actually bid.
-          check_has_bidder,
+        if highest_bidder == "" {
+          // No bids: item goes back to seller
+          let check_item_to_seller =
+            item_out.address == from_verification_key(seller)
+
+          and {
+            // 1. Auction expired.
+            valid_after(validity_range, expiration),
+            // 2. Exactly one output (item back to seller).
+            // (We relax this to allow change, but simple expectation is safer)
+            // or just ensure item goes to seller.
+            // Let's stick to strict output check for now to match style?
+            // "list.length(outputs) == 1" might be too strict if there's change,
+            // but usually a close tx is constructed carefully.
+            // Let's loosen output count but ensure item destination.
+            check_item_to_seller,
+            check_no_continuing,
+            check_asset_count,
+            // Seller must sign to reclaim if no bids (optional but good practice)
+            key_signed(extra_signatories, seller),
+          }
+        } else {
+          // Winner exists
+          let seller_outputs =
+            list.filter(
+              outputs,
+              fn(o) { o.address == from_verification_key(seller) },
+            )
+          expect Some(seller_out) = list.head(seller_outputs)
+          let check_seller_count = list.length(seller_outputs) >= 1
+
+          let check_item_to_winner =
+            item_out.address == from_verification_key(highest_bidder)
+          let check_seller_payment =
+            lovelace_of(seller_out.value) >= highest_bid
+
+          and {
+            // 1. Auction expired.
+            valid_after(validity_range, expiration),
+            // 2. No continuing auction at script address.
+            check_no_continuing,
+            // 4. Exactly one asset-carrying output.
+            check_asset_count,
+            // 5. Item goes to highest bidder.
+            check_item_to_winner,
+            // 6. Seller receives highest bid.
+            check_seller_count,
+            check_seller_payment,
+          }
         }
       }
     }
