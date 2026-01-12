@@ -6,7 +6,7 @@ This directory contains the offchain code for interacting with the Vault Aiken c
 
 - **Deno**: Install Deno 1.40+.
 - **Cardano Node**: Access to Preprod (using Koios provider by default).
-- **Wallet**: A `wallet.txt` (mnemonic) file is expected in this directory. If not present, the app may fall back to generating one or failing, but explicit file naming prevents accidental usage of wrong wallets.
+- **Wallet**: The app uses `wallet_0.txt` by default. You can generate it using the `prepare` command.
 
 ## Installation
 
