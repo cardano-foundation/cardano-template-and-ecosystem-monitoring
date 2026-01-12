@@ -33,6 +33,23 @@ deno task cancel <TX>       # Cancel (Reset)
 deno run -A --unstable-detect-cjs vault.ts <COMMAND> [ARGS]
 ```
 
+### Technical Details & Time Handling
+
+To ensure robust operation across distributed systems, this implementation includes specific time synchronization logic:
+
+1.  **Network Time Synchronization**:
+    Instead of relying on the local system clock (which may drift), the code fetches the latest block time from the Provider (Koios/Blockfrost) using `getNetworkTime()`. This ensures that validity intervals constructed in transactions align precisely with the blockchain's view of time.
+
+2.  **Automatic Waiting**:
+    The contract enforces a 60-second wait period (`WAIT_TIME`) between `withdraw` and `finalize`.
+
+    - If you run `finalize` too early, the script detects this by comparing the current network time with the stored `lockTime + WAIT_TIME`.
+    - Instead of failing, it calculates the remaining duration and uses `setTimeout` to pause execution until the exact moment the funds become claimable.
+
+3.  **Validity Intervals**:
+    - **Withdraw**: Sets a validity range of `[now, now + 2min]` and updates the UTxO datum with `now`.
+    - **Finalize**: Sets a validity range of `[validAfter + 1s, now + 3min]`. The `validFrom` is strictly checked to be greater than the wait time expiry.
+
 ### Commands Detail
 
 1.  **Initialize**
@@ -83,7 +100,8 @@ deno run -A --unstable-detect-cjs vault.ts <COMMAND> [ARGS]
     Claims the funds from a UTxO that has completed its wait time.
 
     **Important**:  
-    This command verifies that the network time is valid. The contract owner must wait for the specified period (default 60s) after `withdraw` before this command will succeed. If run too early, the CLI will output the required wait time.
+    This command verifies that the network time is valid. The contract owner must wait for the specified period (default 60s) after `withdraw` before this command will succeed.
+    **Auto-Wait**: If run too early, the CLI will automatically wait (sleep) for the remaining time before submitting the transaction.
 
     ```bash
     deno task finalize <TX_HASH>
