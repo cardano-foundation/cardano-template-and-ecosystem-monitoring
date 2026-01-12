@@ -122,8 +122,8 @@ export class AuctionContract {
     const expirationSlot = currentSlot + 1000;
     const expirationTime = getTimeFromSlot(expirationSlot);
     
-    console.log(`\n🎰 Starting a New Auction!`);
-    console.log(`🕒 Closing time: ${new Date(expirationTime).toLocaleString()} (Slot: ${expirationSlot})`);
+    console.log(`Starting new auction...`);
+    console.log(`Closing time: ${new Date(expirationTime).toLocaleString()} (Slot: ${expirationSlot})`);
 
     // Construct Datum
     // AuctionDatum { seller, highest_bidder, highest_bid, expiration, asset_policy, asset_name }
@@ -174,12 +174,12 @@ export class AuctionContract {
     //console.log("Unsigned Tx:", JSON.stringify(unsignedTx, null, 2));
     const signedTx = await this.wallet.signTx(unsignedTx);
     
-    console.log(`🚀 Sending transaction to the blockchain...`);
+    console.log(`Submitting transaction...`);
     const txHash = await this.wallet.submitTx(signedTx);
     
-    console.log(`✨ Auction Initialized!`);
-    console.log(`📜 Transaction ID: ${txHash}`);
-    console.log(`🏠 Auction House Address: ${this.scriptAddress}\n`);
+    console.log(`Auction initialized.`);
+    console.log(`Transaction ID: ${txHash}`);
+    console.log(`Script Address: ${this.scriptAddress}`);
     return txHash;
   }
 
@@ -194,11 +194,11 @@ export class AuctionContract {
     const scriptUtxo = utxos.find(u => u.input.txHash === auctionTxHash && u.input.outputIndex === 0);
     
     if (!scriptUtxo) {
-        throw new Error("❌ Auction not found! Are you sure the Transction ID is correct and the auction hasn't ended?");
+        throw new Error("Auction UTXO not found.");
     }
 
     if (!scriptUtxo.output.plutusData) {
-        throw new Error("❌ Fatal: The auction data seems corrupted (missing datum).");
+        throw new Error("No datum found on auction UTXO.");
     }
 
     const oldDatum = deserializeDatum(scriptUtxo.output.plutusData);
@@ -227,7 +227,7 @@ export class AuctionContract {
 
     const newBid = parseInt(newBidAmount);
     if (newBid <= currentHighestBid) {
-        throw new Error(`⚠️ Bid too low! You need to beat ${currentHighestBid} ADA.`);
+        throw new Error(`Bid must be higher than current highest bid (${currentHighestBid}).`);
     }
 
     const newDatumData = mConStr0([
@@ -254,7 +254,7 @@ export class AuctionContract {
         walletUtxos = walletUtxos.filter(u => u.input.txHash !== collateral.input.txHash || u.input.outputIndex !== collateral.input.outputIndex);
     }
     
-    console.log(`\n💰 Placing Bid: ${newBidAmount} ADA`);
+    console.log(`Placing bid: ${newBidAmount} ADA`);
     //console.log(`Wallet UTXOs Available (filtered): ${walletUtxos.length}`);
     //walletUtxos.forEach(u => console.log(`W:`, JSON.stringify(u.output.amount)));
 
@@ -285,7 +285,7 @@ export class AuctionContract {
         const pkhWords = bech32.toWords(pkhBytes);
         const refundAddress = bech32.encode("addr_test", pkhWords);
         
-        console.log(`💸 Refunding ${currentHighestBid} ADA to previous bidder...`);
+        console.log(`Refunding ${currentHighestBid} to previous bidder.`);
         
         txBuilder.txOut(refundAddress, [
             { unit: "lovelace", quantity: currentHighestBid.toString() }
@@ -303,10 +303,10 @@ export class AuctionContract {
     const unsignedTx = await txBuilder.complete();
     const signedTx = await this.wallet.signTx(unsignedTx);
     
-    console.log(`🚀 Sending Bid Transaction...`);
+    console.log(`Submitting Bid Tx...`);
     const txHash = await this.wallet.submitTx(signedTx);
-    console.log(`✅ Bid Placed Successfully!`);
-    console.log(`📜 Transaction ID: ${txHash}\n`);
+    console.log(`Bid Placed.`);
+    console.log(`Transaction ID: ${txHash}`);
     return txHash;
   }
 
@@ -317,8 +317,8 @@ export class AuctionContract {
     const utxos = await this.provider.fetchAddressUTxOs(this.scriptAddress);
     const scriptUtxo = utxos.find(u => u.input.txHash === auctionTxHash && u.input.outputIndex === 0);
     
-    if (!scriptUtxo) throw new Error("❌ Auction not found! Is the Tx Hash correct?");
-    if (!scriptUtxo.output.plutusData) throw new Error("❌ Fatal: Missing auction datum.");
+    if (!scriptUtxo) throw new Error("Auction UTXO not found.");
+    if (!scriptUtxo.output.plutusData) throw new Error("No datum found.");
 
     const oldDatum = deserializeDatum(scriptUtxo.output.plutusData);
     const fields = oldDatum.fields;
@@ -331,13 +331,13 @@ export class AuctionContract {
     const highestBid = Number(fields[2].int);
     // @ts-ignore type check
     const expiration = Number(fields[3].int);
-    console.log(`\n🛑 Closing Auction...`);
+    console.log(`Closing Auction...`);
 
     const currentSlot = await this.getCurrentSlot();
     const expirationSlot = getSlotFromTime(expiration);
     
     if (currentSlot < expirationSlot) {
-        throw new Error(`⏳ Auction is still running! Please wait until ${new Date(expiration).toLocaleString()} (Slot: ${expirationSlot})`);
+        throw new Error(`Auction not yet expired. Current Slot: ${currentSlot}, Expiration Slot: ${expirationSlot}`);
     }
 
     const txBuilder = new MeshTxBuilder({ fetcher: this.provider, submitter: this.provider, evaluator: this.provider });
@@ -382,7 +382,7 @@ export class AuctionContract {
         const bidderBytes = new Uint8Array(bidderFullHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
         const bidderAddr = bech32.encode("addr_test", bech32.toWords(bidderBytes));
         
-        console.log(`🏆 Winner found! Sending NFT to winner and ${highestBid} ADA to seller.`);
+        console.log(`Winner found. Sending NFT to winner and ${highestBid} ADA to seller.`);
         
         txBuilder.txOut(sellerAddr, [
             { unit: "lovelace", quantity: highestBid.toString() }
@@ -392,7 +392,7 @@ export class AuctionContract {
             { unit: this.policyId + stringToHex("auction_nft"), quantity: "1" }
         ]);
     } else {
-        console.log(`😢 No bids placed. Returning NFT to Seller.`);
+        console.log(`No bids. Returning NFT to Seller.`);
         
         txBuilder.txOut(sellerAddr, [
             { unit: this.policyId + stringToHex("auction_nft"), quantity: "1" }
@@ -408,10 +408,10 @@ export class AuctionContract {
     const unsignedTx = await txBuilder.complete();
     const signedTx = await this.wallet.signTx(unsignedTx);
     
-    console.log(`🚀 Finalizing Auction...`);
+    console.log(`Submitting Close Tx...`);
     const txHash = await this.wallet.submitTx(signedTx);
-    console.log(`✅ Auction Closed Successfully!`);
-    console.log(`📜 Transaction ID: ${txHash}\n`);
+    console.log(`Auction Closed.`);
+    console.log(`Transaction ID: ${txHash}`);
     return txHash;
   }
 }
@@ -427,11 +427,11 @@ if (import.meta.main) {
   
   if (command === "prepare") {
       const amount = args[1] ? parseInt(args[1]) : 1;
-      console.log(`\n⚙️  Preparing ${amount} wallet(s)...`);
+      console.log(`Preparing ${amount} wallet(s)...`);
       for (let i=0; i<amount; i++) {
         await setup(i);
       }
-      console.log("✅ Wallets ready.\n");
+      console.log("Wallets prepared.");
   } else if (command === "init") {
       const { provider, wallet } = await setup(0);
       const contract = new AuctionContract(provider, wallet);
