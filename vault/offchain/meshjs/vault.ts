@@ -24,11 +24,20 @@ function getTimeFromSlot(slot: number): number {
     return (slot * SLOT_LENGTH) + PREPROD_SYSTEM_START;
 }
 
-export const setup = async (walletName: string | number = "wallet.txt") => {
+export const setup = async (walletName: string | number = 0) => {
   const provider = new KoiosProvider("preprod");
+  
+  let prefix = "";
+  try {
+    await Deno.stat("vault/offchain/meshjs");
+    prefix = "vault/offchain/meshjs/";
+  } catch {
+    prefix = "";
+  }
+
   const fileName = typeof walletName === 'number' 
-      ? `vault/offchain/meshjs/wallet_${walletName}.txt`
-      : `vault/offchain/meshjs/${walletName}`;
+      ? `${prefix}wallet_${walletName}.txt`
+      : `${prefix}${walletName}`;
   let wallet;
   try {
     const mnemonic = await Deno.readTextFile(fileName);
