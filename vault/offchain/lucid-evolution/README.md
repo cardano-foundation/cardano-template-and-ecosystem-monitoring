@@ -1,6 +1,6 @@
-# Vault Contract Offchain (MeshJS)
+# Vault Contract Offchain (Lucid Evolution)
 
-This directory contains the offchain code for interacting with the Vault Aiken contract using MeshJS (Deno).
+This directory contains the offchain code for interacting with the Vault Aiken contract using Lucid Evolution (Deno).
 
 ## Prerequisites
 
@@ -14,75 +14,86 @@ The project uses a `deno.json` import map. No manual `npm install` is required f
 
 ## Usage
 
-Run the CLI using `deno run`:
+You can run the commands using `deno task` (convenience scripts defined in `deno.json`) or directly with `deno run`.
+
+### Quick Tasks
+
+```bash
+deno task init              # Initialize and print script address
+deno task prepare <COUNT>   # Generate N wallets (e.g. deno task prepare 1)
+deno task lock <AMOUNT>     # Lock Amount (Lovelace)
+deno task withdraw <TX>     # Withdraw (Start Timer)
+deno task finalize <TX>     # Finalize (Claim)
+deno task cancel <TX>       # Cancel (Reset)
+```
+
+### Manual Execution
 
 ```bash
 deno run -A --unstable-detect-cjs vault.ts <COMMAND> [ARGS]
 ```
 
-### Commands
+### Commands Detail
 
 1.  **Initialize**
     Prints the script address derived from the contract blueprint.
 
     ```bash
-    deno run -A --unstable-detect-cjs vault.ts init
+    deno task init
     ```
 
-2.  **Lock Funds (Infinite)**
-    Locks funds with a ~100 year lock time. These funds can only be cancelled/withdrawn by manual intervention (or `cancel` command).
+2.  **Prepare Wallets**
+    Generates wallet files (e.g., `wallet_0.txt`) with seed phrases if they don't exist.
 
     ```bash
-    deno run -A --unstable-detect-cjs vault.ts lock <LOVELACE_AMOUNT>
-    # Example
-    deno run -A --unstable-detect-cjs vault.ts lock 5000000
+    deno task prepare 1
     ```
 
-3.  **Lock Funds (Withdrawable Shortcut)**
+3.  **Lock Funds (Infinite)**
+    Locks funds with a ~100 year lock time. These funds cannot be finalized immediately. You must first `withdraw` to start the countdown.
+
+    ```bash
+    deno task lock 5000000
+    ```
+
+4.  **Lock Funds (Withdrawable Shortcut)**
     Locks funds with a timestamp in the _past_ (100 seconds ago). These funds are immediately ready for `finalize`.
 
-    **Note**: This is useful for testing the happy path without waiting.
+    **Note**: This is useful for testing without waiting.
 
     ```bash
-    deno run -A --unstable-detect-cjs vault.ts lock-withdrawable <LOVELACE_AMOUNT>
+    deno run -A --unstable-detect-cjs vault.ts lock-withdrawable 5000000
     ```
 
-4.  **Cancel**
-    Cancels a locked UTxO and returns funds to the contract owner (or resets the state).
+5.  **Cancel**
+    Cancels a locked UTxO by resetting it to a state without the withdrawal datum, effectively stopping any countdown.
 
     ```bash
-    deno run -A --unstable-detect-cjs vault.ts cancel <TX_HASH>
+    deno task cancel <TX_HASH>
     ```
 
-5.  **Withdraw**
-    Transitions a "Locked" UTxO to a "Withdrawing" state (starts the timer).
+6.  **Withdraw**
+    Transitions a "Locked" UTxO to a "Withdrawing" state by updating the datum to the current network time. This starts the 60-second timer.
 
     ```bash
-    deno run -A --unstable-detect-cjs vault.ts withdraw <TX_HASH>
+    deno task withdraw <TX_HASH>
     ```
 
-6.  **Finalize**
+7.  **Finalize**
     Claims the funds from a UTxO that has completed its wait time.
 
     **Important**:  
-    This command verifies that the network time is valid. The contract owner must wait for the specified period (default 60s, or past if using `lock-withdrawable`) before this command will succeed. If run too early, the CLI will output the required wait time.
+    This command verifies that the network time is valid. The contract owner must wait for the specified period (default 60s) after `withdraw` before this command will succeed. If run too early, the CLI will output the required wait time.
 
     ```bash
-    deno run -A --unstable-detect-cjs vault.ts finalize <TX_HASH>
+    deno task finalize <TX_HASH>
     ```
 
 ### Troubleshooting
 
 - **BadInputsUTxO / ValueNotConserved**:
-  If you run commands in quick succession (e.g., `lock` then immediately `lock-withdrawable`), you may encounter errors because the UTxO set hasn't refreshed.
+  If you run commands in quick succession (e.g., `lock` then immediately `lock-withdrawable`), you may encounter errors because the UTxO set hasn't refreshed on the provider.
   **Solution**: Wait 10-20 seconds between transactions or retry the command.
 
 - **Wallet Not Found**:
-  The app looks for `wallet.txt` in the `vault/offchain/meshjs` directory. Ensure your mnemonic file is named correctly.
-
-## Utilities
-
-- **Check Balances**:
-  ```bash
-  deno run -A --unstable-detect-cjs check_balances.ts
-  ```
+  The app looks for `wallet_0.txt` in the current directory. Use `prepare` to generate it.

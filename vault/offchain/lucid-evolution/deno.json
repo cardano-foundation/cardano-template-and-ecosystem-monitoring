@@ -1,15 +1,17 @@
 {
   "tasks": {
-    "dev": "deno run --watch vault.ts",
-    "init": "deno run -A vault.ts init",
-    "lock": "deno run -A vault.ts lock",
-    "withdraw": "deno run -A vault.ts withdraw",
-    "finalize": "deno run -A vault.ts finalize",
-    "cancel": "deno run -A vault.ts cancel",
-    "prepare": "deno run -A vault.ts prepare"
+    "dev": "deno run --unstable-detect-cjs --watch vault.ts",
+    "init": "deno run -A --unstable-detect-cjs vault.ts init",
+    "lock": "deno run -A --unstable-detect-cjs vault.ts lock",
+    "withdraw": "deno run -A --unstable-detect-cjs vault.ts withdraw",
+    "finalize": "deno run -A --unstable-detect-cjs vault.ts finalize",
+    "cancel": "deno run -A --unstable-detect-cjs vault.ts cancel",
+    "prepare": "deno run -A --unstable-detect-cjs vault.ts prepare"
   },
   "imports": {
-    "@evolution-sdk/lucid": "npm:@evolution-sdk/lucid@^2.0.1",
+    "libsodium-wrappers-sumo": "npm:libsodium-wrappers-sumo@0.7.15",
+    "@evolution-sdk/lucid": "npm:@evolution-sdk/lucid@2.0.1",
     "@std/assert": "jsr:@std/assert@1"
-  }
+  },
+  "nodeModulesDir": "auto"
 }
