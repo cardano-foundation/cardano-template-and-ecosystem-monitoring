@@ -13,7 +13,7 @@ import {
 import { applyParamsToScript } from "@meshsdk/core-cst";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
-const PREPROD_SYSTEM_START = 1654041600000; // ms
+const PREPROD_SYSTEM_START = 1655683200000; // ms
 const SLOT_LENGTH = 1000; // ms
 
 function getSlotFromTime(timeVal: number): number {
@@ -156,10 +156,12 @@ export class MeshVaultContract {
     if (!utxoToSpend) throw new Error("UTxO not found");
 
     // Calculate slot from current time
-    const now = Date.now();
-    const slot = getSlotFromTime(now);
+    // Use network slot to align time
+    const networkSlot = await this.getNetworkSlot();
+    const slot = networkSlot - 1000; // Buffer for node lag
+    const lockTime = getTimeFromSlot(slot - 200); // Lock time slightly in past to pass valid_after check
 
-    const lockTime = 1000; // Fixed old time
+    // const lockTime = 1000; // Fixed old time
     const datum = mConStr0([lockTime]);
     
     // Auto-setup collateral
@@ -173,14 +175,20 @@ export class MeshVaultContract {
         );
     }
     
-    await txBuilder
+    txBuilder
       .spendingPlutusScript("V3")
       .txIn(
          utxoToSpend.input.txHash,
          utxoToSpend.input.outputIndex,
          utxoToSpend.output.amount,
          this.scriptAddress
-      )
+      );
+
+    if (utxoToSpend.output.plutusData) {
+        txBuilder.txInInlineDatumPresent();
+    }
+
+    await txBuilder
       // Removed txInInlineDatumPresent because input from Cancel has NoDatum
       .txInScript(this.scriptCbor)
       .txInRedeemerValue(mConStr0([])) // redeemer: Action.WITHDRAW (Index 0)
@@ -222,8 +230,10 @@ export class MeshVaultContract {
     const currentTime = getTimeFromSlot(currentSlot);
 
     if (currentTime < validAfter) {
-         console.log(`Too early! Wait until ${new Date(validAfter).toISOString()} (Current Chain Time: ${new Date(currentTime).toISOString()})`);
-         return;
+         const diff = validAfter - currentTime;
+         console.log(`Too early! Waiting ${(diff/1000).toFixed(1)}s until ${new Date(validAfter).toISOString()}...`);
+         await new Promise(r => setTimeout(r, diff + 1000));
+         console.log("Resuming...");
     }
 
     const collateral = (await this.wallet.getCollateral())[0];
@@ -278,15 +288,20 @@ export class MeshVaultContract {
         );
     }
 
-    await txBuilder
+    txBuilder
       .spendingPlutusScript("V3")
       .txIn(
          utxoToSpend.input.txHash,
          utxoToSpend.input.outputIndex,
          utxoToSpend.output.amount,
          this.scriptAddress
-      )
-      .txInInlineDatumPresent()
+      );
+
+    if (utxoToSpend.output.plutusData) {
+        txBuilder.txInInlineDatumPresent();
+    }
+
+    await txBuilder
       .txInScript(this.scriptCbor)
       .txInRedeemerValue(mConStr2([])) // redeemer: Action.CANCEL (Index 2)
       

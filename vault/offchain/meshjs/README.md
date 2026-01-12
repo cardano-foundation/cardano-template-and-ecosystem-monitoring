@@ -14,71 +14,91 @@ The project uses a `deno.json` import map. No manual `npm install` is required f
 
 ## Usage
 
-Run the CLI using `deno run`:
+Use `deno task` for convenience:
+
+### 1. Initialize
+
+Prints the script address derived from the contract blueprint.
 
 ```bash
-deno run -A --unstable-detect-cjs vault.ts <COMMAND> [ARGS]
+deno task init
 ```
 
-### Commands
+### 2. Lock Funds
 
-1.  **Initialize**
-    Prints the script address derived from the contract blueprint.
+Locks funds with a ~100 year lock time (Infinite).
 
-    ```bash
-    deno run -A --unstable-detect-cjs vault.ts init
-    ```
+```bash
+deno task lock 5000000
+```
 
-2.  **Lock Funds (Infinite)**
-    Locks funds with a ~100 year lock time. These funds can only be cancelled/withdrawn by manual intervention (or `cancel` command).
+This locks 5 ADA.
 
-    ```bash
-    deno run -A --unstable-detect-cjs vault.ts lock <LOVELACE_AMOUNT>
-    # Example
-    deno run -A --unstable-detect-cjs vault.ts lock 5000000
-    ```
+To lock funds that are immediately withdrawable (with a past timestamp), usage raw command:
 
-3.  **Lock Funds (Withdrawable Shortcut)**
-    Locks funds with a timestamp in the _past_ (100 seconds ago). These funds are immediately ready for `finalize`.
+```bash
+deno run -A --unstable-detect-cjs vault.ts lock-withdrawable 5000000
+```
 
-    **Note**: This is useful for testing the happy path without waiting.
+### 3. Withdraw
 
-    ```bash
-    deno run -A --unstable-detect-cjs vault.ts lock-withdrawable <LOVELACE_AMOUNT>
-    ```
+Initiates the withdrawal process. This sets the lock time to "Now" and starts the waiting period.
 
-4.  **Cancel**
-    Cancels a locked UTxO and returns funds to the contract owner (or resets the state).
+```bash
+deno task withdraw <UTXO_TX_HASH>
+```
 
-    ```bash
-    deno run -A --unstable-detect-cjs vault.ts cancel <TX_HASH>
-    ```
+Example:
 
-5.  **Withdraw**
-    Transitions a "Locked" UTxO to a "Withdrawing" state (starts the timer).
+```bash
+deno task withdraw e9291acc9b4c95363f7d0d33c77e44878c1da3e40dc9cfc5115f011274051bf9
+```
 
-    ```bash
-    deno run -A --unstable-detect-cjs vault.ts withdraw <TX_HASH>
-    ```
+### 4. Finalize
 
-6.  **Finalize**
-    Claims the funds from a UTxO that has completed its wait time.
+Claims the funds after the waiting period (default 60s) has passed.
+The command will automatically wait if the time hasn't passed yet.
 
-    **Important**:  
-    This command verifies that the network time is valid. The contract owner must wait for the specified period (default 60s, or past if using `lock-withdrawable`) before this command will succeed. If run too early, the CLI will output the required wait time.
+```bash
+deno task finalize <WITHDRAW_TX_HASH>
+```
 
-    ```bash
-    deno run -A --unstable-detect-cjs vault.ts finalize <TX_HASH>
-    ```
+Example:
 
-### Troubleshooting
+```bash
+deno task finalize 5e12ac6562650d28b187a8684900dbd966d90597a93dfa56cecd84f237ac83c4
+```
+
+### 5. Cancel
+
+Cancels a locked UTxO and returns funds to the owner.
+
+```bash
+deno task cancel <LOCKED_TX_HASH>
+```
+
+### 6. Prepare Wallets
+
+Generates `wallet_X.txt` files.
+
+```bash
+deno task prepare 4
+```
+
+## Troubleshooting
 
 - **BadInputsUTxO / ValueNotConserved**:
-  If you run commands in quick succession (e.g., `lock` then immediately `lock-withdrawable`), you may encounter errors because the UTxO set hasn't refreshed.
-  **Solution**: Wait 10-20 seconds between transactions or retry the command.
+  If you run commands in quick succession (e.g., `lock` then immediately `lock-withdrawable`), you may encounter errors because the Koios provider hasn't indexed the previous transaction yet.
+  **Solution**: Wait 20-60 seconds between transactions.
+
+- **UTxO Not Found**:
+  Same as above. Wait for the transaction to be confirmed and indexed.
+
+- **OutsideValidityIntervalUTxO**:
+  Ensure your system clock is synced or rely on `getNetworkSlot` (which is now implemented in the code) to avoid validity interval issues.
 
 - **Wallet Not Found**:
-  The app looks for `wallet.txt` in the `vault/offchain/meshjs` directory. Ensure your mnemonic file is named correctly.
+  The app looks for `wallet_0.txt` in the `vault/offchain/meshjs` directory. Ensure your mnemonic file is named correctly or run `deno task prepare` to generate one.
 
 ## Utilities
 
