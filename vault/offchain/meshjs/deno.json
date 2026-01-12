@@ -1,12 +1,12 @@
 {
   "tasks": {
-    "dev": "deno run --watch vault.ts",
-    "init": "deno run -A vault.ts init",
-    "lock": "deno run -A vault.ts lock",
-    "withdraw": "deno run -A vault.ts withdraw",
-    "finalize": "deno run -A vault.ts finalize",
-    "cancel": "deno run -A vault.ts cancel",
-    "prepare": "deno run -A vault.ts prepare"
+    "dev": "deno run --unstable-detect-cjs --watch vault.ts",
+    "init": "deno run -A --unstable-detect-cjs vault.ts init",
+    "lock": "deno run -A --unstable-detect-cjs vault.ts lock",
+    "withdraw": "deno run -A --unstable-detect-cjs vault.ts withdraw",
+    "finalize": "deno run -A --unstable-detect-cjs vault.ts finalize",
+    "cancel": "deno run -A --unstable-detect-cjs vault.ts cancel",
+    "prepare": "deno run -A --unstable-detect-cjs vault.ts prepare"
   },
   "imports": {
     "@meshsdk/common": "npm:@meshsdk/common@^1.9.0-beta.94",
