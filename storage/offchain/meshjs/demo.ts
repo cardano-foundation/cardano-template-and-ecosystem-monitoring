@@ -11,7 +11,7 @@ import * as path from 'path';
 
 import { SensorData } from './lib/types';
 import { analyzeStatus, printStatus } from './lib/analyzer';
-import { initContract, lockData, readRecords, getScriptAddress } from './lib/interaction';
+import { initContract, lockData, lockDataWithRecycling, readRecords, getScriptAddress } from './lib/interaction';
 import {
   loadSensorReading, listReadingFiles, loadRegistry,
   updateRegistryRecord, hashSensorData, printRegistrySummary,
@@ -152,7 +152,7 @@ function analyzeAndSave(data: SensorData): { filename: string; status: any } {
   return { filename, status };
 }
 
-// Step 5: Submit to blockchain
+// Step 5: Submit to blockchain with UTXO recycling
 async function submitToBlockchain(
   provider: BlockfrostProvider,
   wallet: MeshWallet,
@@ -163,7 +163,10 @@ async function submitToBlockchain(
   console.log('\nSTEP 5: Submit to Cardano Blockchain');
   console.log('-------------------------------------');
   
-  const result = await lockData(provider, wallet, data, status);
+  // Use UTXO recycling for cost efficiency
+  // First tx: ~2.2 ADA (fee + deposit)
+  // Subsequent: ~0.3 ADA (fee only, deposit recycled)
+  const result = await lockDataWithRecycling(provider, wallet, data, status);
   
   if (result.success) {
     updateRegistryRecord(recordId, {
@@ -228,7 +231,8 @@ async function runFullDemo(): Promise<void> {
       const validator = plutusJson.validators.find((v: any) => v.title === 'storage.storage.spend');
       
       if (validator) {
-        initContract(validator.compiledCode, CONFIG.NETWORK);
+        // Pass script hash for UTXO recycling compatibility check
+        initContract(validator.compiledCode, CONFIG.NETWORK, validator.hash);
         
         const provider = new BlockfrostProvider(CONFIG.BLOCKFROST_API_KEY);
         const wallet = new MeshWallet({
@@ -293,7 +297,7 @@ async function processPendingRecords(): Promise<void> {
   const validator = plutusJson.validators.find((v: any) => v.title === 'storage.storage.spend');
   if (!validator) return;
   
-  initContract(validator.compiledCode, CONFIG.NETWORK);
+  initContract(validator.compiledCode, CONFIG.NETWORK, validator.hash);
   
   const provider = new BlockfrostProvider(CONFIG.BLOCKFROST_API_KEY);
   const wallet = new MeshWallet({
