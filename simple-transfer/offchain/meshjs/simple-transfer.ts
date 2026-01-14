@@ -90,6 +90,7 @@ async function depositAda(
     const utxos = await provider.fetchAddressUTxOs(changeAddr);
     if (!utxos.length) throw new Error("No wallet UTxOs");
 
+    const walletUtxos = await wallet.getUtxos();
     const collateral = await wallet.getCollateral();
     if (!collateral.length) throw new Error("No collateral UTxO");
 
@@ -127,6 +128,7 @@ async function depositAda(
         // Depositor signs
         .requiredSignerHash(signerPkh)
         .changeAddress(changeAddr)
+        .selectUtxosFrom(walletUtxos)
         .complete();
 
     const signed = await wallet.signTx(tx.txHex);
