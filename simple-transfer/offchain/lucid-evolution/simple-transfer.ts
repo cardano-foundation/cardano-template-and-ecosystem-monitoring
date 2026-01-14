@@ -134,7 +134,7 @@ async function claim(walletIndex: string | number = 0) {
             .collectFrom(utxos, Data.void())
             .attach.SpendingValidator(script as SpendingValidator)
             .addSigner(address)
-            .complete({ setCollateral: { utxos: [collateralUtxo] } });
+            .complete();
 
         const signedTx = await tx.sign.withWallet().complete();
         const txHash = await signedTx.submit();
