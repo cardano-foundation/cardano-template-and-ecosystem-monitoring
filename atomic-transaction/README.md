@@ -201,12 +201,6 @@ The MeshJS off-chain code executes the full atomic transaction flow in a **singl
 deno run -A atomic-transaction.ts run wallet_0.json
 ```
 
-Sample output:
-
-```text
-Step 1: Minting (always success) and locking at script
-Setup tx submitted: <tx-hash>
-```
 
 ---
 
@@ -214,9 +208,6 @@ Setup tx submitted: <tx-hash>
 
 The off-chain code waits until the script UTXO appears on-chain before continuing:
 
-```text
-Script UTxO found
-```
 
 This ensures the next transaction is built against confirmed chain state.
 
@@ -237,8 +228,17 @@ Because Cardano transactions are atomic:
 
 Sample output on success:
 
+Sample output:
 ```text
-Atomic transaction submitted: Tx hash: <tx-hash>
+atomic-transaction\offchain\meshjs> deno run -A atomic-transaction.ts run wallet_0.json
+Step 1: Minting (using always succeed script) and locking at script
+Script utxo setup tx submitted: Tx hash:  7f6cffd54ca3121e865654ebbb4728f1cdd2c70c976ce47a9401c8f17a8d06e8
+Polling blockchain ledger to detect script utxo
+Waiting for 20 seconds before next check..
+Script UTxO found
+
+Step 2: Executing atomic spend + mint
+Atomic transaction submitted: Tx hash:  872443886db42d88c449d458dfd8b9f3ede3d84f5028450aa0c99c375df0c20d
 ```
 
 ---
