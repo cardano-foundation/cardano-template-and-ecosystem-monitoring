@@ -93,15 +93,49 @@ These values uniquely identify the NFT and are required for all future interacti
 
 ## Off-chain Interface (CLI)
 
-The repository includes a simple command-line interface to interact with the contracts. Below is an example end-to-end flow with real command invocations and their corresponding outputs.
+The repository includes a simple command-line interface implemented in **TypeScript (MeshJS + Deno)** to interact with the contracts.
 
-### Mint
+Each command follows the general pattern:
+
+```bash
+deno run -A editable-nft-cli-test.ts <command> <arguments...>
+```
+
+If an incorrect number of arguments is provided, the script is expected to fail early.
+
+---
+
+## Command Reference
+
+Below is a detailed reference of each supported command, its parameters, and their meaning. The parameter order directly reflects the function signatures in the TypeScript implementation.
+
+---
+
+### 1️⃣ Mint Editable NFT
+
+Creates a new editable NFT, initializes its state, and locks it at the state script address.
+
+#### Usage
+
+```bash
+deno run -A editable-nft-cli-test.ts mint <walletFile> <tokenName> <payload>
+```
+
+#### Parameters
+
+| Parameter    | Description                                                      |
+| ------------ | ---------------------------------------------------------------- |
+| `walletFile` | Path to a wallet JSON file (mnemonic words) used to mint the NFT |
+| `tokenName`  | Human-readable token name (will be hex-encoded on-chain)         |
+| `payload`    | Initial payload stored in the NFT state datum                    |
+
+#### Example
 
 ```bash
 deno run -A editable-nft-cli-test.ts mint wallet_0.json "firefly" "crafted-by-alice"
 ```
 
-Example output:
+#### Example Output
 
 ```text
 ownerPkh:  72b46a9927fd32da5c2f11365b6f20f9af930e63974e4f8935064215
@@ -110,38 +144,99 @@ policyId : 2868ca31fcd7549f568083411b68f15e9668e09a723a25d36f75ab24
 assetName: 66697265666c79
 ```
 
-The `policyId` and `assetName` uniquely identify the NFT and are required for all subsequent actions.
+The printed `policyId` and `assetName` must be preserved for all subsequent operations.
 
 ---
 
-### Update Payload / Transfer Ownership
+### 2️⃣ Update Payload / Transfer Ownership
+
+Updates the NFT state. In this reference implementation, **payload updates and ownership changes are handled together** for simplicity.
+
+#### Usage
+
+```bash
+deno run -A editable-nft-cli-test.ts update <walletFile> <policyId> <tokenName> <newOwnerPkh> <newPayload>
+```
+
+#### Parameters
+
+| Parameter     | Description                                                      |
+| ------------- | ---------------------------------------------------------------- |
+| `walletFile`  | Wallet file of the **current owner**                             |
+| `policyId`    | Policy ID returned during mint                                   |
+| `tokenName`   | Original token name (same as mint)                               |
+| `newOwnerPkh` | Payment key hash of the new owner (can be same as current owner) |
+| `newPayload`  | Updated payload to store in the NFT state                        |
+
+#### Example
 
 ```bash
 deno run -A editable-nft-cli-test.ts update wallet_0.json 2868ca31fcd7549f568083411b68f15e9668e09a723a25d36f75ab24 "firefly" 332353c1231a76c19a9a7d44ef4252759e5feba6c9bb13a4c38ae712 "level-boost-2"
 ```
 This single command updates the NFT state. In this reference implementation, payload updates and ownership changes are handled together for simplicity.
 
-Example output:
+#### Example Output
 
 ```text
 editable-nft\offchain\meshjs> deno run -A editable-nft-cli-test.ts update wallet_0.json 2868ca31fcd7549f568083411b68f15e9668e09a723a25d36f75ab24 "firefly" 332353c1231a76c19a9a7d44ef4252759e5feba6c9bb13a4c38ae712 "level-boost-2"
 ✏️ NFT state updated: Tx Id: acefcbd7044dd256a8c1c9b82305cf7fc3bf034a01f8e7cd7b70012bee8e12f1
 ```
 
+Notes:
+
+* The transaction **must be signed by the current owner**
+* The update will fail if the NFT has already been sealed
+
 ---
 
-### Seal NFT
+### 3️⃣ Seal NFT
+
+Seals the NFT, making both payload and ownership **permanently immutable**.
+
+#### Usage
+
+```bash
+deno run -A editable-nft-cli-test.ts seal <walletFile> <policyId> <tokenName> <payload>
+```
+
+#### Parameters
+
+| Parameter    | Description                           |
+| ------------ | ------------------------------------- |
+| `walletFile` | Wallet file of the current owner      |
+| `policyId`   | Policy ID of the NFT                  |
+| `tokenName`  | Token name used at mint time          |
+| `payload`    | Final payload to be stored at sealing |
+
+#### Example
 
 ```bash
 deno run -A editable-nft-cli-test.ts seal wallet_1.json 2868ca31fcd7549f568083411b68f15e9668e09a723a25d36f75ab24 "firefly" "level-boost-2"
 ```
 
-Example output:
+#### Example Output
 
 ```text
 editable-nft\offchain\meshjs> deno run -A editable-nft-cli-test.ts seal wallet_1.json 2868ca31fcd7549f568083411b68f15e9668e09a723a25d36f75ab24 "firefly" "level-boost-2"
 🔒 NFT sealed: Tx Id: 014ea42b96d02ea328405f3f637efe90e96db9e7c25305d5890f95b0a8f9e10c
 ```
+
+Once sealed:
+
+* Further `update` calls will fail
+* Ownership can no longer be changed
+
+---
+
+## Notes on Parameters & Design
+
+* `tokenName` is converted to hex internally using `stringToHex`
+* The state script address is deterministically derived from:
+
+    * `policyId`
+    * `assetName`
+* The implementation assumes **a single state UTxO** at the script address
+* No indexing or UTxO selection strategy is implemented beyond the first match
 
 ---
 

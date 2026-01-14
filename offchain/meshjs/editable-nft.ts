@@ -176,6 +176,7 @@ export async function mintEditableNft(
         )
         .requiredSignerHash(ownerPkh)
         .changeAddress(changeAddr)
+        .selectUtxosFrom(utxos)
         .complete();
 
     const signed = await wallet.signTx(tx.txHex);
