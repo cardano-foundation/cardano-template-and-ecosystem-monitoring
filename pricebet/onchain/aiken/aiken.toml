@@ -1,0 +1,16 @@
+name = "cardano-foundation/pricebet"
+version = "0.1.0"
+compiler = "v1.1.21"
+plutus = "v3"
+license = "Apache-2.0"
+description = "A decentralized price prediction betting system using Charli3 oracles"
+
+[repository]
+user = "cardano-foundation"
+project = "pricebet"
+platform = "github"
+
+[[dependencies]]
+name = "aiken-lang/stdlib"
+version = "1.9.0"
+source = "github"

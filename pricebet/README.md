@@ -133,6 +133,20 @@ Select appropriate off-chain tools for price monitoring:
 - **Oracle Fees**: Account for oracle service costs in bet economics
 - **Data Encoding**: Properly encode and decode price feed data
 
+## 🚀 Getting Started (On-chain)
+
+The Aiken implementation of the Price Bet contract is located in `onchain/aiken`.
+
+### Prerequisites
+- [Aiken CLI](https://aiken-lang.org/installation-instructions) (v1.1.21+)
+
+### Building and Testing
+```sh
+cd onchain/aiken
+aiken check
+aiken build
+```
+
 ## 🤝 Contributing
 
 This smart contract serves as an educational example of decentralized price betting with oracle integration on Cardano. Contributions, improvements, and discussions are welcome!
