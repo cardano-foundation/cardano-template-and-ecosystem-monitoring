@@ -1,6 +1,9 @@
 use aiken/interval
-use aiken/transaction.{InlineDatum, Input, Output, OutputReference, Transaction, placeholder, TransactionId}
-use aiken/transaction/credential.{from_verification_key}
+use aiken/transaction.{
+  InlineDatum, Input, Output, OutputReference, Transaction, placeholder,
+  TransactionId
+}
+use aiken/transaction/credential.{from_verification_key, ScriptCredential, Address}
 use aiken/transaction/value
 use oracle_datum
 use price_bet.{PriceBetDatum, Join, Win, Timeout, validate_bet}
@@ -8,11 +11,13 @@ use price_bet.{PriceBetDatum, Join, Win, Timeout, validate_bet}
 test join_success() {
   let owner_vkh = #"01010101010101010101010101010101010101010101010101010101"
   let player_vkh = #"02020202020202020202020202020202020202020202020202020202"
+  let oracle_vkh = #"03030303030303030303030303030303030303030303030303030303"
   let bet_amount = 10000000 // 10 ADA
   
   let initial_datum = PriceBetDatum {
     owner: owner_vkh,
     player: None,
+    oracle_vkh,
     target_rate: 1500,
     deadline: 1000,
     bet_amount,
@@ -60,10 +65,12 @@ test join_success() {
 
 test win_success() {
   let player_vkh = #"02020202020202020202020202020202020202020202020202020202"
+  let oracle_vkh = #"03030303030303030303030303030303030303030303030303030303"
   let bet_amount = 10000000
   let datum = PriceBetDatum {
     owner: #"0101",
     player: Some(player_vkh),
+    oracle_vkh,
     target_rate: 1500,
     deadline: 2000,
     bet_amount,
@@ -77,7 +84,7 @@ test win_success() {
       output_index: 0,
     },
     output: Output {
-      address: from_verification_key(#"ee"),
+      address: Address(ScriptCredential(oracle_vkh), None),
       value: value.from_lovelace(2000000),
       datum: InlineDatum(oracle_datum_data),
       reference_script: None,
@@ -122,10 +129,12 @@ test win_success() {
 
 test timeout_success() {
   let owner_vkh = #"01010101010101010101010101010101010101010101010101010101"
+  let oracle_vkh = #"03030303030303030303030303030303030303030303030303030303"
   let bet_amount = 10000000
   let datum = PriceBetDatum {
     owner: owner_vkh,
     player: Some(#"0202"),
+    oracle_vkh,
     target_rate: 1500,
     deadline: 1000,
     bet_amount,

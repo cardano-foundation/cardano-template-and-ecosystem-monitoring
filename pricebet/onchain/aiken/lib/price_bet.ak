@@ -5,13 +5,14 @@ use aiken/option
 use aiken/transaction.{
   InlineDatum, Input, Output, OutputReference, Transaction, find_input
 }
-use aiken/transaction/credential.{VerificationKey, from_verification_key}
+use aiken/transaction/credential.{VerificationKey, Script, from_verification_key}
 use aiken/transaction/value
 use oracle_datum.{OracleDatum}
 
 pub type PriceBetDatum {
   owner: Hash<Blake2b_224, VerificationKey>,
   player: Option<Hash<Blake2b_224, VerificationKey>>,
+  oracle_vkh: Hash<Blake2b_224, Script>,
   target_rate: Int,
   deadline: Int,
   bet_amount: Int,
@@ -64,6 +65,7 @@ pub fn validate_bet(
         list.has(extra_signatories, option.or_else(updated_datum.player, #"" ))?,
         // Other fields unchanged
         (updated_datum.owner == datum.owner)?,
+        (updated_datum.oracle_vkh == datum.oracle_vkh)?,
         (updated_datum.target_rate == datum.target_rate)?,
         (updated_datum.deadline == datum.deadline)?,
         (updated_datum.bet_amount == datum.bet_amount)?,
@@ -84,13 +86,14 @@ pub fn validate_bet(
       // 2. Must be signed by the player
       expect list.has(extra_signatories, player)
 
-      // 3. Find oracle reference input
+      // 3. Find oracle reference input and verify it
       let oracle_input =
         list.find(
           reference_inputs,
           fn(input) {
-            when input.output.datum is {
-              InlineDatum(_) -> True
+            let addr = input.output.address
+            when addr.payment_credential is {
+              credential.ScriptCredential(vh) -> vh == datum.oracle_vkh
               _ -> False
             }
           },
@@ -113,11 +116,21 @@ pub fn validate_bet(
         value.lovelace_of(out.value) >= value.lovelace_of(total_pot)
       })
 
+      // 7. Check if price data is still valid for the current tx
+      let is_price_valid = when validity_range.upper_bound.bound_type is {
+        interval.Finite(tx_upper) -> oracle_datum.is_oracle_valid(oracle, tx_upper)
+        _ -> False
+      }
+
       and {
         (current_price >= datum.target_rate)?,
+        is_price_valid?,
         payout_to_player?,
-        // Must happen before deadline? Actually Win can happen anytime as long as we have oracle data...
-        // But usually there is a window. For now let's say anytime before/after is fine as long as target hit.
+        // Win must also happen before deadline
+        when validity_range.upper_bound.bound_type is {
+          interval.Finite(tx_upper) -> (tx_upper <= datum.deadline)?
+          _ -> False
+        },
       }
     }
 

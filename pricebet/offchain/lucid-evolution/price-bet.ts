@@ -14,6 +14,7 @@ import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 const PriceBetDatumSchema = Data.Object({
   owner: Data.Bytes(),
   player: Data.Nullable(Data.Bytes()),
+  oracle_vkh: Data.Bytes(),
   target_rate: Data.Integer(),
   deadline: Data.Integer(),
   bet_amount: Data.Integer(),
@@ -74,6 +75,20 @@ async function balance(walletOrAddress: string | number = 0) {
     console.log(`Balance: ${totalLovelace} lovelace (${Number(totalLovelace) / 1000000} ADA)`);
 }
 
+// --- Store Management ---
+async function loadStore() {
+    try {
+        const content = await Deno.readTextFile("store.json");
+        return JSON.parse(content);
+    } catch {
+        return {};
+    }
+}
+
+async function saveStore(data: any) {
+    await Deno.writeTextFile("store.json", JSON.stringify(data, null, 2));
+}
+
 async function getLucid() {
     return await Lucid(new Koios("https://preprod.koios.rest/api/v1"), "Preprod");
 }
@@ -92,6 +107,7 @@ export async function createBet(targetRate: number, deadlineInMs: number, betAmo
     selectWallet(lucid, walletIndex);
     const ownerAddress = await lucid.wallet().address();
     const ownerPKH = getAddressDetails(ownerAddress).paymentCredential?.hash!;
+    const oracleVKH = getAddressDetails(ORACLE_ADDRESS).paymentCredential?.hash!;
 
     const betAmount = BigInt(betAmountAda) * 1_000_000n;
     const deadline = BigInt(Date.now() + deadlineInMs);
@@ -99,6 +115,7 @@ export async function createBet(targetRate: number, deadlineInMs: number, betAmo
     const datum: PriceBetDatum = {
         owner: ownerPKH,
         player: null,
+        oracle_vkh: oracleVKH,
         target_rate: BigInt(targetRate),
         deadline: deadline,
         bet_amount: betAmount,
@@ -115,6 +132,11 @@ export async function createBet(targetRate: number, deadlineInMs: number, betAmo
     const txHash = await signedTx.submit();
     console.log(`Bet created! Tx Hash: ${txHash}`);
     console.log(`Script Address: ${scriptAddress}`);
+    
+    const store = await loadStore();
+    store.lastTxHash = txHash;
+    await saveStore(store);
+
     return txHash;
 }
 
@@ -152,17 +174,30 @@ export async function joinBet(scriptUtxoHash: string, scriptUtxoIndex: number, w
     const signedTx = await tx.sign.withWallet().complete();
     const txHash = await signedTx.submit();
     console.log(`Bet joined! Tx Hash: ${txHash}`);
+    
+    const store = await loadStore();
+    store.lastJoinTxHash = txHash;
+    store.lastTxHash = txHash; // Update general last tx
+    await saveStore(store);
+
     return txHash;
 }
 
-export async function winBet(scriptUtxoHash: string, scriptUtxoIndex: number, oracleUtxoHash: string, oracleUtxoIndex: number, walletIndex: number = 1) {
+export async function winBet(scriptUtxoHash: string, scriptUtxoIndex: number, oracleUtxoHash?: string, oracleUtxoIndex?: number, walletIndex: number = 1) {
     const lucid = await getLucid();
     selectWallet(lucid, walletIndex);
     const playerAddress = await lucid.wallet().address();
 
     const validator = getValidator();
     const [utxo] = await lucid.utxosByOutRef([{ txHash: scriptUtxoHash, outputIndex: scriptUtxoIndex }]);
-    const [oracleUtxo] = await lucid.utxosByOutRef([{ txHash: oracleUtxoHash, outputIndex: oracleUtxoIndex }]);
+    
+    let oracleUtxo: UTxO;
+    if (oracleUtxoHash && oracleUtxoIndex !== undefined) {
+        [oracleUtxo] = await lucid.utxosByOutRef([{ txHash: oracleUtxoHash, outputIndex: oracleUtxoIndex }]);
+    } else {
+        const oracleUtxos = await lucid.utxosAt(ORACLE_ADDRESS);
+        oracleUtxo = oracleUtxos[0]; // Just pick the first one with datum
+    }
 
     if (!utxo || !oracleUtxo) throw new Error("UTXO not found");
 
@@ -203,28 +238,81 @@ export async function timeoutBet(scriptUtxoHash: string, scriptUtxoIndex: number
     return txHash;
 }
 
-if (import.meta.main) {
-    const command = Deno.args[0];
-    switch (command) {
-        case "prepare":
-            await prepare(Number(Deno.args[1]) || 2);
-            break;
-        case "balance":
-            await balance(Deno.args[1] || 0);
-            break;
-        case "create":
-            await createBet(Number(Deno.args[1]), Number(Deno.args[2]), Number(Deno.args[3]), Number(Deno.args[4] || 0));
-            break;
-        case "join":
-            await joinBet(Deno.args[1], Number(Deno.args[2]), Number(Deno.args[3] || 1));
-            break;
-        case "win":
-            await winBet(Deno.args[1], Number(Deno.args[2]), Deno.args[3], Number(Deno.args[4]), Number(Deno.args[5] || 1));
-            break;
-        case "timeout":
-            await timeoutBet(Deno.args[1], Number(Deno.args[2]), Number(Deno.args[3] || 0));
-            break;
-        default:
-            console.log("Commands: prepare, balance, create, join, win, timeout");
+// --- CLI Runner ---
+const isPositiveNumber = (s: string) =>
+  Number.isInteger(Number(s)) && Number(s) > 0;
+
+const args = Deno.args;
+
+if (args.length > 0) {
+  const cmd = args[0];
+
+  if (cmd === 'create') {
+    if (args.length > 3 && isPositiveNumber(args[1]) && isPositiveNumber(args[2]) && isPositiveNumber(args[3])) {
+      await createBet(Number(args[1]), Number(args[2]), Number(args[3]), Number(args[4] || 0));
+    } else {
+      console.log('Usage: deno run -A price-bet.ts create <target_rate> <deadline_ms> <bet_ada> [wallet_index]');
     }
+  } else if (cmd === 'join') {
+    let txHash = args.length > 1 ? args[1] : undefined;
+    if (!txHash) {
+      const store = await loadStore();
+      if (store.lastTxHash) {
+        txHash = store.lastTxHash;
+        console.log(`Using stored TX Hash: ${txHash}`);
+      }
+    }
+    const index = args.length > 2 ? Number(args[2]) : 0;
+    const wallet = args.length > 3 ? Number(args[3]) : 1;
+    if (txHash) {
+      await joinBet(txHash, index, wallet);
+    } else {
+      console.log('Usage: deno run -A price-bet.ts join <tx_hash> <index> [wallet_index]');
+    }
+  } else if (cmd === 'win') {
+    let txHash = args.length > 1 ? args[1] : undefined;
+    if (!txHash) {
+      const store = await loadStore();
+      if (store.lastJoinTxHash) {
+        txHash = store.lastJoinTxHash;
+        console.log(`Using stored Join TX Hash: ${txHash}`);
+      }
+    }
+    const index = args.length > 2 ? Number(args[2]) : 0;
+    const oracleHash = (args.length > 3 && args[3].length > 10) ? args[3] : undefined;
+    const oracleIndex = (args.length > 4 && !isNaN(Number(args[4]))) ? Number(args[4]) : undefined;
+    const wallet = args.length > 5 ? Number(args[5]) : (args.length > 3 && args[3].length <= 2 ? Number(args[3]) : 1);
+
+    if (txHash) {
+      await winBet(txHash, index, oracleHash, oracleIndex, wallet);
+    } else {
+      console.log('Usage: deno run -A price-bet.ts win <bet_tx_hash> <index> [oracle_tx_hash] [oracle_index] [wallet_index]');
+    }
+  } else if (cmd === 'timeout') {
+    let txHash = args.length > 1 ? args[1] : undefined;
+    if (!txHash) {
+      const store = await loadStore();
+      if (store.lastJoinTxHash) {
+        txHash = store.lastJoinTxHash;
+        console.log(`Using stored Join TX Hash: ${txHash}`);
+      }
+    }
+    const index = args.length > 2 ? Number(args[2]) : 0;
+    const wallet = args.length > 3 ? Number(args[3]) : 0;
+    if (txHash) {
+      await timeoutBet(txHash, index, wallet);
+    } else {
+      console.log('Usage: deno run -A price-bet.ts timeout <tx_hash> <index> [wallet_index]');
+    }
+  } else if (cmd === 'prepare') {
+    const count = args.length > 1 ? parseInt(args[1]) : 2;
+    await prepare(count);
+  } else if (cmd === 'balance') {
+    await balance(args[1] || 0);
+  } else {
+    console.log('Unknown command. Use: create, join, win, timeout, prepare, balance');
+  }
+} else {
+  console.log('Usage: deno run -A price-bet.ts <command> [args]');
 }
+
