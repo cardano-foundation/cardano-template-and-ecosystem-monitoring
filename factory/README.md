@@ -142,12 +142,22 @@ The off-chain code handles:
 
 The following commands can be used to interact with the contracts.
 
+---
+
 ### Create Product
 
 Creates a new Product contract, mints its identifier NFT, and locks it at the Product script address.
 
+**Command format**
+
 ```sh
-deno run -A factory_product_offchain.ts create-product wallet_0.json firefly-002 organic-honey
+deno run -A factory.ts create-product <wallet.json> <product_id> <tag>
+```
+
+**Example**
+
+```sh
+deno run -A factory.ts create-product wallet_0.json firefly-002 organic-honey
 ```
 
 **Arguments**
@@ -156,21 +166,62 @@ deno run -A factory_product_offchain.ts create-product wallet_0.json firefly-002
 * `firefly-002` — product identifier
 * `organic-honey` — tag stored in Product datum
 
+**Example Output**
+
+```text
+ownerPkh:  72b46a9927fd32da5c2f11365b6f20f9af930e63974e4f8935064215
+Product contract created
+Owner PKH: 72b46a9927fd32da5c2f11365b6f20f9af930e63974e4f8935064215
+Factory policy: c69b1f737aee7fbf902a453ebb83674623f74a90d13a833ce0222005
+Product contract address: addr_test1wr2dy9h26gyxnmm7m69f3p0g44mrnvvs8zhrnzm49gh9urgakmd2w
+Tx hash: e9d85d8254340c23ae6589632824e244cff55b91b603b1e2cb477a66bdcd1b29
+```
+
 ---
 
 ### Get Products
 
 Returns the Products created by the given owner.
 
+**Command format**
+
 ```sh
-deno run -A factory_product_offchain.ts get-products 72b46a9927fd32da5c2f11365b6f20f9af930e63974e4f8935064215
+deno run -A factory.ts get-products <owner_pkh>
+```
+
+**Example**
+
+```sh
+deno run -A factory.ts get-products 72b46a9927fd32da5c2f11365b6f20f9af930e63974e4f8935064215
 ```
 
 **Arguments**
 
 * `owner_pkh` — owner payment key hash
 
-> For simplicity, the reference implementation assumes a single Product per Factory when resolving chain data.
+**Example Output**
+
+```text
+Products fetched: [
+  {
+    productId: "firefly-001",
+    policyId: "c69b1f737aee7fbf902a453ebb83674623f74a90d13a833ce0222005",
+    fingerprint: "asset1hez9j04caycjx7kpk7r76ya85nelc3zlpawgwk"
+  },
+  {
+    productId: "firefly-002",
+    policyId: "c69b1f737aee7fbf902a453ebb83674623f74a90d13a833ce0222005",
+    fingerprint: "asset1hs6kc669zjhzk3mmnkc78c4mh5seuhnrarre8x"
+  },
+  {
+    productId: "firefly-009",
+    policyId: "c69b1f737aee7fbf902a453ebb83674623f74a90d13a833ce0222005",
+    fingerprint: "asset19stx7u2v58z5ma3ah7qnq8zr22uelmcn70qt3f"
+  }
+]
+```
+
+> Product discovery is performed off-chain using the Factory’s minting policy to identify Product NFTs.
 
 ---
 
@@ -178,8 +229,16 @@ deno run -A factory_product_offchain.ts get-products 72b46a9927fd32da5c2f11365b6
 
 Reads the tag stored in a Product contract.
 
+**Command format**
+
 ```sh
-deno run -A factory_product_offchain.ts get-tag 72b46a9927fd32da5c2f11365b6f20f9af930e63974e4f8935064215 firefly-002
+deno run -A factory.ts get-tag <owner_pkh> <product_id>
+```
+
+**Example**
+
+```sh
+deno run -A factory.ts get-tag 72b46a9927fd32da5c2f11365b6f20f9af930e63974e4f8935064215 firefly-002
 ```
 
 **Arguments**
@@ -187,22 +246,45 @@ deno run -A factory_product_offchain.ts get-tag 72b46a9927fd32da5c2f11365b6f20f9
 * `owner_pkh` — owner payment key hash
 * `product_id` — product identifier
 
+**Example Output**
+
+```text
+Product tag: 6f7267616e69632d686f6e6579
+```
+
 ---
 
 ### Get Factory
 
 Returns the Factory identity derived from the owner.
 
+**Command format**
+
 ```sh
-deno run -A factory_product_offchain.ts get-factory 72b46a9927fd32da5c2f11365b6f20f9af930e63974e4f8935064215
+deno run -A factory.ts get-factory <owner_pkh>
+```
+
+**Example**
+
+```sh
+deno run -A factory.ts get-factory 72b46a9927fd32da5c2f11365b6f20f9af930e63974e4f8935064215
+```
+
+**Example Output**
+
+```json
+{
+  "ownerPkh": "72b46a9927fd32da5c2f11365b6f20f9af930e63974e4f8935064215",
+  "policyId": "c69b1f737aee7fbf902a453ebb83674623f74a90d13a833ce0222005"
+}
 ```
 
 ---
 
 ## Design Notes
 
-* Each Product is a **true contract**, not merely a datum instance
-* Factory–Product provenance is **cryptographically enforced**
+* Each Product is a true contract, not merely a datum instance
+* Factory-Product provenance is cryptographically enforced
 * No mutable registries or shared state are required
 * Discovery is performed off-chain, consistent with Cardano’s UTxO model
 * The design maps cleanly to the original Factory Pattern specification while remaining Cardano-native
@@ -211,7 +293,7 @@ deno run -A factory_product_offchain.ts get-factory 72b46a9927fd32da5c2f11365b6f
 
 ## Disclaimer
 
-This project is intended as a **reference implementation** and educational example.
+This project is intended as a reference implementation and educational example.
 It has not been audited and should not be used with real funds without proper review and testing.
 
 ---

@@ -11,6 +11,7 @@ import {
     mConStr0,
     deserializeDatum,
     Asset,
+    hexToString
 } from "@meshsdk/core";
 
 import { applyParamsToScript } from "@meshsdk/core-csl";
@@ -170,39 +171,33 @@ export async function createProduct(
 // ------------------------------------------------------------
 // getProducts (derived from owner)
 // ------------------------------------------------------------
-
 export async function getProducts(ownerPkh: string) {
-    const provider = new KoiosProvider(NETWORK);
     const factory = getFactoryScriptDetails(ownerPkh);
 
-    //Query chain for utxos holding assets with the policy id of this factory
-    // Reference code for chain querying.
-    // 1. Fetch assets under the factory policy (assume at least one)
-    const assets = await provider.fetchCollectionAssets(factory.policyId);
-    let asset = assets[0];
+    const url =
+        `https://preprod.koios.rest/api/v1/policy_asset_list` +
+        `?_asset_policy=${factory.policyId}`;
 
-    // using hard coded asset object here for this reference code as mesh libs fetchCollectionAssets is not reliable
-    asset = {policy_id:factory.policyId, asset_name:"firefly-002"}
+    const response = await fetch(url, {
+        method: "GET",
+        headers: {
+            accept: "application/json",
+        },
+    });
 
-    const unit = factory.policyId + stringToHex(asset.asset_name);
-    //const unit = asset.policy_id + asset.asset_name;
-
-    // 2. Fetch addresses holding this asset (assuming just one for this reference code)
-    const addresses = await provider.fetchAssetAddresses(unit);
-    const address = addresses[0].address;
-    // 3. Fetch UTxOs at that address (assuming just one for this reference code)
-    const utxos = await provider.fetchAddressUTxOs(address);
-    if (!utxos.length) {
-        return [];
+    if (!response.ok) {
+        throw new Error(`Koios error: ${response.statusText}`);
     }
 
-    console.log("Products fetched: ", [
-        {
-            productId: asset.asset_name,
-            address,
-            txHash: utxos[0].input.txHash,
-        },
-    ]);
+    const assets = await response.json();
+
+    const products = assets.map((asset: any) => ({
+        productId: hexToString(asset.asset_name),          // hex asset name
+        policyId: factory.policyId,
+        fingerprint: asset.fingerprint,
+    }));
+
+    console.log("Products fetched:", products);
 }
 
 

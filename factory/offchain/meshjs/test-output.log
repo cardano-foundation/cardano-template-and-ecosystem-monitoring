@@ -7,11 +7,21 @@ Product contract address: addr_test1wr2dy9h26gyxnmm7m69f3p0g44mrnvvs8zhrnzm49gh9
 Tx hash: e9d85d8254340c23ae6589632824e244cff55b91b603b1e2cb477a66bdcd1b29
 
 factory\offchain\meshjs> deno run -A factory.ts get-products 72b46a9927fd32da5c2f11365b6f20f9af930e63974e4f8935064215
-Products fetched:  [
+Products fetched: [
+  {
+    productId: "firefly-001",
+    policyId: "c69b1f737aee7fbf902a453ebb83674623f74a90d13a833ce0222005",
+    fingerprint: "asset1hez9j04caycjx7kpk7r76ya85nelc3zlpawgwk"
+  },
   {
     productId: "firefly-002",
-    address: "addr_test1wr2dy9h26gyxnmm7m69f3p0g44mrnvvs8zhrnzm49gh9urgakmd2w",
-    txHash: "e9d85d8254340c23ae6589632824e244cff55b91b603b1e2cb477a66bdcd1b29"
+    policyId: "c69b1f737aee7fbf902a453ebb83674623f74a90d13a833ce0222005",
+    fingerprint: "asset1hs6kc669zjhzk3mmnkc78c4mh5seuhnrarre8x"
+  },
+  {
+    productId: "firefly-009",
+    policyId: "c69b1f737aee7fbf902a453ebb83674623f74a90d13a833ce0222005",
+    fingerprint: "asset19stx7u2v58z5ma3ah7qnq8zr22uelmcn70qt3f"
   }
 ]
 

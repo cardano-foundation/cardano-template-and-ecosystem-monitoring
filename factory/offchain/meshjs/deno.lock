@@ -380,11 +380,11 @@
     "@scure/base@1.2.6": {
       "integrity": "sha512-g/nm5FgUa//MCj1gV09zTJTaM6KBAHqLN907YVQqf7zC49+DcO4B1so4ZX07Ef10Twr6nuqYEH9GEggFXA4Fmg=="
     },
-    "@sidan-lab/whisky-js-browser@1.0.17": {
-      "integrity": "sha512-guF+Q8DITf69N8lypiUZkDzNIba3kk31Eeloj0AnnlpIY+azEO34VJcu1XcuhbRp+iWXE/mEJcJgxPYxY5dE2g=="
+    "@sidan-lab/whisky-js-browser@1.0.18": {
+      "integrity": "sha512-AMltJVi9dnT2xA/ZYInAzYP4QyjOygmcXEFcNAlSatHUS8/oB0n8q7g7F9enE8Z8zKcKFhyRIyTIIYo+F7A/0A=="
     },
-    "@sidan-lab/whisky-js-nodejs@1.0.17": {
-      "integrity": "sha512-XlUFBrLQ0FJxln52GRozxsVyCbueJwT4gU2G1jFLPEnZ8dN49e6Wgg82bLd204MEWJ1zKe3c7nHLMFAAz5jKfA=="
+    "@sidan-lab/whisky-js-nodejs@1.0.18": {
+      "integrity": "sha512-p5fwbvHvzLn7zSDMw1ouALkOyyJmSG4ngL6hlPucqQWECk5hsfHgGn1cZlwd0hEB44oz/77MTzcD+H3Cwgjo/g=="
     },
     "@simplewebauthn/browser@13.2.2": {
       "integrity": "sha512-FNW1oLQpTJyqG5kkDg5ZsotvWgmBaC6jCHR7Ej0qUNep36Wl9tj2eZu7J5rP+uhXgHaLk+QQ3lqcw2vS5MX1IA=="
@@ -398,8 +398,8 @@
     "@types/json-bigint@1.0.4": {
       "integrity": "sha512-ydHooXLbOmxBbubnA7Eh+RpBzuaIiQjh8WGJYQB50JFGFrdxW7JzVlyEV7fAXw0T2sqJ1ysTneJbiyNLqZRAag=="
     },
-    "@types/node@25.0.3": {
-      "integrity": "sha512-W609buLVRVmeW693xKfzHeIV6nJGGz98uCPfeXI1ELMLXVeKYZ9m15fAMSaUPBHYLGFsVRcMmSCksQOrZV9BYA==",
+    "@types/node@25.0.8": {
+      "integrity": "sha512-powIePYMmC3ibL0UJ2i2s0WIbq6cg6UyVFQxSCpaPxxzAaziRfimGivjdF943sSGV6RADVbk0Nvlm5P/FB44Zg==",
       "dependencies": [
         "undici-types"
       ]
