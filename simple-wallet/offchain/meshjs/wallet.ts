@@ -178,7 +178,7 @@ export async function createIntent(
     const hash = await wallet.submitTx(signed);
 
     console.log("Intent address:", scripts.intent.address);
-    console.log("✅ Intent created: Tx Id: ", hash);
+    console.log("Intent created: Tx Id: ", hash);
 }
 
 // ------------------------------------------------------------
@@ -230,7 +230,7 @@ export async function addFunds(
     const hash = await wallet.submitTx(signed);
 
     console.log("Funds address:", scripts.funds.address);
-    console.log("✅ Funds script funded: Tx Id:", hash);
+    console.log("Funds script funded: Tx Id:", hash);
 }
 
 // Execute Intent
@@ -336,7 +336,7 @@ export async function executeIntent(walletFile: string) {
     const signed = await wallet.signTx(tx.txHex, true);
     const hash = await wallet.submitTx(signed);
 
-    console.log("✅ Intent executed: Tx Id:", hash);
+    console.log("Intent executed: Tx Id:", hash);
 }
 
 // Withdraw funds
@@ -392,5 +392,5 @@ export async function withdrawAll(walletFile: string) {
     const signed = await wallet.signTx(tx.txHex, true);
     const hash = await wallet.submitTx(signed);
 
-    console.log("✅ Withdraw executed: Tx Id: ", hash);
+    console.log("Withdraw executed: Tx Id: ", hash);
 }

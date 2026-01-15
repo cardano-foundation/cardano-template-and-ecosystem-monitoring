@@ -72,7 +72,7 @@ Output:
 
 ```
 Intent address: addr_test1wpfq0vmuw9jjd0hsc4wpnuj8jle8m4j4wzt46r3l5g8nlgg9446xt
-✅ Intent created: Tx Id: 8ba635005a179b7da121e0a1c50c787dd81c1351406563176ca528f9c63c8038
+Intent created: Tx Id: 8ba635005a179b7da121e0a1c50c787dd81c1351406563176ca528f9c63c8038
 ```
 
 ---
@@ -92,7 +92,7 @@ Output:
 
 ```
 Funds address: addr_test1wqmuptvkl8xvllzfyet3d48dehgrp6etggewza7nrydtnrcj9xjaz
-✅ Funds script funded: Tx Id: f3f04d20848bf734ed3e5443a5edbed5fb07e4a24fb3c35704785c91ba37368d
+Funds script funded: Tx Id: f3f04d20848bf734ed3e5443a5edbed5fb07e4a24fb3c35704785c91ba37368d
 ```
 
 ---
@@ -106,7 +106,7 @@ deno run -A wallet-cli-test.ts execute wallet_0.json
 Output:
 
 ```
-✅ Intent executed: Tx Id: 190faabfe65bf415c2acea700fb623c77d10e3efee6465cf961ee556053d0248
+Intent executed: Tx Id: 190faabfe65bf415c2acea700fb623c77d10e3efee6465cf961ee556053d0248
 ```
 
 ---
@@ -120,7 +120,7 @@ deno run -A wallet-cli-test.ts withdraw wallet_0.json
 Output:
 
 ```
-✅ Withdraw executed: Tx Id: 067b1fce4f7ae85e23fd45ccd9e38c32ab7673370140a962b257f77277cd8d51
+Withdraw executed: Tx Id: 067b1fce4f7ae85e23fd45ccd9e38c32ab7673370140a962b257f77277cd8d51
 ```
 
 ---
