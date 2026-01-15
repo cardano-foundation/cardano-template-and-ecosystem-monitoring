@@ -2,3 +2,4 @@
 wallet_*.txt
 wallet.txt
 *.lock
+store.json

@@ -166,8 +166,11 @@ export async function joinBet(scriptUtxoHash: string, scriptUtxoIndex: number, w
     const validator = getValidator();
     const scriptAddress = validatorToAddress("Preprod", validator);
 
-    const [utxo] = await lucid.utxosByOutRef([{ txHash: scriptUtxoHash, outputIndex: scriptUtxoIndex }]);
-    if (!utxo) throw new Error("UTXO not found");
+    console.log(`Searching for UTXO: ${scriptUtxoHash}#${scriptUtxoIndex} at ${scriptAddress}`);
+    const utxos = await lucid.utxosAt(scriptAddress);
+    const utxo = utxos.find(u => u.txHash === scriptUtxoHash && u.outputIndex === scriptUtxoIndex);
+    
+    if (!utxo) throw new Error("UTXO not found. It might not be indexed yet or the index is different.");
     if (!utxo.datum) throw new Error("UTXO must have inline datum");
 
     const currentDatum = Data.from(utxo.datum, PriceBetDatum);
@@ -261,75 +264,84 @@ const isPositiveNumber = (s: string) =>
 
 const args = Deno.args;
 
-if (args.length > 0) {
-  const cmd = args[0];
+async function run() {
+  console.log(`Running command: ${args[0]}`);
+  if (args.length > 0) {
+    const cmd = args[0];
 
-  if (cmd === 'create') {
-    if (args.length > 3 && isPositiveNumber(args[1]) && isPositiveNumber(args[2]) && isPositiveNumber(args[3])) {
-      await createBet(Number(args[1]), Number(args[2]), Number(args[3]), Number(args[4] || 0));
-    } else {
-      console.log('Usage: deno run -A price-bet.ts create <target_rate> <deadline_ms> <bet_ada> [wallet_index]');
-    }
-  } else if (cmd === 'join') {
-    let txHash = args.length > 1 ? args[1] : undefined;
-    if (!txHash) {
-      const store = await loadStore();
-      if (store.lastTxHash) {
-        txHash = store.lastTxHash;
-        console.log(`Using stored TX Hash: ${txHash}`);
-      }
-    }
-    const index = args.length > 2 ? Number(args[2]) : 0;
-    const wallet = args.length > 3 ? Number(args[3]) : 1;
-    if (txHash) {
-      await joinBet(txHash, index, wallet);
-    } else {
-      console.log('Usage: deno run -A price-bet.ts join <tx_hash> <index> [wallet_index]');
-    }
-  } else if (cmd === 'win') {
-    let txHash = args.length > 1 ? args[1] : undefined;
-    if (!txHash) {
-      const store = await loadStore();
-      if (store.lastJoinTxHash) {
-        txHash = store.lastJoinTxHash;
-        console.log(`Using stored Join TX Hash: ${txHash}`);
-      }
-    }
-    const index = args.length > 2 ? Number(args[2]) : 0;
-    const oracleHash = (args.length > 3 && args[3].length > 10) ? args[3] : undefined;
-    const oracleIndex = (args.length > 4 && !isNaN(Number(args[4]))) ? Number(args[4]) : undefined;
-    const wallet = args.length > 5 ? Number(args[5]) : (args.length > 3 && args[3].length <= 2 ? Number(args[3]) : 1);
+    try {
+      if (cmd === 'create') {
+        if (args.length > 3 && isPositiveNumber(args[1]) && isPositiveNumber(args[2]) && isPositiveNumber(args[3])) {
+          await createBet(Number(args[1]), Number(args[2]), Number(args[3]), Number(args[4] || 0));
+        } else {
+          console.log('Usage: deno run -A price-bet.ts create <target_rate> <deadline_ms> <bet_ada> [wallet_index]');
+        }
+      } else if (cmd === 'join') {
+        let txHash = args.length > 1 ? args[1] : undefined;
+        if (!txHash) {
+          const store = await loadStore();
+          if (store.lastTxHash) {
+            txHash = store.lastTxHash;
+            console.log(`Using stored TX Hash: ${txHash}`);
+          }
+        }
+        const index = args.length > 2 ? Number(args[2]) : 0;
+        const wallet = args.length > 3 ? Number(args[3]) : 1;
+        if (txHash) {
+          await joinBet(txHash, index, wallet);
+        } else {
+          console.log('Usage: deno run -A price-bet.ts join <tx_hash> <index> [wallet_index]');
+        }
+      } else if (cmd === 'win') {
+        let txHash = args.length > 1 ? args[1] : undefined;
+        if (!txHash) {
+          const store = await loadStore();
+          if (store.lastJoinTxHash) {
+            txHash = store.lastJoinTxHash;
+            console.log(`Using stored Join TX Hash: ${txHash}`);
+          }
+        }
+        const index = args.length > 2 ? Number(args[2]) : 0;
+        const oracleHash = (args.length > 3 && args[3].length > 10) ? args[3] : undefined;
+        const oracleIndex = (args.length > 4 && !isNaN(Number(args[4]))) ? Number(args[4]) : undefined;
+        const wallet = args.length > 5 ? Number(args[5]) : (args.length > 3 && args[3].length <= 2 ? Number(args[3]) : 1);
 
-    if (txHash) {
-      await winBet(txHash, index, oracleHash, oracleIndex, wallet);
-    } else {
-      console.log('Usage: deno run -A price-bet.ts win <bet_tx_hash> <index> [oracle_tx_hash] [oracle_index] [wallet_index]');
-    }
-  } else if (cmd === 'timeout') {
-    let txHash = args.length > 1 ? args[1] : undefined;
-    if (!txHash) {
-      const store = await loadStore();
-      if (store.lastJoinTxHash) {
-        txHash = store.lastJoinTxHash;
-        console.log(`Using stored Join TX Hash: ${txHash}`);
+        if (txHash) {
+          await winBet(txHash, index, oracleHash, oracleIndex, wallet);
+        } else {
+          console.log('Usage: deno run -A price-bet.ts win <bet_tx_hash> <index> [oracle_tx_hash] [oracle_index] [wallet_index]');
+        }
+      } else if (cmd === 'timeout') {
+        let txHash = args.length > 1 ? args[1] : undefined;
+        if (!txHash) {
+          const store = await loadStore();
+          if (store.lastJoinTxHash) {
+            txHash = store.lastJoinTxHash;
+            console.log(`Using stored Join TX Hash: ${txHash}`);
+          }
+        }
+        const index = args.length > 2 ? Number(args[2]) : 0;
+        const wallet = args.length > 3 ? Number(args[3]) : 0;
+        if (txHash) {
+          await timeoutBet(txHash, index, wallet);
+        } else {
+          console.log('Usage: deno run -A price-bet.ts timeout <tx_hash> <index> [wallet_index]');
+        }
+      } else if (cmd === 'prepare') {
+        const count = args.length > 1 ? parseInt(args[1]) : 2;
+        await prepare(count);
+      } else if (cmd === 'balance') {
+        await balance(args[1] || 0);
+      } else {
+        console.log('Unknown command. Use: create, join, win, timeout, prepare, balance');
       }
+    } catch (e) {
+      console.error("ERROR:", e);
     }
-    const index = args.length > 2 ? Number(args[2]) : 0;
-    const wallet = args.length > 3 ? Number(args[3]) : 0;
-    if (txHash) {
-      await timeoutBet(txHash, index, wallet);
-    } else {
-      console.log('Usage: deno run -A price-bet.ts timeout <tx_hash> <index> [wallet_index]');
-    }
-  } else if (cmd === 'prepare') {
-    const count = args.length > 1 ? parseInt(args[1]) : 2;
-    await prepare(count);
-  } else if (cmd === 'balance') {
-    await balance(args[1] || 0);
   } else {
-    console.log('Unknown command. Use: create, join, win, timeout, prepare, balance');
+    console.log('Usage: deno run -A price-bet.ts <command> [args]');
   }
-} else {
-  console.log('Usage: deno run -A price-bet.ts <command> [args]');
 }
+
+run();
 
