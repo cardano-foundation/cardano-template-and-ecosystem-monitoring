@@ -9,7 +9,6 @@ Network: Cardano Preprod Testnet
 """
 
 # 1. SETUP CHAIN CONTEXT
-# Note: For the challenge, ensure you use an environment variable or placeholder for the API Key
 BLOCKFROST_PROJECT_ID = "preproddcZ2D926P5tbNUdrZ1NQaZHBFbOHB0Up" 
 network = Network.TESTNET
 context = BlockFrostChainContext(
