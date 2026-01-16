@@ -72,7 +72,7 @@ test reveal1_valid() {
       |> complete()
       |> add_input(True, script_input(oref, initial_datum))
 
-  lottery.lottery.spend(None, Reveal1 { n1 }, oref, tx)
+  lottery.lottery.spend(1,None, Reveal1 { n1 }, oref, tx)
 }
 
 test reveal1_invalid_wrong_signer() {
@@ -84,7 +84,7 @@ test reveal1_invalid_wrong_signer() {
       |> complete()
       |> add_input(True, script_input(oref, initial_datum))
 
-  !lottery.lottery.spend(None, Reveal1 { n1 }, oref, tx)
+  !lottery.lottery.spend(1,None, Reveal1 { n1 }, oref, tx)
 }
 
 test timeout1_valid_player2_wins() {
@@ -98,7 +98,7 @@ test timeout1_valid_player2_wins() {
       |> complete()
       |> add_input(True, script_input(oref, initial_datum))
 
-  lottery.lottery.spend(None, Timeout1, oref, tx)
+  lottery.lottery.spend(1,None, Timeout1, oref, tx)
 }
 
 test settle_valid_player1_wins() {
@@ -123,7 +123,7 @@ test settle_valid_player1_wins() {
       |> complete()
       |> add_input(True, script_input(oref, revealed_datum))
 
-  lottery.lottery.spend(None, Settle, oref, tx)
+  lottery.lottery.spend(1,None, Settle, oref, tx)
 }
 
 test reveal2_valid() {
@@ -147,7 +147,7 @@ test reveal2_valid() {
       |> complete()
       |> add_input(True, script_input(oref, revealed1_datum))
 
-  lottery.lottery.spend(None, Reveal2 { n2 }, oref, tx)
+  lottery.lottery.spend(1,None, Reveal2 { n2 }, oref, tx)
 }
 
 test timeout2_valid_player1_wins() {
@@ -173,7 +173,7 @@ test timeout2_valid_player1_wins() {
       |> complete()
       |> add_input(True, script_input(oref, revealed1_datum))
 
-  lottery.lottery.spend(None, Timeout2, oref, tx)
+  lottery.lottery.spend(1,None, Timeout2, oref, tx)
 }
 
 test settle_invalid_wrong_winner() {
@@ -198,5 +198,5 @@ test settle_invalid_wrong_winner() {
       |> complete()
       |> add_input(True, script_input(oref, revealed_datum))
 
-  !lottery.lottery.spend(None, Settle, oref, tx)
+  !lottery.lottery.spend(1,None, Settle, oref, tx)
 }

@@ -29,7 +29,7 @@ pub type LotteryRedeemer {
   Settle
 }
 
-validator lottery {
+validator lottery (_game_index: Int){
   spend(
     _datum_opt: Option<Data>,
     // ignored on purpose
