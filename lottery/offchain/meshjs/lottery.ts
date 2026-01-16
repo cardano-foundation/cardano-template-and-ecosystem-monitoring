@@ -34,7 +34,7 @@ const BET_AMOUNT = "10000000";
 // Hardcoded secrets
 const SECRET1 = "3";
 const SECRET2 = "4";
-const GAME_INDEX = 2;
+const GAME_INDEX = 11;
 
 // --------------------------------------------------
 // Wallet helper
