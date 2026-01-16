@@ -7,6 +7,9 @@ import {
   resolvePaymentKeyHash,
   pubKeyAddress,
 } from '@meshsdk/core';
+
+console.log('Main script started');
+
 import {
   koiosProvider,
   getWallet,
@@ -38,8 +41,8 @@ const blockchainProvider = koiosProvider;
  * Subscriber locks funds into the contract to start a subscription.
  */
 async function initSubscription(feeAmount: string) {
-  const subscriber = await getWallet(1);
-  const merchant = await getWallet(2);
+  const subscriber = await getWallet(0);
+  const merchant = await getWallet(1);
 
   const subPkh = resolvePaymentKeyHash(
     (await subscriber.getUsedAddresses())[0]
@@ -86,7 +89,7 @@ async function initSubscription(feeAmount: string) {
  * Merchant collects the fee if the period has passed.
  */
 async function collectFee(txHash: string) {
-  const merchant = await getWallet(2);
+  const merchant = await getWallet(1);
   const scriptAddr = getScriptAddress();
 
   const utxos = await blockchainProvider.fetchAddressUTxOs(scriptAddr);
@@ -193,7 +196,7 @@ async function collectFee(txHash: string) {
  * Subscriber cancels the subscription.
  */
 async function cancelSubscription(txHash: string) {
-  const subscriber = await getWallet(1);
+  const subscriber = await getWallet(0);
   const scriptAddr = getScriptAddress();
 
   const utxos = await blockchainProvider.fetchAddressUTxOs(scriptAddr);
@@ -244,7 +247,7 @@ async function cancelSubscription(txHash: string) {
  * Must verify funds return to Subscriber.
  */
 async function closeSubscription(txHash: string) {
-  const merchant = await getWallet(2);
+  const merchant = await getWallet(1);
   const scriptAddr = getScriptAddress();
 
   const utxos = await blockchainProvider.fetchAddressUTxOs(scriptAddr);
@@ -374,8 +377,11 @@ if (args.length > 0) {
     await prepare(count);
   } else if (cmd === 'address') {
     await showAddresses();
+  } else if (cmd === 'balance') {
+    const { checkBalances } = await import('./lib/utils.ts');
+    await checkBalances();
   } else {
-    console.log('Unknown command. Use: init, collect, cancel, prepare');
+    console.log('Unknown command. Use: init, collect, cancel, prepare, balance');
   }
 } else {
   console.log('Usage: deno run -A main.ts <command> [args]');

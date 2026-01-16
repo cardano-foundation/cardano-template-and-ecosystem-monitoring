@@ -79,3 +79,7 @@ validator subscription {
     fail
   }
 }
+
+test simple_test() {
+  1 + 1 == 2
+}
