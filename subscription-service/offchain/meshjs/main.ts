@@ -94,7 +94,10 @@ async function initSubscription(feeAmount: string) {
 async function collectFee(txHash: string) {
   const merchant = await getWallet(1);
   const scriptAddr = getScriptAddress();
-  console.log('Merchant Address:', (await merchant.getUsedAddresses())[0]);
+  const merchantAddress = (await merchant.getUsedAddresses())[0];
+  const merchantPkh = resolvePaymentKeyHash(merchantAddress);
+
+  console.log('Merchant Address:', merchantAddress);
   console.log('Script Address:', scriptAddr);
 
   console.log('Fetching UTXOs for script address...');
@@ -103,7 +106,7 @@ async function collectFee(txHash: string) {
   const utxo = utxos.find((u) => u.input.txHash === txHash);
 
   if (!utxo) {
-    console.log('UTXOs available:', utxos.map(u => u.input.txHash));
+    console.log('UTXOs available:', utxos.map((u) => u.input.txHash));
     throw new Error('Subscription UTXO not found');
   }
   if (!utxo.output.plutusData) throw new Error('No datum found in UTXO');
@@ -116,22 +119,10 @@ async function collectFee(txHash: string) {
   const blockTime = Number(tip[0].block_time); // Unix seconds
   console.log('Current Slot (Koios Tip):', currentSlot);
 
-  // Calculate System Start (Approx) - Preprod uses 1s slots
+  // Strategy for Validity window:
+  const startSlot = currentSlot - 300; // 5 mins ago
+  const endSlot = currentSlot + 3600; // 1h future
   const systemStart = blockTime - currentSlot;
-
-  // Strategy for Lagging vs Synced Nodes:
-  // Create a wide validity window that satisfies the Contract AND both Node states.
-  // 1. Contract requires: invalidBefore >= last_claim + 60s.
-  //    (We assume last_claim was backdated by 6h in INIT).
-  // 2. Lagging Node (T-4h) requires: invalidBefore <= T-4h.
-  // 3. Synced Node (T) requires: invalidHereafter > T.
-
-  // Set invalidBefore to ~6h ago (plus small buffer for period).
-  const startSlot = currentSlot - 21600 + 300; // 6h ago + 5 mins
-  // Set invalidHereafter to future.
-  const endSlot = currentSlot + 600; // 10 mins future
-
-  // Calculate Time for startSlot to synchronize with Datum
   const startSlotTime = (systemStart + startSlot) * 1000;
 
   console.log(`Validity Range: [${startSlot}, ${endSlot}]`);
@@ -152,7 +143,6 @@ async function collectFee(txHash: string) {
     datum.period,
   ]);
 
-  const merchantAddress = (await merchant.getUsedAddresses())[0];
   const merchantUtxos = await merchant.getUtxos();
   const collateral = (await merchant.getCollateral())[0] || merchantUtxos[0];
 
@@ -161,7 +151,7 @@ async function collectFee(txHash: string) {
   const inputLovelace = BigInt(
     utxo.output.amount.find((a) => a.unit === 'lovelace')?.quantity || '0'
   );
-  // Ensure we deduct the fee
+  // Merchant receives the fee, rest goes back to script
   const outputLovelace = inputLovelace - datum.fee;
 
   const txBuilder = new MeshTxBuilder({
@@ -180,11 +170,12 @@ async function collectFee(txHash: string) {
     .txInInlineDatumPresent()
     .txInRedeemerValue(mConStr0([])) // Collect
     .txInScript(scriptCbor)
-    .requiredSignerHash(resolvePaymentKeyHash(merchantAddress))
     .txOut(scriptAddr, [
       { unit: 'lovelace', quantity: outputLovelace.toString() },
     ])
     .txOutInlineDatumValue(newDatum)
+    .txOut(merchantAddress, [{ unit: 'lovelace', quantity: datum.fee.toString() }])
+    .requiredSignerHash(merchantPkh)
     .changeAddress(merchantAddress)
     .txInCollateral(
       collateral.input.txHash,
@@ -192,7 +183,7 @@ async function collectFee(txHash: string) {
       collateral.output.amount,
       collateral.output.address
     )
-    .selectUtxosFrom(await merchant.getUtxos())
+    .selectUtxosFrom(merchantUtxos)
     .invalidBefore(startSlot)
     .invalidHereafter(endSlot)
     .complete();
@@ -217,9 +208,12 @@ async function cancelSubscription(txHash: string) {
   if (!utxo) throw new Error('Subscription UTXO not found');
 
   const subscriberAddress = (await subscriber.getUsedAddresses())[0];
-  const collateral = (await subscriber.getCollateral())[0];
+  const subscriberPkh = resolvePaymentKeyHash(subscriberAddress);
+  const subscriberUtxos = await subscriber.getUtxos();
+  const collateral = (await subscriber.getCollateral())[0] || subscriberUtxos[0];
 
-  // Redeemer: Cancel = mConStr1([])
+  if (!collateral)
+    throw new Error('No collateral or UTXOs found for subscriber');
 
   const txBuilder = new MeshTxBuilder({
     fetcher: blockchainProvider,
@@ -235,9 +229,9 @@ async function cancelSubscription(txHash: string) {
       utxo.output.address
     )
     .txInInlineDatumPresent()
-    .txInRedeemerValue(mConStr1([]))
+    .txInRedeemerValue(mConStr1([])) // Cancel
     .txInScript(scriptCbor)
-    .requiredSignerHash(resolvePaymentKeyHash(subscriberAddress))
+    .requiredSignerHash(subscriberPkh)
     .changeAddress(subscriberAddress)
     .txInCollateral(
       collateral.input.txHash,
@@ -245,7 +239,7 @@ async function cancelSubscription(txHash: string) {
       collateral.output.amount,
       collateral.output.address
     )
-    .selectUtxosFrom(await subscriber.getUtxos())
+    .selectUtxosFrom(subscriberUtxos)
     .complete();
 
   const signedTx = await subscriber.signTx(tx);
@@ -270,7 +264,11 @@ async function closeSubscription(txHash: string) {
 
   const datum = decodeDatum(utxo.output.plutusData);
   const merchantAddress = (await merchant.getUsedAddresses())[0];
-  const collateral = (await merchant.getCollateral())[0];
+  const merchantPkh = resolvePaymentKeyHash(merchantAddress);
+  const merchantUtxos = await merchant.getUtxos();
+  const collateral = (await merchant.getCollateral())[0] || merchantUtxos[0];
+
+  if (!collateral) throw new Error('No collateral or UTXOs found for merchant');
 
   // Reconstruct subscriber address (Enterprise) from PubKeyHash
   const subscriberAddress = serializeAddressObj(
@@ -298,10 +296,10 @@ async function closeSubscription(txHash: string) {
     .txInInlineDatumPresent()
     .txInRedeemerValue(mConStr2([])) // Close
     .txInScript(scriptCbor)
-    .requiredSignerHash(resolvePaymentKeyHash(merchantAddress))
     .txOut(subscriberAddress, [
       { unit: 'lovelace', quantity: inputLovelace.toString() },
     ])
+    .requiredSignerHash(merchantPkh)
     .changeAddress(merchantAddress)
     .txInCollateral(
       collateral.input.txHash,
@@ -309,7 +307,7 @@ async function closeSubscription(txHash: string) {
       collateral.output.amount,
       collateral.output.address
     )
-    .selectUtxosFrom(await merchant.getUtxos())
+    .selectUtxosFrom(merchantUtxos)
     .complete();
 
   const signedTx = await merchant.signTx(tx);
