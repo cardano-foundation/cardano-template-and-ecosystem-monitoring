@@ -27,14 +27,14 @@ const NETWORK = "preprod";
 const NETWORK_ID = 0;
 
 // Hardcoded lottery params (reference repo)
-const END_REVEAL = 100;
-const DELTA = 20;
+const END_REVEAL = 100; //nominal values for test
+const DELTA = 20; //nominal values for test
 const BET_AMOUNT = "10000000";
 
 // Hardcoded secrets
 const SECRET1 = "3";
 const SECRET2 = "4";
-const GAME_INDEX = 1;
+const GAME_INDEX = 2;
 
 // --------------------------------------------------
 // Wallet helper
@@ -346,7 +346,6 @@ export async function settle(walletFile1: string, walletFile2: string) {
     const n1 = Number(hexToString(fields[4].bytes));
     const n2 = Number(hexToString(fields[5].bytes));
 
-    console.log(n1,n2)
     if (Number.isNaN(n1) || Number.isNaN(n2)) {
         throw new Error("Both secrets must be revealed before settlement");
     }
