@@ -11,7 +11,7 @@ import {
 } from "@evolution-sdk/lucid";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
-const PriceBetDatum = Data.Object({
+const PriceBetDatumSchema = Data.Object({
   owner: Data.Bytes(),
   player: Data.Nullable(Data.Bytes()),
   oracle_vkh: Data.Bytes(),
@@ -19,14 +19,16 @@ const PriceBetDatum = Data.Object({
   deadline: Data.Integer(),
   bet_amount: Data.Integer(),
 });
-type PriceBetDatum = Data.Static<typeof PriceBetDatum>;
+type PriceBetDatum = Data.Static<typeof PriceBetDatumSchema>;
+const PriceBetDatum = PriceBetDatumSchema as unknown as PriceBetDatum;
 
-const PriceBetRedeemer = Data.Enum([
+const PriceBetRedeemerSchema = Data.Enum([
   Data.Literal("Join"),
   Data.Literal("Win"),
   Data.Literal("Timeout"),
 ]);
-type PriceBetRedeemer = Data.Static<typeof PriceBetRedeemer>;
+type PriceBetRedeemer = Data.Static<typeof PriceBetRedeemerSchema>;
+const PriceBetRedeemer = PriceBetRedeemerSchema as unknown as PriceBetRedeemer;
 
 const ORACLE_ADDRESS = "addr_test1qr6tq95wj9hkte4cr7v4ggwf4l8kmu0ejq5w2pktthjc3kte2q8lazrsrxxhkfzzmxe6fsjj434p0q384cgywdnan5qw0wwsy";
 
@@ -34,8 +36,10 @@ const ORACLE_ADDRESS = "addr_test1qr6tq95wj9hkte4cr7v4ggwf4l8kmu0ejq5w2pktthjc3k
 function getPKH(address: string): string {
   try {
     const details = getAddressDetails(address);
-    return details.paymentCredential?.hash!;
-  } catch {
+    if (!details.paymentCredential) throw new Error("No payment credential");
+    return details.paymentCredential.hash;
+  } catch (e) {
+    console.error(`Error parsing address ${address}:`, e);
     // Return a dummy PKH for testing if address parsing fails in the library
     return "00000000000000000000000000000000000000000000000000000000";
   }
@@ -70,17 +74,17 @@ async function prepare(amount: number) {
 }
 
 async function balance(walletOrAddress: string | number = 0) {
-    const lucid = await Lucid(new Koios("https://preprod.koios.rest/api/v1"), "Preprod");
+    const lucid = await getLucid();
     let address: string;
-    if (typeof walletOrAddress === "number" || (!isNaN(Number(walletOrAddress)) && walletOrAddress.toString().length < 5)) {
+    if (typeof walletOrAddress === "number" || (!isNaN(Number(walletOrAddress)) && !walletOrAddress.toString().startsWith("addr"))) {
         selectWallet(lucid, walletOrAddress);
         address = await lucid.wallet().address();
     } else {
         address = walletOrAddress.toString();
     }
+    console.log(`Checking balance for: ${address}`);
     const utxos = await lucid.utxosAt(address);
     const totalLovelace = utxos.reduce((acc, utxo) => acc + utxo.assets.lovelace, 0n);
-    console.log(`Address: ${address}`);
     console.log(`Balance: ${totalLovelace} lovelace (${Number(totalLovelace) / 1000000} ADA)`);
 }
 
@@ -140,7 +144,7 @@ export async function createBet(targetRate: number, deadlineInMs: number, betAmo
     console.log(`Script Address: ${scriptAddress}`);
 
     const tx = await lucid.newTx()
-        .pay.ToAddressWithData(scriptAddress, { kind: "inline", value: Data.to(datum, PriceBetDatum) }, { lovelace: betAmount })
+      .pay.ToAddressWithData(scriptAddress, { kind: "inline", value: Data.to(datum, PriceBetDatum) }, { lovelace: betAmount })
         .complete();
     console.log("Transaction built.");
 
@@ -173,7 +177,7 @@ export async function joinBet(scriptUtxoHash: string, scriptUtxoIndex: number, w
     if (!utxo) throw new Error("UTXO not found. It might not be indexed yet or the index is different.");
     if (!utxo.datum) throw new Error("UTXO must have inline datum");
 
-    const currentDatum = Data.from(utxo.datum, PriceBetDatum);
+    const currentDatum = Data.from(utxo.datum, PriceBetDatum) as PriceBetDatum;
     if (currentDatum.player !== null) throw new Error("Bet already joined");
 
     const updatedDatum: PriceBetDatum = {
@@ -243,7 +247,7 @@ export async function timeoutBet(scriptUtxoHash: string, scriptUtxoIndex: number
     const [utxo] = await lucid.utxosByOutRef([{ txHash: scriptUtxoHash, outputIndex: scriptUtxoIndex }]);
     if (!utxo) throw new Error("UTXO not found");
 
-    const currentDatum = Data.from(utxo.datum!, PriceBetDatum);
+    const currentDatum = Data.from(utxo.datum!, PriceBetDatum) as PriceBetDatum;
 
     const tx = await lucid.newTx()
         .collectFrom([utxo], Data.to("Timeout", PriceBetRedeemer))
