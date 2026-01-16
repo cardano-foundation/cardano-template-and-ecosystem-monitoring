@@ -70,11 +70,14 @@ async function initSubscription(feeAmount: string) {
     submitter: blockchainProvider,
   });
 
+  const utxos = await subscriber.getUtxos();
+  console.log(`Subscriber has ${utxos.length} UTXOs`);
+
   const tx = await txBuilder
     .txOut(scriptAddr, [{ unit: 'lovelace', quantity: '50000000' }]) // Initial deposit
     .txOutInlineDatumValue(datum)
     .changeAddress((await subscriber.getUsedAddresses())[0])
-    .selectUtxosFrom(await subscriber.getUtxos())
+    .selectUtxosFrom(utxos)
     .complete();
 
   const signedTx = await subscriber.signTx(tx);
@@ -91,11 +94,18 @@ async function initSubscription(feeAmount: string) {
 async function collectFee(txHash: string) {
   const merchant = await getWallet(1);
   const scriptAddr = getScriptAddress();
+  console.log('Merchant Address:', (await merchant.getUsedAddresses())[0]);
+  console.log('Script Address:', scriptAddr);
 
+  console.log('Fetching UTXOs for script address...');
   const utxos = await blockchainProvider.fetchAddressUTxOs(scriptAddr);
+  console.log(`Found ${utxos.length} UTXOs`);
   const utxo = utxos.find((u) => u.input.txHash === txHash);
 
-  if (!utxo) throw new Error('Subscription UTXO not found');
+  if (!utxo) {
+    console.log('UTXOs available:', utxos.map(u => u.input.txHash));
+    throw new Error('Subscription UTXO not found');
+  }
   if (!utxo.output.plutusData) throw new Error('No datum found in UTXO');
 
   const datum = decodeDatum(utxo.output.plutusData);
@@ -143,7 +153,10 @@ async function collectFee(txHash: string) {
   ]);
 
   const merchantAddress = (await merchant.getUsedAddresses())[0];
-  const collateral = (await merchant.getCollateral())[0];
+  const merchantUtxos = await merchant.getUtxos();
+  const collateral = (await merchant.getCollateral())[0] || merchantUtxos[0];
+
+  if (!collateral) throw new Error('No collateral or UTXOs found for merchant');
 
   const inputLovelace = BigInt(
     utxo.output.amount.find((a) => a.unit === 'lovelace')?.quantity || '0'

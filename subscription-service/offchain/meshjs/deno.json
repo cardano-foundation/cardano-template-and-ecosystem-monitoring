@@ -6,7 +6,8 @@
     "collect": "deno run --allow-read --allow-write --allow-net --allow-env --unstable-detect-cjs main.ts collect",
     "cancel": "deno run --allow-read --allow-write --allow-net --allow-env --unstable-detect-cjs main.ts cancel",
     "close": "deno run --allow-read --allow-write --allow-net --allow-env --unstable-detect-cjs main.ts close",
-    "address": "deno run --allow-read --allow-write --allow-net --allow-env --unstable-detect-cjs main.ts address",
+    "address": "deno run --allow-all --unstable-detect-cjs main.ts address",
+    "balance": "deno run --allow-all --unstable-detect-cjs main.ts balance",
     "dev": "deno run --watch --allow-read --allow-write --allow-net --allow-env --unstable-detect-cjs main.ts"
   },
   "imports": {
