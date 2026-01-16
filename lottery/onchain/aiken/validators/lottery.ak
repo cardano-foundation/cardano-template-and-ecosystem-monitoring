@@ -1,12 +1,9 @@
 use aiken/collection/list
 use aiken/crypto.{VerificationKeyHash, blake2b_256}
 use aiken/primitive/int
-use cardano/address.{VerificationKey}
-use cardano/assets.{lovelace_of}
 use cardano/transaction.{InlineDatum, OutputReference, Transaction, find_input}
 use cocktail/vodka_extra_signatories.{key_signed}
 use cocktail/vodka_validity_range.{valid_after}
-use cocktail/vodka_value.{outputs_value}
 
 pub type LotteryDatum {
   player1: VerificationKeyHash,
@@ -29,7 +26,7 @@ pub type LotteryRedeemer {
   Settle
 }
 
-validator lottery (_game_index: Int){
+validator lottery(_game_index: Int) {
   spend(
     _datum_opt: Option<Data>,
     // ignored on purpose
@@ -57,22 +54,12 @@ validator lottery (_game_index: Int){
       delta,
     } = datum
 
-    let pays_to =
-      fn(pkh) {
-        let locked = lovelace_of(own_input.output.value)
-
-        let paid_to_pkh =
-          outputs
-            |> list.filter(
-                fn(o) { o.address.payment_credential == VerificationKey(pkh) },
-              )
-            |> outputs_value
-            |> lovelace_of
-        trace @"foo": paid_to_pkh
-        trace @"foo": locked
-
-        paid_to_pkh == locked
-      }
+    let script_utxo_consumed =
+      (
+        outputs
+          |> list.filter(fn(o) { o.address == own_input.output.address })
+          |> list.length
+      ) == 0
 
     when redeemer is {
       // ---------- Player 1 reveal ----------
@@ -92,14 +79,14 @@ validator lottery (_game_index: Int){
         n1 == "" && valid_after(validity_range, end_reveal)? && key_signed(
           extra_signatories,
           player2,
-        )? && pays_to(player2)?
+        )? && script_utxo_consumed?
 
       // ---------- Timeout: player1 wins ----------
       Timeout2 ->
         n1 != "" && n2 == "" && valid_after(validity_range, end_reveal + delta) && key_signed(
           extra_signatories,
           player1,
-        ) && pays_to(player1)
+        ) && script_utxo_consumed
 
       // ---------- Final settlement ----------
       Settle -> {
@@ -115,9 +102,7 @@ validator lottery (_game_index: Int){
             player2
           }
 
-        both_revealed && key_signed(extra_signatories, winner) && pays_to(
-          winner,
-        )
+        both_revealed && key_signed(extra_signatories, winner) && script_utxo_consumed
       }
     }
   }
