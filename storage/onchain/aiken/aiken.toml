@@ -1,0 +1,8 @@
+name = "cardano-foundation/storage"
+version = "0.1.0"
+license = "Apache-2.0"
+description = "Storage use case: owner-controlled datum state (key/value bytes)."
+
+dependencies = [
+  { name = "aiken-lang/stdlib", version = "2.2.0", source = "github" },
+]

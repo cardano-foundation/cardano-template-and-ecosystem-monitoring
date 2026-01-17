@@ -1,0 +1,14 @@
+{
+  "tasks": {
+    "fmt": "deno fmt",
+    "lint": "deno lint",
+    "check": "deno check main.ts",
+    "lock": "deno run -A main.ts lock",
+    "set": "deno run -A main.ts set",
+    "delete": "deno run -A main.ts delete"
+  },
+  "imports": {
+    "@meshsdk/core": "npm:@meshsdk/core",
+    "@meshsdk/core-csl": "npm:@meshsdk/core-csl"
+  }
+}
