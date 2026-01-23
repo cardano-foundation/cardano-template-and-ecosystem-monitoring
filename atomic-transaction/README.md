@@ -147,3 +147,118 @@ The output should show:
 ## 🎯 Key Takeaway
 
 This example demonstrates that **Cardano transactions are atomic by design**. You don't need special mechanisms or additional logic to ensure atomicity - it's a fundamental guarantee of the protocol. When building complex transactions with multiple validator executions, you can rely on this property to ensure consistent state transitions.
+
+
+## 📄 Off-chain (MeshJS – Deno)
+
+This repository also includes an alternative off-chain implementation using **MeshJS**, written in **TypeScript** and executed with **Deno**.
+
+The MeshJS implementation demonstrates the same atomic transaction guarantees as the Java example, using a single orchestrated off-chain flow.
+
+### 📁 Location
+
+```text
+atomic-transaction/offchain/meshjs
+```
+
+---
+
+### 🔌 Prerequisites
+
+Ensure the following are available:
+
+* [Deno](https://deno.land/)
+* A running Cardano devnet or testnet (for example via Yaci DevKit)
+* A wallet JSON file funded with test ADA
+
+Wallet files are expected to contain signing keys compatible with MeshJS.
+
+---
+
+### ▶️ Running the MeshJS Off-chain Code
+
+Navigate to the MeshJS off-chain directory:
+
+```shell
+cd atomic-transaction/offchain/meshjs
+```
+
+All commands below are executed from this directory.
+
+---
+
+## 🧪 Example Flow (MeshJS)
+
+The MeshJS off-chain code executes the full atomic transaction flow in a **single function**, coordinating multiple on-chain steps.
+
+### Step 1: Mint and Lock (Setup)
+
+* A token is minted using an **always-success minting policy**
+* The minted token and some ADA are locked at the **atomic script address**
+* This step is purely setup and does **not** involve password validation
+
+```shell
+deno run -A atomic-transaction.ts run wallet_0.json
+```
+
+
+---
+
+### Step 2: Wait for Chain Confirmation
+
+The off-chain code waits until the script UTXO appears on-chain before continuing:
+
+
+This ensures the next transaction is built against confirmed chain state.
+
+---
+
+### Step 3: Atomic Spend + Password-Gated Mint
+
+A **single transaction** is constructed that:
+
+* Spends the script UTXO (the spending validator always returns `true`)
+* Mints a token using the password-gated minting validator
+* Uses `"super_secret_password"` as the mint redeemer
+
+Because Cardano transactions are atomic:
+
+* If the password is **incorrect**, the entire transaction fails
+* If the password is **correct**, both the spend and mint succeed together
+
+Sample output on success:
+
+Sample output:
+```text
+atomic-transaction\offchain\meshjs> deno run -A atomic-transaction.ts run wallet_0.json
+Step 1: Minting (using always succeed script) and locking at script
+Script utxo setup tx submitted: Tx hash:  7f6cffd54ca3121e865654ebbb4728f1cdd2c70c976ce47a9401c8f17a8d06e8
+Polling blockchain ledger to detect script utxo
+Waiting for 20 seconds before next check..
+Script UTxO found
+
+Step 2: Executing atomic spend + mint
+Atomic transaction submitted: Tx hash:  872443886db42d88c449d458dfd8b9f3ede3d84f5028450aa0c99c375df0c20d
+```
+
+---
+
+## 🔍 Verification
+
+The transactions can be inspected using:
+
+* Yaci Viewer (for local devnet)
+* Any Cardano explorer compatible with the chosen testnet
+
+You should observe:
+
+* A setup transaction creating a script-locked UTXO
+* A single atomic transaction that both spends the UTXO and mints the token
+
+---
+
+## 🎯 MeshJS Takeaway
+
+This MeshJS example demonstrates that **Cardano’s atomicity guarantees apply regardless of tooling**.
+
+Even though the spending validator always succeeds, the final outcome of the transaction is governed by the minting validator. When multiple validators execute within a single transaction, **all must pass or none take effect**—a core property of Cardano’s eUTxO model.
