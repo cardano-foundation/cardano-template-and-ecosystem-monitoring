@@ -30,7 +30,7 @@ The 21 use cases identified in the research paper are as follows:
 9. [Vesting](vesting/README.md)  
 10. Storage  
 11. Simple wallet  
-12. Price Bet  
+12. [Price Bet](pricebet/README.md)  
 13. [Payment splitter](payment-splitter/README.md)
 14. Lottery  
 15. Constant-product AMM  
