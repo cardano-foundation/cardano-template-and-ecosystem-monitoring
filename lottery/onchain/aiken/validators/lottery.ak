@@ -66,13 +66,13 @@ validator lottery(_game_index: Int) {
       Reveal1 { n1: r1 } ->
         key_signed(extra_signatories, player1) && n1 == "" && r1 != "" && blake2b_256(
           r1,
-        ) == commit1
+        ) == commit1 && (!script_utxo_consumed)?
 
       // ---------- Player 2 reveal ----------
       Reveal2 { n2: r2 } ->
         key_signed(extra_signatories, player2) && n1 != "" && n2 == "" && r2 != "" && blake2b_256(
           r2,
-        ) == commit2
+        ) == commit2 && (!script_utxo_consumed)?
 
       // ---------- Timeout: player2 wins ----------
       Timeout1 ->
