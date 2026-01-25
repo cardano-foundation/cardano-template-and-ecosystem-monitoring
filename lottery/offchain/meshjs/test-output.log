@@ -1,17 +1,32 @@
 lottery\offchain\meshjs> deno run -A lottery.ts multisig-create wallet_0.json wallet_1.json wallet_2.json
 Lottery created with marker token
-Script address: addr_test1wqt6x4rn3tu8g9xrdhcwvnemhhy7dwssnl59n4xj9fvqx7gwlndkf
-Policy ID: 6e7fcb6f82b40b09f585e33e5b227eb3818de4123277b56cacfbca86
+Script address: addr_test1wzz9k44s0uu0a57nfm3m350cerha7u32rus8tzmpckr0z4gpanr7a
+Policy ID: 2d31f63e018d753c4d46d3d4694fc20c092bf6516d57413d520bdfad
 Asset name: LOTTERY_TOKEN
-Tx Id: 5da24f97b6733edccce781bc6d1e5b811f4f03cc6a88435f0dc7fa6e58fe9202
+Tx Id: 156b3ac0633fbb28238f0703df204169f8d98fd50d5e0b31612183e69d482e27
 
 lottery\offchain\meshjs> deno run -A lottery.ts reveal1 wallet_1.json
-Tx submitted: 17f56daed2e5e7927c9ea11764ad9e5365484852bbe70f90629d5977b12163a1
+Tx submitted: 896a8d509e4dac2e03aaf9c3845510cc382918be86523a179a01894f48896d41
 
 lottery\offchain\meshjs> deno run -A lottery.ts reveal2 wallet_2.json
-Tx submitted: c2964ee8ec7045299ce5bc5ed3115cee74a6e35ac8d20306293cced69f45ebac
+Tx submitted: e383556f603804f7e21a86b28aa2e1eb4745f4973184d25ba9d0639769ede7d7
 
 lottery\offchain\meshjs> deno run -A lottery.ts settle wallet_1.json wallet_2.json
 Lottery settled
 Winner PKH: 72b46a9927fd32da5c2f11365b6f20f9af930e63974e4f8935064215
-Tx Id: 99e828900c748ea9cd549c4c3f63a819939eb13cd4e5e1722409fb81be552be1
+Tx Id: 9ae05c303cceba98781c58b597ef00075a9c6f2ec5b252918ca822ccffd5e2eb
+
+
+
+# Timeout
+
+
+lottery\offchain\meshjs> deno run -A lottery.ts multisig-create wallet_0.json wallet_1.json wallet_2.json
+Lottery created with marker token
+Script address: addr_test1wpqdx328cr84tc8v8wktevtunm8k882anxuzzrwn9v7tefgf6ccfw
+Policy ID: 58357ead852eda1fc62ba27cf98a6498761a10f52cbb827e7360fb6b
+Asset name: LOTTERY_TOKEN
+Tx Id: 3214fb37beda0206fea2f36341e6f2195ca530c6e7bfbf608afaf88c1b6741b0
+
+lottery\offchain\meshjs> deno run -A lottery.ts timeout1 wallet_2.json
+Tx submitted: e62a466afdb34c72195d1cc153e2c15d56b4a319192e2db31594ec9fcecef7f6

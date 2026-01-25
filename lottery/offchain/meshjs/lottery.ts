@@ -1,6 +1,6 @@
 import {
   applyParamsToScript,
-  conStr,
+  SLOT_CONFIG_NETWORK, unixTimeToEnclosingSlot,  conStr,
   deserializeDatum,
   hexToString,
   integer,
@@ -33,7 +33,7 @@ const BET_AMOUNT = '10000000';
 // Hardcoded secrets
 const SECRET1 = '3';
 const SECRET2 = '4';
-const GAME_INDEX = 18;
+const GAME_INDEX = 19;
 
 // --------------------------------------------------
 // Wallet helper
@@ -299,7 +299,6 @@ async function spendLotteryUtxoForReveal(
 async function spendLotteryUtxoForTimeout(
   wallet: MeshWallet,
   provider: KoiosProvider,
-  scripts: { script: string; address: string },
   utxo: any,
   redeemer: any
 ) {
@@ -309,27 +308,42 @@ async function spendLotteryUtxoForTimeout(
   const collateral = (await wallet.getCollateral())[0];
   const walletUtxos = await provider.fetchAddressUTxOs(changeAddr);
 
+  const { lottery, creator } = loadLotteryScripts();
+
   const tx = new MeshTxBuilder({
     fetcher: provider,
     submitter: provider,
     evaluator: provider
   }).setNetwork(NETWORK);
 
+  const TOKEN_NAME = stringToHex('LOTTERY_TOKEN');
+  const policyId = getScriptHash(creator.script);
+
   await tx
+    .mintPlutusScriptV3()
+    .mint('-1', policyId, TOKEN_NAME)
+    .mintingScript(creator.script)
+    .mintRedeemerValue(mConStr1([]))
     .spendingPlutusScriptV3()
     .txIn(
       utxo.input.txHash,
       utxo.input.outputIndex,
       utxo.output.amount,
-      scripts.address
+      lottery.address
     )
     .txInInlineDatumPresent()
     .txInRedeemerValue(redeemer, 'JSON')
-    .txInScript(scripts.script)
+    .txInScript(lottery.script)
 
     .txOut(
       changeAddr,
       [{ unit: 'lovelace', quantity: BET_AMOUNT }]
+    )
+    .invalidBefore(
+      unixTimeToEnclosingSlot(
+        Date.now() - 24 * 60 * 60 * 1000,
+        SLOT_CONFIG_NETWORK.preprod
+      )
     )
 
     .txInCollateral(
@@ -410,7 +424,7 @@ export async function timeout1(walletFile: string) {
   const { lottery: scripts } = loadLotteryScripts();
   const utxo = await getLotteryUtxo(provider, scripts.address);
 
-  await spendLotteryUtxoForTimeout(wallet, provider, scripts, utxo, timeout1Redeemer());
+  await spendLotteryUtxoForTimeout(wallet, provider, utxo, timeout1Redeemer());
 }
 
 export async function timeout2(walletFile: string) {
@@ -419,7 +433,7 @@ export async function timeout2(walletFile: string) {
   const { lottery: scripts } = loadLotteryScripts();
   const utxo = await getLotteryUtxo(provider, scripts.address);
 
-  await spendLotteryUtxoForTimeout(wallet, provider, scripts, utxo, timeout2Redeemer());
+  await spendLotteryUtxoForTimeout(wallet, provider, utxo, timeout2Redeemer());
 }
 
 export async function settle(walletFile1: string, walletFile2: string) {
