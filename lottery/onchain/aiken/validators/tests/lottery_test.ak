@@ -1,5 +1,5 @@
 use aiken/crypto.{blake2b_256}
-use cardano/assets.{from_lovelace}
+use cardano/assets.{from_lovelace,merge,from_asset}
 use cardano/transaction.{InlineDatum, Input, Output}
 use lottery.{LotteryDatum, Reveal1, Reveal2, Settle, Timeout1, Timeout2}
 use mocktail.{
@@ -7,12 +7,14 @@ use mocktail.{
   tx_out_inline_datum,
 }
 use mocktail/virgin_address.{mock_pub_key_address, mock_script_address}
-use mocktail/virgin_key_hash.{mock_pub_key_hash}
+use mocktail/virgin_key_hash.{mock_policy_id, mock_pub_key_hash}
 use mocktail/virgin_output_reference.{mock_utxo_ref}
 
 // --------------------------------------------------
 // Shared test constants
 // --------------------------------------------------
+
+const mint_policy_id = mock_policy_id(0)
 
 const player1 = mock_pub_key_hash(1)
 
@@ -57,7 +59,7 @@ fn script_input(oref, datum, val) {
     output_reference: oref,
     output: Output {
       address: script_addr,
-      value: val,
+      value: merge(from_asset(mint_policy_id,"LOTTERY_TOKEN",1), val),
       datum: InlineDatum(datum),
       reference_script: None,
     },
@@ -90,7 +92,7 @@ test reveal1_valid() {
           script_input(oref, initial_datum, from_lovelace(10_000_000)),
         )
 
-  lottery.lottery.spend(1, None, Reveal1 { n1 }, oref, tx)
+  lottery.lottery.spend(mint_policy_id, 1, None, Reveal1 { n1 }, oref, tx)
 }
 
 test reveal1_invalid_wrong_signer() {
@@ -119,7 +121,7 @@ test reveal1_invalid_wrong_signer() {
           script_input(oref, initial_datum, from_lovelace(10_000_000)),
         )
 
-  !lottery.lottery.spend(1, None, Reveal1 { n1 }, oref, tx)
+  !lottery.lottery.spend(mint_policy_id, 1, None, Reveal1 { n1 }, oref, tx)
 }
 
 test timeout1_valid_player2_wins() {
@@ -136,7 +138,7 @@ test timeout1_valid_player2_wins() {
           script_input(oref, initial_datum, from_lovelace(10_000_000)),
         )
 
-  lottery.lottery.spend(1, None, Timeout1, oref, tx)
+  lottery.lottery.spend(mint_policy_id, 1, None, Timeout1, oref, tx)
 }
 
 test settle_valid_player1_wins() {
@@ -161,10 +163,10 @@ test settle_valid_player1_wins() {
       |> complete()
       |> add_input(
           True,
-          script_input(oref, revealed_datum, from_lovelace(20_000_000)),
+          script_input(oref, revealed_datum, from_lovelace(10_000_000)),
         )
 
-  lottery.lottery.spend(1, None, Settle, oref, tx)
+  lottery.lottery.spend(mint_policy_id, 1, None, Settle, oref, tx)
 }
 
 test reveal2_valid() {
@@ -197,15 +199,15 @@ test reveal2_valid() {
   let tx =
     mocktail_tx()
       |> required_signer_hash(True, player2)
-      |> tx_out(True, script_addr, from_lovelace(20_000_000))
+      |> tx_out(True, script_addr, from_lovelace(10_000_000))
       |> tx_out_inline_datum(True, new_datum)
       |> complete()
       |> add_input(
           True,
-          script_input(oref, revealed1_datum, from_lovelace(20_000_000)),
+          script_input(oref, revealed1_datum, from_lovelace(10_000_000)),
         )
 
-  lottery.lottery.spend(1, None, Reveal2 { n2 }, oref, tx)
+  lottery.lottery.spend(mint_policy_id, 1, None, Reveal2 { n2 }, oref, tx)
 }
 
 test timeout2_valid_player1_wins() {
@@ -234,7 +236,7 @@ test timeout2_valid_player1_wins() {
           script_input(oref, revealed1_datum, from_lovelace(10_000_000)),
         )
 
-  lottery.lottery.spend(1, None, Timeout2, oref, tx)
+  lottery.lottery.spend(mint_policy_id, 1, None, Timeout2, oref, tx)
 }
 
 test settle_invalid_wrong_winner() {
@@ -259,8 +261,8 @@ test settle_invalid_wrong_winner() {
       |> complete()
       |> add_input(
           True,
-          script_input(oref, revealed_datum, from_lovelace(20_000_000)),
+          script_input(oref, revealed_datum, from_lovelace(10_000_000)),
         )
 
-  !lottery.lottery.spend(1, None, Settle, oref, tx)
+  !lottery.lottery.spend(mint_policy_id, 1, None, Settle, oref, tx)
 }

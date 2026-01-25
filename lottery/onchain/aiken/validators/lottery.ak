@@ -1,9 +1,11 @@
 use aiken/collection/list
 use aiken/crypto.{VerificationKeyHash, blake2b_256}
 use aiken/primitive/int
+use cardano/assets.{PolicyId}
 use cardano/transaction.{InlineDatum, OutputReference, Transaction, find_input}
 use cocktail/vodka_extra_signatories.{key_signed}
 use cocktail/vodka_validity_range.{valid_after}
+use cocktail/vodka_inputs.{inputs_with_policy}
 
 pub type LotteryDatum {
   player1: VerificationKeyHash,
@@ -26,10 +28,9 @@ pub type LotteryRedeemer {
   Settle
 }
 
-validator lottery(_game_index: Int) {
+validator lottery(policy_id: PolicyId, _game_index: Int) {
   spend(
     _datum_opt: Option<Data>,
-    // ignored on purpose
     redeemer: LotteryRedeemer,
     oref: OutputReference,
     tx: Transaction,
@@ -38,8 +39,7 @@ validator lottery(_game_index: Int) {
       tx
 
     // 1. Locate the script input
-    expect Some(own_input) = find_input(inputs, oref)
-
+    expect Some(own_input) = inputs_with_policy(inputs,policy_id) |> find_input(oref)
     // 2. Extract inline datum (the state)
     expect InlineDatum(datum) = own_input.output.datum
 
