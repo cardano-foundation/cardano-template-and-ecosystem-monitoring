@@ -1,40 +1,39 @@
 import {
-  KoiosProvider,
-  scriptHash,  MeshTxBuilder,
-  MeshWallet,
-  deserializeDatum,
-  serializePlutusScript,
-  resolvePaymentKeyHash,
-  mConStr0,
-  resolveScriptHash,  mConStr1,
-  mConStr2,
-  mConStr3,
-  mConStr4,
   applyParamsToScript,
-  stringToHex,
-  hexToString,
   conStr,
-  integer
-} from "@meshsdk/core";
-import { blake2b } from "@cardano-sdk/crypto";
-import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
+  deserializeDatum,
+  hexToString,
+  integer,
+  KoiosProvider,
+  mConStr0,
+  mConStr1,
+  MeshTxBuilder,
+  MeshWallet,
+  resolvePaymentKeyHash,
+  resolveScriptHash,
+  scriptHash,
+  serializePlutusScript,
+  stringToHex
+} from '@meshsdk/core';
+import { blake2b } from '@cardano-sdk/crypto';
+import blueprint from '../../onchain/aiken/plutus.json' with { type: 'json' };
 
 // --------------------------------------------------
 // Configuration
 // --------------------------------------------------
 
-const NETWORK = "preprod";
+const NETWORK = 'preprod';
 const NETWORK_ID = 0;
 
 // Hardcoded lottery params (reference repo)
 const END_REVEAL = 100; // nominal values for test
 const DELTA = 20; // nominal values for test
-const BET_AMOUNT = "10000000";
+const BET_AMOUNT = '10000000';
 
 // Hardcoded secrets
-const SECRET1 = "3";
-const SECRET2 = "4";
-const GAME_INDEX = 16;
+const SECRET1 = '3';
+const SECRET2 = '4';
+const GAME_INDEX = 18;
 
 // --------------------------------------------------
 // Wallet helper
@@ -48,7 +47,7 @@ function loadWallet(walletFile: string): MeshWallet {
     networkId: NETWORK_ID,
     fetcher: provider,
     submitter: provider,
-    key: { type: "mnemonic", words: mnemonic },
+    key: { type: 'mnemonic', words: mnemonic }
   });
 }
 
@@ -58,7 +57,7 @@ function loadWallet(walletFile: string): MeshWallet {
 
 function getValidator(name: string) {
   const v = blueprint.validators.find(v =>
-    v.title.startsWith(name),
+    v.title.startsWith(name)
   );
   if (!v) {
     throw new Error(`Validator not found: ${name}`);
@@ -68,42 +67,42 @@ function getValidator(name: string) {
 
 function getScriptAddress(compiled: string) {
   const { address } = serializePlutusScript(
-    { code: compiled, version: "V3" },
+    { code: compiled, version: 'V3' },
     undefined,
-    NETWORK_ID,
+    NETWORK_ID
   );
   return address;
 }
 
 function getScriptHash(compiledCode: string) {
-  return resolveScriptHash(compiledCode, "V3");
+  return resolveScriptHash(compiledCode, 'V3');
 }
 
 function loadLotteryScripts() {
 
   // Lottery creator validator
   const creatorScript = applyParamsToScript(
-    getValidator("lottery_creator."),
+    getValidator('lottery_creator.'),
     [integer(GAME_INDEX)],
-    "JSON",
+    'JSON'
   );
 
   // Lottery spending validator
   const lotteryScript = applyParamsToScript(
-    getValidator("lottery."),
-    [scriptHash(getScriptHash(creatorScript)),integer(GAME_INDEX)],
-    "JSON",
+    getValidator('lottery.'),
+    [scriptHash(getScriptHash(creatorScript)), integer(GAME_INDEX)],
+    'JSON'
   );
 
   return {
     lottery: {
       script: lotteryScript,
-      address: getScriptAddress(lotteryScript),
+      address: getScriptAddress(lotteryScript)
     },
     creator: {
       script: creatorScript,
-      address: getScriptAddress(creatorScript),
-    },
+      address: getScriptAddress(creatorScript)
+    }
   };
 }
 
@@ -113,8 +112,8 @@ function loadLotteryScripts() {
 
 function bytesToHex(bytes: Uint8Array): string {
   return [...bytes]
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
 }
 
 const hashSecret = (s: string): string => {
@@ -129,12 +128,12 @@ const hashSecret = (s: string): string => {
 
 async function getLotteryUtxo(
   provider: KoiosProvider,
-  address: string,
+  address: string
 ) {
   const utxos = await provider.fetchAddressUTxOs(address);
   const state = utxos.find(u => u.output.plutusData);
 
-  if (!state) throw new Error("Lottery state UTxO not found");
+  if (!state) throw new Error('Lottery state UTxO not found');
   return state;
 }
 
@@ -144,7 +143,7 @@ async function getLotteryUtxo(
 export async function multisigCreate(
   coordinatorFile: string,
   player1File: string,
-  player2File: string,
+  player2File: string
 ) {
   const coordinator = loadWallet(coordinatorFile);
   const player1 = loadWallet(player1File);
@@ -161,7 +160,7 @@ export async function multisigCreate(
   const player2Pkh = resolvePaymentKeyHash(await player2.getChangeAddress());
 
   // Marker token details
-  const TOKEN_NAME = stringToHex("LOTTERY_TOKEN");
+  const TOKEN_NAME = stringToHex('LOTTERY_TOKEN');
   const policyId = getScriptHash(creator.script);
   const unit = policyId + TOKEN_NAME;
 
@@ -171,28 +170,28 @@ export async function multisigCreate(
     player2Pkh,
     hashSecret(SECRET1),
     hashSecret(SECRET2),
-    "",
-    "",
+    '',
+    '',
     END_REVEAL,
-    DELTA,
+    DELTA
   ]);
 
   const tx = new MeshTxBuilder({
     fetcher: provider,
     submitter: provider,
-    evaluator: provider,
+    evaluator: provider
   }).setNetwork(NETWORK);
 
   await tx
     // Mint marker token
     .mintPlutusScriptV3()
-    .mint("1", policyId,TOKEN_NAME)
+    .mint('1', policyId, TOKEN_NAME)
     .mintingScript(creator.script)
     .mintRedeemerValue(mConStr0([]))
     // Lock ADA + marker token at lottery script
     .txOut(lottery.address, [
-      { unit: "lovelace", quantity: BET_AMOUNT },
-      { unit, quantity: "1" },
+      { unit: 'lovelace', quantity: BET_AMOUNT },
+      { unit, quantity: '1' }
     ])
     .txOutInlineDatumValue(datum)
 
@@ -205,7 +204,7 @@ export async function multisigCreate(
       collateral.input.txHash,
       collateral.input.outputIndex,
       collateral.output.amount,
-      collateral.output.address,
+      collateral.output.address
     )
     .changeAddress(coordAddr)
     .selectUtxosFrom(utxos)
@@ -217,11 +216,11 @@ export async function multisigCreate(
 
   const hash = await coordinator.submitTx(s3);
 
-  console.log("Lottery created with marker token");
-  console.log("Script address:", lottery.address);
-  console.log("Policy ID:", policyId);
-  console.log("Asset name:", "LOTTERY_TOKEN");
-  console.log("Tx Id:", hash);
+  console.log('Lottery created with marker token');
+  console.log('Script address:', lottery.address);
+  console.log('Policy ID:', policyId);
+  console.log('Asset name:', 'LOTTERY_TOKEN');
+  console.log('Tx Id:', hash);
 }
 
 
@@ -240,16 +239,16 @@ const timeout2Redeemer = () => conStr(3, []);
 const settleRedeemer = () => conStr(4, []);
 
 // --------------------------------------------------
-// Generic spend helper (UNCHANGED)
+// Generic spend helper
 // --------------------------------------------------
 
-async function spendLotteryUtxo(
+async function spendLotteryUtxoForReveal(
   wallet: MeshWallet,
   provider: KoiosProvider,
   scripts: { script: string; address: string },
   utxo: any,
   redeemer: any,
-  newDatum?: any,
+  newDatum: any
 ) {
   const changeAddr = await wallet.getChangeAddress();
   const signerPkh = resolvePaymentKeyHash(changeAddr);
@@ -260,7 +259,7 @@ async function spendLotteryUtxo(
   const tx = new MeshTxBuilder({
     fetcher: provider,
     submitter: provider,
-    evaluator: provider,
+    evaluator: provider
   }).setNetwork(NETWORK);
 
   await tx
@@ -269,24 +268,22 @@ async function spendLotteryUtxo(
       utxo.input.txHash,
       utxo.input.outputIndex,
       utxo.output.amount,
-      scripts.address,
+      scripts.address
     )
     .txInInlineDatumPresent()
-    .txInRedeemerValue(redeemer, "JSON")
+    .txInRedeemerValue(redeemer, 'JSON')
     .txInScript(scripts.script);
 
-  if (newDatum) {
-    await tx
-      .txOut(scripts.address, utxo.output.amount)
-      .txOutInlineDatumValue(newDatum);
-  }
+  await tx
+    .txOut(scripts.address, utxo.output.amount)
+    .txOutInlineDatumValue(newDatum);
 
   await tx
     .txInCollateral(
       collateral.input.txHash,
       collateral.input.outputIndex,
       collateral.output.amount,
-      collateral.output.address,
+      collateral.output.address
     )
     .requiredSignerHash(signerPkh)
     .changeAddress(changeAddr)
@@ -296,8 +293,62 @@ async function spendLotteryUtxo(
   const signed = await wallet.signTx(tx.txHex, true);
   const hash = await wallet.submitTx(signed);
 
-  console.log("Tx submitted:", hash);
+  console.log('Tx submitted:', hash);
 }
+
+async function spendLotteryUtxoForTimeout(
+  wallet: MeshWallet,
+  provider: KoiosProvider,
+  scripts: { script: string; address: string },
+  utxo: any,
+  redeemer: any
+) {
+  const changeAddr = await wallet.getChangeAddress();
+  const signerPkh = resolvePaymentKeyHash(changeAddr);
+
+  const collateral = (await wallet.getCollateral())[0];
+  const walletUtxos = await provider.fetchAddressUTxOs(changeAddr);
+
+  const tx = new MeshTxBuilder({
+    fetcher: provider,
+    submitter: provider,
+    evaluator: provider
+  }).setNetwork(NETWORK);
+
+  await tx
+    .spendingPlutusScriptV3()
+    .txIn(
+      utxo.input.txHash,
+      utxo.input.outputIndex,
+      utxo.output.amount,
+      scripts.address
+    )
+    .txInInlineDatumPresent()
+    .txInRedeemerValue(redeemer, 'JSON')
+    .txInScript(scripts.script)
+
+    .txOut(
+      changeAddr,
+      [{ unit: 'lovelace', quantity: BET_AMOUNT }]
+    )
+
+    .txInCollateral(
+      collateral.input.txHash,
+      collateral.input.outputIndex,
+      collateral.output.amount,
+      collateral.output.address
+    )
+    .requiredSignerHash(signerPkh)
+    .changeAddress(changeAddr)
+    .selectUtxosFrom(walletUtxos)
+    .complete();
+
+  const signed = await wallet.signTx(tx.txHex, true);
+  const hash = await wallet.submitTx(signed);
+
+  console.log('Tx submitted:', hash);
+}
+
 
 // --------------------------------------------------
 // Reveal helpers
@@ -307,7 +358,7 @@ async function reveal(
   walletFile: string,
   player: 1 | 2,
   secret: string,
-  redeemerFn: (s: string) => any,
+  redeemerFn: (s: string) => any
 ) {
   const wallet = loadWallet(walletFile);
   const provider = new KoiosProvider(NETWORK);
@@ -317,27 +368,27 @@ async function reveal(
   const fields = deserializeDatum(utxo.output.plutusData).fields;
 
   const newDatum = mConStr0([
-        fields[0].bytes, // player1
-        fields[1].bytes, // player2
-        fields[2].bytes, // commit1
-        fields[3].bytes, // commit2
+    fields[0].bytes, // player1
+    fields[1].bytes, // player2
+    fields[2].bytes, // commit1
+    fields[3].bytes, // commit2
 
-        // n1
+    // n1
     player === 1 ? stringToHex(secret) : fields[4].bytes,
 
-        // n2
+    // n2
     player === 2 ? stringToHex(secret) : fields[5].bytes,
     END_REVEAL,
-    DELTA,
+    DELTA
   ]);
 
-  await spendLotteryUtxo(
+  await spendLotteryUtxoForReveal(
     wallet,
     provider,
     scripts,
     utxo,
     redeemerFn(secret),
-    newDatum,
+    newDatum
   );
 }
 
@@ -359,7 +410,7 @@ export async function timeout1(walletFile: string) {
   const { lottery: scripts } = loadLotteryScripts();
   const utxo = await getLotteryUtxo(provider, scripts.address);
 
-  await spendLotteryUtxo(wallet, provider, scripts, utxo, timeout1Redeemer());
+  await spendLotteryUtxoForTimeout(wallet, provider, scripts, utxo, timeout1Redeemer());
 }
 
 export async function timeout2(walletFile: string) {
@@ -368,12 +419,12 @@ export async function timeout2(walletFile: string) {
   const { lottery: scripts } = loadLotteryScripts();
   const utxo = await getLotteryUtxo(provider, scripts.address);
 
-  await spendLotteryUtxo(wallet, provider, scripts, utxo, timeout2Redeemer());
+  await spendLotteryUtxoForTimeout(wallet, provider, scripts, utxo, timeout2Redeemer());
 }
 
 export async function settle(walletFile1: string, walletFile2: string) {
   const provider = new KoiosProvider(NETWORK);
-  const { lottery: scripts } = loadLotteryScripts();
+  const { lottery, creator } = loadLotteryScripts();
 
   const wallet1 = loadWallet(walletFile1);
   const wallet2 = loadWallet(walletFile2);
@@ -384,25 +435,25 @@ export async function settle(walletFile1: string, walletFile2: string) {
   const pkh1 = resolvePaymentKeyHash(addr1);
   const pkh2 = resolvePaymentKeyHash(addr2);
 
-    // Fetch lottery state
-  const utxo = await getLotteryUtxo(provider, scripts.address);
+  // Fetch lottery state
+  const utxo = await getLotteryUtxo(provider, lottery.address);
   const fields = deserializeDatum(utxo.output.plutusData).fields;
 
-    const player1 = fields[0].bytes;
-    const player2 = fields[1].bytes;
+  const player1 = fields[0].bytes;
+  const player2 = fields[1].bytes;
 
   const n1 = Number(hexToString(fields[4].bytes));
   const n2 = Number(hexToString(fields[5].bytes));
 
   if (Number.isNaN(n1) || Number.isNaN(n2)) {
-    throw new Error("Both secrets must be revealed before settlement");
+    throw new Error('Both secrets must be revealed before settlement');
   }
 
-    // Determine winner exactly like on-chain
+  // Determine winner exactly like on-chain
   const winnerPkh =
-        (n1 + n2) % 2 == 1 ? player1 : player2;
+    (n1 + n2) % 2 == 1 ? player1 : player2;
 
-    // Select the correct wallet
+  // Select the correct wallet
   let winnerWallet: MeshWallet;
   let winnerAddr: string;
 
@@ -413,7 +464,7 @@ export async function settle(walletFile1: string, walletFile2: string) {
     winnerWallet = wallet2;
     winnerAddr = addr2;
   } else {
-    throw new Error("Neither wallet matches the winning PKH");
+    throw new Error('Neither wallet matches the winning PKH');
   }
 
   const collateral = (await winnerWallet.getCollateral())[0];
@@ -422,34 +473,43 @@ export async function settle(walletFile1: string, walletFile2: string) {
   const tx = new MeshTxBuilder({
     fetcher: provider,
     submitter: provider,
-    evaluator: provider,
+    evaluator: provider
   }).setNetwork(NETWORK);
 
+  // Marker token details
+  const TOKEN_NAME = stringToHex('LOTTERY_TOKEN');
+  const policyId = getScriptHash(creator.script);
+
   await tx
+    .mintPlutusScriptV3()
+    .mint('-1', policyId, TOKEN_NAME)
+    .mintingScript(creator.script)
+    .mintRedeemerValue(mConStr1([]))
+
     .spendingPlutusScriptV3()
     .txIn(
       utxo.input.txHash,
       utxo.input.outputIndex,
       utxo.output.amount,
-      scripts.address,
+      lottery.address
     )
     .txInInlineDatumPresent()
-    .txInRedeemerValue(settleRedeemer(), "JSON")
-    .txInScript(scripts.script)
+    .txInRedeemerValue(settleRedeemer(), 'JSON')
+    .txInScript(lottery.script)
 
-        // pay everything to winner
-        .txOut(
-            winnerAddr,
-            utxo.output.amount,
-        )
+    // pay everything to winner
+    .txOut(
+      winnerAddr,
+      [{ unit: 'lovelace', quantity: BET_AMOUNT }]
+    )
 
-        // winner must sign
+    // winner must sign
     .requiredSignerHash(winnerPkh)
     .txInCollateral(
       collateral.input.txHash,
       collateral.input.outputIndex,
       collateral.output.amount,
-      collateral.output.address,
+      collateral.output.address
     )
     .changeAddress(winnerAddr)
     .selectUtxosFrom(walletUtxos)
@@ -458,9 +518,9 @@ export async function settle(walletFile1: string, walletFile2: string) {
   const signed = await winnerWallet.signTx(tx.txHex, true);
   const hash = await winnerWallet.submitTx(signed);
 
-  console.log("Lottery settled");
-  console.log("Winner PKH:", winnerPkh);
-  console.log("Tx Id:", hash);
+  console.log('Lottery settled');
+  console.log('Winner PKH:', winnerPkh);
+  console.log('Tx Id:', hash);
 }
 
 // --------------------------------------------------
@@ -471,22 +531,22 @@ if (import.meta.main) {
   const [cmd, a, b, c] = Deno.args;
 
   switch (cmd) {
-    case "multisig-create":
+    case 'multisig-create':
       await multisigCreate(a, b, c);
       break;
-    case "reveal1":
+    case 'reveal1':
       await reveal1(a);
       break;
-    case "reveal2":
+    case 'reveal2':
       await reveal2(a);
       break;
-    case "timeout1":
+    case 'timeout1':
       await timeout1(a);
       break;
-    case "timeout2":
+    case 'timeout2':
       await timeout2(a);
       break;
-    case "settle":
+    case 'settle':
       await settle(a, b);
       break;
     default:

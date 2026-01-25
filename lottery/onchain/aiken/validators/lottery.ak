@@ -4,8 +4,9 @@ use aiken/primitive/int
 use cardano/assets.{PolicyId}
 use cardano/transaction.{InlineDatum, OutputReference, Transaction, find_input}
 use cocktail/vodka_extra_signatories.{key_signed}
-use cocktail/vodka_validity_range.{valid_after}
 use cocktail/vodka_inputs.{inputs_with_policy}
+use cocktail/vodka_mints.{only_minted_token}
+use cocktail/vodka_validity_range.{valid_after}
 
 pub type LotteryDatum {
   player1: VerificationKeyHash,
@@ -39,7 +40,8 @@ validator lottery(policy_id: PolicyId, _game_index: Int) {
       tx
 
     // 1. Locate the script input
-    expect Some(own_input) = inputs_with_policy(inputs,policy_id) |> find_input(oref)
+    expect Some(own_input) =
+      inputs_with_policy(inputs, policy_id) |> find_input(oref)
     // 2. Extract inline datum (the state)
     expect InlineDatum(datum) = own_input.output.datum
 
@@ -79,14 +81,24 @@ validator lottery(policy_id: PolicyId, _game_index: Int) {
         n1 == "" && valid_after(validity_range, end_reveal)? && key_signed(
           extra_signatories,
           player2,
-        )? && script_utxo_consumed?
+        )? && script_utxo_consumed? && only_minted_token(
+          tx.mint,
+          policy_id,
+          "LOTTERY_TOKEN",
+          -1,
+        )
 
       // ---------- Timeout: player1 wins ----------
       Timeout2 ->
         n1 != "" && n2 == "" && valid_after(validity_range, end_reveal + delta) && key_signed(
           extra_signatories,
           player1,
-        ) && script_utxo_consumed
+        ) && script_utxo_consumed && only_minted_token(
+          tx.mint,
+          policy_id,
+          "LOTTERY_TOKEN",
+          -1,
+        )
 
       // ---------- Final settlement ----------
       Settle -> {
@@ -102,7 +114,12 @@ validator lottery(policy_id: PolicyId, _game_index: Int) {
             player2
           }
 
-        both_revealed && key_signed(extra_signatories, winner) && script_utxo_consumed
+        both_revealed && key_signed(extra_signatories, winner) && script_utxo_consumed && only_minted_token(
+          tx.mint,
+          policy_id,
+          "LOTTERY_TOKEN",
+          -1,
+        )
       }
     }
   }

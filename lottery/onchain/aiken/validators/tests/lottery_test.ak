@@ -1,10 +1,10 @@
 use aiken/crypto.{blake2b_256}
-use cardano/assets.{from_lovelace,merge,from_asset}
+use cardano/assets.{from_asset, from_lovelace, merge}
 use cardano/transaction.{InlineDatum, Input, Output}
 use lottery.{LotteryDatum, Reveal1, Reveal2, Settle, Timeout1, Timeout2}
 use mocktail.{
-  add_input, complete, invalid_before, mocktail_tx, required_signer_hash, tx_out,
-  tx_out_inline_datum,
+  add_input, complete, invalid_before, mint, mocktail_tx, required_signer_hash,
+  tx_out, tx_out_inline_datum,
 }
 use mocktail/virgin_address.{mock_pub_key_address, mock_script_address}
 use mocktail/virgin_key_hash.{mock_policy_id, mock_pub_key_hash}
@@ -59,7 +59,7 @@ fn script_input(oref, datum, val) {
     output_reference: oref,
     output: Output {
       address: script_addr,
-      value: merge(from_asset(mint_policy_id,"LOTTERY_TOKEN",1), val),
+      value: merge(from_asset(mint_policy_id, "LOTTERY_TOKEN", 1), val),
       datum: InlineDatum(datum),
       reference_script: None,
     },
@@ -132,6 +132,7 @@ test timeout1_valid_player2_wins() {
       |> required_signer_hash(True, player2)
       |> tx_out(True, player2_addr, from_lovelace(10_000_000))
       |> invalid_before(True, end_reveal + 1)
+      |> mint(True, -1, mint_policy_id, "LOTTERY_TOKEN")
       |> complete()
       |> add_input(
           True,
@@ -160,6 +161,7 @@ test settle_valid_player1_wins() {
     mocktail_tx()
       |> required_signer_hash(True, player1)
       |> tx_out(True, player1_addr, from_lovelace(10_000_000))
+      |> mint(True, -1, mint_policy_id, "LOTTERY_TOKEN")
       |> complete()
       |> add_input(
           True,
@@ -230,6 +232,7 @@ test timeout2_valid_player1_wins() {
       |> required_signer_hash(True, player1)
       |> tx_out(True, player1_addr, from_lovelace(10_000_000))
       |> invalid_before(True, end_reveal + delta + 1)
+      |> mint(True, -1, mint_policy_id, "LOTTERY_TOKEN")
       |> complete()
       |> add_input(
           True,
