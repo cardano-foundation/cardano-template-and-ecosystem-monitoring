@@ -20,6 +20,21 @@ aiken build
 
 ## 📄 Off-chain
 
+### Lucid Evolution (Deno)
+
+This offchain implementation uses [Lucid Evolution](https://github.com/Evolution-SDK/lucid-evolution).
+
+#### Prerequisites
+- [Deno](https://deno.land/)
+
+#### Usage
+```zsh
+cd offchain/lucid-evolution
+deno task prepare 2
+deno task lock 5000000 <ADDRESS_OF_WALLET_1> 0
+deno task claim 1
+```
+
 ### Java Cardano Client Lib 
 This offchain code is written by using the [Cardano Client Lib](https://github.com/bloxbean/cardano-client-lib).
 It assumes that the addresses are topped up. If you need some tAda, you can get some from the [Cardano Testnets Faucet](https://docs.cardano.org/cardano-testnets/tools/faucet/).
