@@ -45,21 +45,33 @@ validator escrow {
         expect InlineDatum(raw_output_datum) = output.datum
         expect Initiation { initiator, initiator_assets }: EscrowDatum =
           raw_input_datum
-        expect output_datum: EscrowDatum = raw_output_datum
-        let is_datum_updated =
-          output_datum == ActiveEscrow {
-            initiator,
-            recipient,
-            initiator_assets,
-            recipient_assets,
-          }
+        expect ActiveEscrow {
+          initiator: out_initiator,
+          recipient: out_recipient,
+          initiator_assets: out_initiator_assets,
+          recipient_assets: out_recipient_assets,
+        }: EscrowDatum = raw_output_datum
+
+        let is_initiator_correct = out_initiator == initiator
+        let is_recipient_correct = out_recipient == recipient
+
+        let is_initiator_assets_correct =
+          ( out_initiator_assets |> from_asset_list ) == (
+            initiator_assets |> from_asset_list
+          )
+
+        let is_recipient_assets_correct =
+          ( out_recipient_assets |> from_asset_list ) == (
+            recipient_assets |> from_asset_list
+          )
+
         let is_value_deposited =
           value_geq(
             output.value,
             input.output.value
               |> merge(recipient_assets |> from_asset_list()),
           )
-        is_datum_updated && is_value_deposited
+        is_initiator_correct && is_recipient_correct && is_initiator_assets_correct && is_recipient_assets_correct && is_value_deposited
       }
       CancelTrade -> {
         expect ([input], []) =
