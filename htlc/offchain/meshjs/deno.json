@@ -1,0 +1,19 @@
+{
+  "tasks": {
+    "dev": "deno run --watch main.ts",
+    "prepare": "deno run -A htlc.ts prepare 5",
+    "balances": "deno run -A htlc.ts balances",
+    "show-addresses": "deno run -A htlc.ts show-addresses",
+    "list-utxos": "deno run -A htlc.ts list-utxos",
+    "transfer": "deno run -A htlc.ts transfer 0 1 10000000",
+    "init": "deno run -A htlc.ts init 10000000 mySecret 0 3600",
+    "claim": "deno run -A htlc.ts claim <txHash> <preimage> 1",
+    "refund": "deno run -A htlc.ts refund <txHash> 0"
+  },
+  "imports": {
+    "@std/assert": "jsr:@std/assert@1",
+    "@meshsdk/core": "npm:@meshsdk/core@1.8.14",
+    "@meshsdk/core-cst": "npm:@meshsdk/core-cst@1.9.0-beta.20",
+    "@meshsdk/common": "npm:@meshsdk/common@1.9.0-beta.20"
+  }
+}

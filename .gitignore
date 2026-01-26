@@ -17,6 +17,8 @@
 
 # Environments
 .env
+wallet_*.txt
+htlc_store.json
 
 # compiled output
 /dist

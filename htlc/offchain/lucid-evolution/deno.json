@@ -1,0 +1,18 @@
+{
+  "tasks": {
+    "dev": "deno run -A --watch htlc.ts",
+    "run": "deno run -A htlc.ts",
+    "prepare": "deno run -A htlc.ts prepare 5",
+    "balances": "deno run -A htlc.ts balances",
+    "show-addresses": "deno run -A htlc.ts show-addresses",
+    "list-utxos": "deno run -A htlc.ts list-utxos",
+    "transfer": "deno run -A htlc.ts transfer",
+    "init": "deno run -A htlc.ts init 10000000 mySecret 0",
+    "claim": "deno run -A htlc.ts claim <txHash> <preimage> 1",
+    "refund": "deno run -A htlc.ts refund <txHash> 0"
+  },
+  "imports": {
+    "@std/assert": "jsr:@std/assert@1",
+    "@evolution-sdk/lucid": "npm:@evolution-sdk/lucid@^2.0.1"
+  }
+}

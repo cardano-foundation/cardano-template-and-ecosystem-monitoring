@@ -1,0 +1,30 @@
+# Ignore wallet seed files and other secrets
+wallet_*.txt
+htlc_store.json
+.env
+.env.local
+
+# Editor and OS
+.DS_Store
+.vscode/
+.idea/
+
+# Build / caches
+dist/
+node_modules/
+.cache/
+
+# Logs
+*.log
+
+# Native / key files
+*.key
+*.pem
+*.p12
+
+# Do NOT ignore lockfile or import map (keep them committed for reproducible builds)
+# deno.lock
+# import_map.json
+deno.lock
+
+
