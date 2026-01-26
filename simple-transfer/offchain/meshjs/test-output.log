@@ -1,0 +1,11 @@
+simple-transfer\offchain\meshjs> deno run -A simple-transfer.ts deposit wallet_0.json 332353c1231a76c19a9a7d44ef4252759e5feba6c9bb13a4c38ae712 20000000
+ADA locked at script
+Receiver PKH: 332353c1231a76c19a9a7d44ef4252759e5feba6c9bb13a4c38ae712
+Amount (lovelace): 20000000
+TxHash: 8a8ae9bf2f76706fb61114007f05fbd0c1a62e42e4dbf35c68d01999db12b05b
+
+simple-transfer\offchain\meshjs> deno run -A simple-transfer.ts collect wallet_1.json           
+ADA collected from script
+Receiver PKH: 332353c1231a76c19a9a7d44ef4252759e5feba6c9bb13a4c38ae712
+TxHash: 51c93f78c00424532778c9217e608f114ce31e99f4b36b19761b2bc9e2c5f911
+simple-transfer\offchain\meshjs> 

@@ -97,3 +97,95 @@ After running the code, you can verify the output in Yaci Viewer. To access Yaci
 http://localhost:5173
 ```
 
+---
+
+## 📄 Off-chain (MeshJS – Deno)
+
+This repository also includes an alternative off-chain implementation using **MeshJS**, written in **TypeScript** and executed with **Deno**.
+
+This implementation follows the same logical flow as the Java example:
+
+* A sender deposits ADA at the script address
+* A designated receiver (identified by payment key hash) is allowed to collect the funds
+
+### 📁 Location
+
+```text
+simple-transfer/offchain/meshjs
+```
+
+---
+
+### 🔌 Prerequisites
+
+Ensure the following are available:
+
+* [Deno](https://deno.land/)
+* A running Cardano devnet or testnet (for example via Yaci DevKit)
+* Wallet JSON files funded with test ADA
+
+Wallet files (e.g. `wallet_0.json`, `wallet_1.json`) are expected to contain addresses and signing keys compatible with MeshJS.
+
+---
+
+### ▶️ Running the MeshJS Off-chain Code
+
+Navigate to the MeshJS off-chain directory:
+
+```shell
+cd simple-transfer/offchain/meshjs
+```
+
+All commands below are executed from this directory.
+
+---
+
+## 🧪 Example Flow
+
+### Alice deposits 20 ADA for Bob
+
+Alice locks **20 ADA** at the script address and specifies Bob’s **payment key hash (PKH)** as the receiver.
+
+```shell
+deno run -A simple-transfer.ts deposit wallet_0.json <receiverPkh> 20000000
+```
+
+Example with a concrete PKH:
+
+```shell
+deno run -A simple-transfer.ts deposit wallet_0.json 332353c1231a76c19a9a7d44ef4252759e5feba6c9bb13a4c38ae712 20000000
+```
+
+#### Sample Output
+
+```text
+ADA locked at script
+Receiver PKH: 332353c1231a76c19a9a7d44ef4252759e5feba6c9bb13a4c38ae712
+Amount (lovelace): 20000000
+TxHash: 8a8ae9bf2f76706fb61114007f05fbd0c1a62e42e4dbf35c68d01999db12b05b
+```
+
+---
+
+### Bob collects the ADA using his wallet
+
+Bob collects the locked ADA from the script using his wallet.
+
+```shell
+deno run -A simple-transfer.ts collect wallet_1.json
+```
+
+#### Sample Output
+
+```text
+ADA collected from script
+Receiver PKH: 332353c1231a76c19a9a7d44ef4252759e5feba6c9bb13a4c38ae712
+TxHash: 51c93f78c00424532778c9217e608f114ce31e99f4b36b19761b2bc9e2c5f911
+```
+
+---
+
+### 🔍 Verification
+
+The transactions can be inspected using:
+* Any Cardano explorer compatible with preprod testnet
