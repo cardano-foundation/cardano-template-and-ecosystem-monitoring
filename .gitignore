@@ -37,3 +37,7 @@ lerna-debug.log*
 plutus.json
 build/
 .local-test-results
+
+wallet.txt
+
+wallet_*.txt
