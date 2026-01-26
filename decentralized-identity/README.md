@@ -2,7 +2,7 @@
 
 A blockchain-based identity management system built on Cardano, implementing self-sovereign identity with identity addresses, ownership control, and delegate management based on EIP 1056.
 
-## 🌟 What is Decentralized Identity?
+## What is Decentralized Identity?
 
 Traditional identity systems rely on centralized authorities and intermediaries for identity verification:
 - Identity verification depends on trusted third parties
@@ -101,6 +101,11 @@ Identity verification through:
 - Block height tracking for time-based delegate validity
 - Transaction revert mechanism for unauthorized operations
 - Dynamic data structures for delegate management
+
+## ✅ Implementations in This Repository
+
+- **On-chain (Aiken)**: `decentralized-identity/onchain/aiken/`
+- **Off-chain (Lucid Evolution)**: `decentralized-identity/offchain/lucid-evolution/`
 
 ## 🛠️ Development Approach with Cardano
 
