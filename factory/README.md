@@ -1,81 +1,85 @@
-# Factory
+# Factory Pattern
 
-A **Factory** allows a user to deterministically create and manage multiple **Product contracts**, where each Product is an independent on-chain contract instance with its own address and immutable identity.
+This repository implements a **Cardano-native Factory Pattern** for deterministically creating and managing multiple **Product contracts**, using **marker tokens**, **parameterised validators**, and **off-chain orchestration**.
 
-This repository demonstrates a **Factory Pattern** for smart contracts on Cardano. The design preserves the intent of the traditional Factory Pattern listed in the rosetta-smart-contracts repository, while adapting it to Cardano’s UTxO-based execution model, where contract instances are expressed through parameterised scripts and off-chain orchestration.
+The design is fully aligned with Cardano’s **UTxO execution model** and adapts the classical Factory Pattern (like described in `rosetta-smart-contracts` spec) to a setting where:
 
----
-
-## Overview
-
-This implementation expresses the **Factory Pattern** in a way that is native to Cardano’s UTxO-based smart contract model.
-
-The Factory–Product relationship is realised through:
-
-* a **Factory identity** implemented as a minting policy (one per owner)
-* **parameterised Product contracts**, where each parameter set yields a distinct on-chain address
-* **off-chain orchestration** for contract instantiation, discovery, and interaction
-
-Together, these components provide deterministic creation, verifiable provenance, and scalable management of independent Product contracts, while remaining fully aligned with Cardano’s execution and security model.
+* contracts are expressed as parameterised scripts,
+* global mutable registries are avoided,
+* and state evolution is enforced through UTxO continuity.
 
 ---
 
-## Factory Contract
+## High-level Design
 
-The Factory is implemented as a **minting policy**, parameterised by the owner’s
-payment key hash (`owner_pkh`). In this design, the Factory identity is represented
-by this minting policy (one per owner), and the terms “Factory” / “Factory identity” are used interchangeably to refer to it.
+The system is composed of **three validators**:
 
-### Responsibilities
+1. **Factory Marker (Minting Policy)**
+2. **Factory (Mint + Spend Validator)**
+3. **Product (Spend Validator)**
 
-Once deployed, the Factory supports the following actions:
+The lifecycle is:
 
-### `createProduct`
+```
+one-shot UTxO
+   ↓
+Factory Marker minted
+   ↓
+Factory state UTxO created
+   ↓
+Products created via Factory
+```
 
-* Authorizes creation of a new Product contract
-* Mints exactly **one Product NFT**
-* The NFT asset name acts as the **product identifier**
-* The Product contract is parameterised by:
-
-  * `owner_pkh`
-  * `factory_id`
-  * `product_id`
-
-A user-provided **tag string** is stored in the Product’s on-chain datum.
-
----
-
-### `getProducts` (off-chain)
-
-* Returns the list of Products created by the owner
-* Product discovery starts by identifying on-chain UTxOs that hold assets minted
-  under the Factory identity
-* From each such UTxO:
-  - the **product identifier** is obtained from the NFT asset name
-  - the presence of the Factory-minted asset establishes provenance
-* The corresponding Product contract address is then derived deterministically
-  from the Product validator parameters, using the on-chain product identifier
-  obtained from the UTxO.
-
-This approach combines **on-chain UTxO inspection** with **deterministic contract derivation**, allowing Products to be reliably discovered and verified without maintaining an explicit registry.
+Each step is cryptographically enforced on-chain.
 
 ---
 
-## Product Contract
+## Core Concepts
 
-Each Product is an **independent contract** with its own script hash and address.
+### Factory Marker
 
-### Identity
+The **Factory Marker** establishes a *unique Factory instance* for an owner.
 
-A Product contract is uniquely defined by its validator parameters:
+* Minted **exactly once**
+* Uses a **one-shot UTxO** as entropy
+* Produces a single NFT: `FACTORY_MARKER`
+* The marker NFT is **locked at the Factory script address**
+* Its policy ID becomes the **Factory identity**
 
-* `owner_pkh`
-* `factory_id`
-* `product_id`
+This avoids ambiguity and ensures that each Factory instance is globally unique and verifiable.
 
-These parameters are immutable and form part of the script hash.
+---
 
-### On-chain State
+### Factory
+
+The **Factory** is a stateful on-chain contract that:
+
+* Holds the `FACTORY_MARKER` NFT
+* Maintains an on-chain registry of Products
+* Authorizes creation of new Products
+
+#### Factory Datum
+
+```text
+FactoryDatum {
+  products : List<PolicyId>
+}
+```
+
+* Each entry corresponds to a **Product minting policy**
+* This registry is the **source of truth** for product discovery
+
+---
+
+### Product
+
+Each **Product** is an independent contract instance with:
+
+* Its own script hash
+* Its own address
+* Immutable identity
+
+#### Product Datum
 
 ```text
 ProductDatum {
@@ -83,217 +87,247 @@ ProductDatum {
 }
 ```
 
-Only mutable product-specific state is stored in the datum.
-Ownership and factory provenance are enforced via validator parameters.
+The tag is user-defined metadata (e.g. label, SKU, description pointer).
 
 ---
 
-### Supported Actions
+## On-chain Responsibilities
 
-#### `getTag`
+### 1. Factory Marker Validator
 
-* Reads the tag stored in the Product’s on-chain datum
-* Only the original creator (owner) is authorized to spend or interact with the Product UTxO
-
-#### `getFactory`
-
-* Returns the Factory identity that created the Product
-* Implemented off-chain by deriving the Factory policy from the owner
-* The Factory identity is cryptographically bound into the Product validator parameters
-
----
-
-## On-chain
-
-### Aiken
-
-#### Prerequisites
-
-* [Aiken](https://aiken-lang.org/installation-instructions#from-aikup-linux--macos-only)
-
-#### Build and test
-
-```sh
-cd onchain/aiken
-aiken check
-aiken build
+```aiken
+validator factory_marker(
+  owner: VerificationKeyHash,
+  utxo_ref: OutputReference,
+)
 ```
+
+**Responsibilities**
+
+* Enforces one-shot minting using `utxo_ref`
+* Requires owner signature
+* Mints exactly one `FACTORY_MARKER` NFT
+* Ensures the marker NFT is locked at the Factory script address
+
+---
+
+### 2. Factory Validator
+
+```aiken
+validator factory(
+  owner: VerificationKeyHash,
+  factory_marker_policy: PolicyId,
+)
+```
+
+**Mint branch**
+
+* Authorizes Product creation
+* Requires:
+
+    * owner signature
+    * exactly one Factory Marker input
+* Mints exactly one Product NFT
+* Ensures Product output:
+
+    * is locked at a Product script address
+    * contains a valid `ProductDatum`
+
+**Spend branch**
+
+* Enforces Factory state continuity
+* Requires:
+
+    * Factory Marker stays at the Factory address
+    * updated Factory datum includes the new Product policy ID
+
+---
+
+### 3. Product Validator
+
+```aiken
+validator product(
+  owner: VerificationKeyHash,
+  factory_id: PolicyId,
+  product_id: ByteArray,
+)
+```
+
+**Responsibilities**
+
+* Binds Product to:
+
+    * owner
+    * Factory identity
+    * product identifier
+* Authorizes spends only by the owner
 
 ---
 
 ## Off-chain (MeshJS)
 
-All off-chain logic is implemented in a **single MeshJS file**, covering all endpoints defined in the specification.
+All off-chain logic is implemented in a **single MeshJS file**, handling:
 
-### Responsibilities
-
-The off-chain code handles:
-
-* Factory policy instantiation
-* Product contract instantiation
-* Product NFT minting
+* Script parameterisation
+* Factory creation
+* Product creation
 * Datum construction
-* Chain querying and discovery
-* CLI-based interaction for testing and demos
+* Chain querying
+* CLI interaction
+
+No off-chain registry is required; discovery is derived from on-chain state.
 
 ---
 
 ## CLI Usage
 
-The following commands can be used to interact with the contracts.
+### Create Factory
 
----
-
-### Create Product
-
-Creates a new Product contract, mints its identifier NFT, and locks it at the Product script address.
-
-**Command format**
+Creates a new Factory instance by minting the Factory Marker and locking it at the Factory address.
 
 ```sh
-deno run -A factory.ts create-product <wallet.json> <product_id> <tag>
+deno run -A factory.ts create-factory <wallet.json>
 ```
 
 **Example**
 
 ```sh
-deno run -A factory.ts create-product wallet_0.json firefly-002 organic-honey
+deno run -A factory.ts create-factory wallet_0.json
 ```
-
-**Arguments**
-
-* `wallet_0.json` — owner wallet file
-* `firefly-002` — product identifier
-* `organic-honey` — tag stored in Product datum
 
 **Example Output**
 
 ```text
-ownerPkh:  72b46a9927fd32da5c2f11365b6f20f9af930e63974e4f8935064215
-Product contract created
-Owner PKH: 72b46a9927fd32da5c2f11365b6f20f9af930e63974e4f8935064215
-Factory policy: c69b1f737aee7fbf902a453ebb83674623f74a90d13a833ce0222005
-Product contract address: addr_test1wr2dy9h26gyxnmm7m69f3p0g44mrnvvs8zhrnzm49gh9urgakmd2w
-Tx hash: e9d85d8254340c23ae6589632824e244cff55b91b603b1e2cb477a66bdcd1b29
-```
-
----
-
-### Get Products
-
-Returns the Products created by the given owner.
-
-**Command format**
-
-```sh
-deno run -A factory.ts get-products <owner_pkh>
-```
-
-**Example**
-
-```sh
-deno run -A factory.ts get-products 72b46a9927fd32da5c2f11365b6f20f9af930e63974e4f8935064215
-```
-
-**Arguments**
-
-* `owner_pkh` — owner payment key hash
-
-**Example Output**
-
-```text
-Products fetched: [
-  {
-    productId: "firefly-001",
-    policyId: "c69b1f737aee7fbf902a453ebb83674623f74a90d13a833ce0222005",
-    fingerprint: "asset1hez9j04caycjx7kpk7r76ya85nelc3zlpawgwk"
-  },
-  {
-    productId: "firefly-002",
-    policyId: "c69b1f737aee7fbf902a453ebb83674623f74a90d13a833ce0222005",
-    fingerprint: "asset1hs6kc669zjhzk3mmnkc78c4mh5seuhnrarre8x"
-  },
-  {
-    productId: "firefly-009",
-    policyId: "c69b1f737aee7fbf902a453ebb83674623f74a90d13a833ce0222005",
-    fingerprint: "asset19stx7u2v58z5ma3ah7qnq8zr22uelmcn70qt3f"
-  }
-]
-```
-
-> Product discovery is performed off-chain using the Factory’s minting policy to identify Product NFTs.
-
----
-
-### Get Product Tag
-
-Reads the tag stored in a Product contract.
-
-**Command format**
-
-```sh
-deno run -A factory.ts get-tag <owner_pkh> <product_id>
-```
-
-**Example**
-
-```sh
-deno run -A factory.ts get-tag 72b46a9927fd32da5c2f11365b6f20f9af930e63974e4f8935064215 firefly-002
-```
-
-**Arguments**
-
-* `owner_pkh` — owner payment key hash
-* `product_id` — product identifier
-
-**Example Output**
-
-```text
-Product tag: 6f7267616e69632d686f6e6579
+Factory created
+Owner PKH: 332353c1231a76c19a9a7d44ef4252759e5feba6c9bb13a4c38ae712
+Factory address: addr_test1wzt96tly6jjtjzcqf2k3w7yvjavm2uwq72qsfwjzdesf5ls90pgvw
+Factory marker policy: d8e6160ad3e69f1976e33cba6bb9769a283c6aa4a28121a70744cb77
+Tx hash: 53910d7e52fc51903025e53d39ab81e228576ec5a9daf80bd33b60006a5dbad1
 ```
 
 ---
 
 ### Get Factory
 
-Returns the Factory identity derived from the owner.
-
-**Command format**
+Checks whether a Factory exists and prints its derived details.
 
 ```sh
-deno run -A factory.ts get-factory <owner_pkh>
+deno run -A factory.ts get-factory <wallet.json> <marker_policy_id>
 ```
 
 **Example**
 
 ```sh
-deno run -A factory.ts get-factory 72b46a9927fd32da5c2f11365b6f20f9af930e63974e4f8935064215
+deno run -A factory.ts get-factory wallet_0.json d8e6160ad3e69f1976e33cba6bb9769a283c6aa4a28121a70744cb77
 ```
 
 **Example Output**
 
-```json
-{
-  "ownerPkh": "72b46a9927fd32da5c2f11365b6f20f9af930e63974e4f8935064215",
-  "policyId": "c69b1f737aee7fbf902a453ebb83674623f74a90d13a833ce0222005"
-}
+```text
+--- Factory status ---
+Owner PKH: 332353c1231a76c19a9a7d44ef4252759e5feba6c9bb13a4c38ae712
+Factory marker policy: d8e6160ad3e69f1976e33cba6bb9769a283c6aa4a28121a70744cb77
+Factory script hash: 965d2fe4d4a4b90b004aad17788c9759b571c0f28104ba426e609a7e
+Factory address: addr_test1wzt96tly6jjtjzcqf2k3w7yvjavm2uwq72qsfwjzdesf5ls90pgvw
+Factory created: true
+```
+
+---
+
+### Create Product
+
+Creates a new Product contract and registers it in the Factory.
+
+```sh
+deno run -A factory.ts create-product <wallet.json> <marker_policy_id> <product_id> <tag>
+```
+
+**Example**
+
+```sh
+deno run -A factory.ts create-product wallet_0.json d8e6160ad3e69f1976e33cba6bb9769a283c6aa4a28121a70744cb77 product_id_1 tag_solarpanel_v1
+```
+
+**Example Output**
+
+```text
+Product created
+Product address: addr_test1wqfra7j2lfvl3g760jg73seses4af2hq7x3l8cqgsz9gvcgy24uy9
+Tx hash: 66191c0d83745266aed4b1f4da9231f512047960adc9289693acb7ee0ac4294e
+```
+
+---
+
+### Get Products
+
+Reads the Factory’s on-chain registry and lists all Products.
+
+```sh
+deno run -A factory.ts get-products <wallet.json> <marker_policy_id>
+```
+
+**Example**
+
+```sh
+deno run -A factory.ts get-products wallet_0.json d8e6160ad3e69f1976e33cba6bb9769a283c6aa4a28121a70744cb77
+```
+
+**Example Output**
+
+```text
+Factory product policy IDs: [
+  { bytes: "123efa4afa59f8a3da7c91e8c330cc2bd4aae0f1a3f3e008808a8661" }
+]
+Products fetched: [
+  {
+    productId: "product_id_1",
+    policyId: "123efa4afa59f8a3da7c91e8c330cc2bd4aae0f1a3f3e008808a8661",
+    fingerprint: "asset1ppyl0e9g56e2j2waz3ytv2h3yns6skhpgs7w3p"
+  }
+]
+```
+
+---
+
+### Get Product Tag
+
+Reads the tag stored in a Product’s datum.
+
+```sh
+deno run -A factory.ts get-tag <wallet.json> <marker_policy_id> <product_id>
+```
+
+**Example**
+
+```sh
+deno run -A factory.ts get-tag wallet_0.json d8e6160ad3e69f1976e33cba6bb9769a283c6aa4a28121a70744cb77 product_id_1
+```
+
+
+**Example Output**
+
+```text
+--- Product details ---
+Product ID: product_id_1
+Product policy: 123efa4afa59f8a3da7c91e8c330cc2bd4aae0f1a3f3e008808a8661
+Product address: addr_test1wqfra7j2lfvl3g760jg73seses4af2hq7x3l8cqgsz9gvcgy24uy9
+Tag: tag_solarpanel_v1
 ```
 
 ---
 
 ## Design Notes
 
-* Each Product is a true contract, not merely a datum instance
-* Factory-Product provenance is cryptographically enforced
-* No mutable registries or shared state are required
-* Discovery is performed off-chain, consistent with Cardano’s UTxO model
-* The design maps cleanly to the original Factory Pattern specification while remaining Cardano-native
+* Factory identity is established via a **marker NFT**
+* Factory state is enforced through **UTxO continuity**
+* Products are **true contracts**, not datum instances
+* Discovery is derived from **on-chain state**, not off-chain registries
 
 ---
 
 ## Disclaimer
 
-This project is intended as a reference implementation and educational example.
-It has not been audited and should not be used with real funds without proper review and testing.
+This repository is a **reference implementation** and **educational example**.
 
----
+It has not been audited and should not be used with real funds without independent security review.
+

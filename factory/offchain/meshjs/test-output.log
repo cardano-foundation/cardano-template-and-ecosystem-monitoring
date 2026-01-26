@@ -1,35 +1,38 @@
-factory\offchain\meshjs> deno run -A factory.ts create-product wallet_0.json firefly-002 organic-honey                      
-ownerPkh:  72b46a9927fd32da5c2f11365b6f20f9af930e63974e4f8935064215
-Product contract created
-Owner PKH: 72b46a9927fd32da5c2f11365b6f20f9af930e63974e4f8935064215
-Factory policy: c69b1f737aee7fbf902a453ebb83674623f74a90d13a833ce0222005
-Product contract address: addr_test1wr2dy9h26gyxnmm7m69f3p0g44mrnvvs8zhrnzm49gh9urgakmd2w
-Tx hash: e9d85d8254340c23ae6589632824e244cff55b91b603b1e2cb477a66bdcd1b29
+factory\offchain\meshjs> deno run -A factory.ts create-factory wallet_0.json
+Factory created
+Owner PKH: 332353c1231a76c19a9a7d44ef4252759e5feba6c9bb13a4c38ae712
+Factory address: addr_test1wzt96tly6jjtjzcqf2k3w7yvjavm2uwq72qsfwjzdesf5ls90pgvw
+Factory marker policy: d8e6160ad3e69f1976e33cba6bb9769a283c6aa4a28121a70744cb77
+Tx hash: 53910d7e52fc51903025e53d39ab81e228576ec5a9daf80bd33b60006a5dbad1
 
-factory\offchain\meshjs> deno run -A factory.ts get-products 72b46a9927fd32da5c2f11365b6f20f9af930e63974e4f8935064215
+factory\offchain\meshjs> deno run -A factory.ts get-factory wallet_0.json d8e6160ad3e69f1976e33cba6bb9769a283c6aa4a28121a70744cb77
+--- Factory status ---
+Owner PKH: 332353c1231a76c19a9a7d44ef4252759e5feba6c9bb13a4c38ae712
+Factory marker policy: d8e6160ad3e69f1976e33cba6bb9769a283c6aa4a28121a70744cb77
+Factory script hash: 965d2fe4d4a4b90b004aad17788c9759b571c0f28104ba426e609a7e
+Factory address: addr_test1wzt96tly6jjtjzcqf2k3w7yvjavm2uwq72qsfwjzdesf5ls90pgvw
+Factory created: true
+
+factory\offchain\meshjs> deno run -A factory.ts create-product wallet_0.json d8e6160ad3e69f1976e33cba6bb9769a283c6aa4a28121a70744cb77 product_id_1 tag_solarpanel_v1
+Product created
+Product address: addr_test1wqfra7j2lfvl3g760jg73seses4af2hq7x3l8cqgsz9gvcgy24uy9
+Tx hash: 66191c0d83745266aed4b1f4da9231f512047960adc9289693acb7ee0ac4294e
+
+factory\offchain\meshjs> deno run -A factory.ts get-products wallet_0.json d8e6160ad3e69f1976e33cba6bb9769a283c6aa4a28121a70744cb77
+Factory product policy IDs: [
+  { bytes: "123efa4afa59f8a3da7c91e8c330cc2bd4aae0f1a3f3e008808a8661" }
+]
 Products fetched: [
   {
-    productId: "firefly-001",
-    policyId: "c69b1f737aee7fbf902a453ebb83674623f74a90d13a833ce0222005",
-    fingerprint: "asset1hez9j04caycjx7kpk7r76ya85nelc3zlpawgwk"
-  },
-  {
-    productId: "firefly-002",
-    policyId: "c69b1f737aee7fbf902a453ebb83674623f74a90d13a833ce0222005",
-    fingerprint: "asset1hs6kc669zjhzk3mmnkc78c4mh5seuhnrarre8x"
-  },
-  {
-    productId: "firefly-009",
-    policyId: "c69b1f737aee7fbf902a453ebb83674623f74a90d13a833ce0222005",
-    fingerprint: "asset19stx7u2v58z5ma3ah7qnq8zr22uelmcn70qt3f"
+    productId: "product_id_1",
+    policyId: "123efa4afa59f8a3da7c91e8c330cc2bd4aae0f1a3f3e008808a8661",
+    fingerprint: "asset1ppyl0e9g56e2j2waz3ytv2h3yns6skhpgs7w3p"
   }
 ]
 
-factory\offchain\meshjs> deno run -A factory.ts get-tag 72b46a9927fd32da5c2f11365b6f20f9af930e63974e4f8935064215 firefly-002
-Product tag: 6f7267616e69632d686f6e6579
-
-factory\offchain\meshjs> deno run -A factory.ts get-factory 72b46a9927fd32da5c2f11365b6f20f9af930e63974e4f8935064215
-{
-  ownerPkh: "72b46a9927fd32da5c2f11365b6f20f9af930e63974e4f8935064215",
-  policyId: "c69b1f737aee7fbf902a453ebb83674623f74a90d13a833ce0222005"
-}
+factory\offchain\meshjs> deno run -A factory.ts get-tag wallet_0.json d8e6160ad3e69f1976e33cba6bb9769a283c6aa4a28121a70744cb77 product_id_1                                                                                       
+--- Product details ---
+Product ID: product_id_1
+Product policy: 123efa4afa59f8a3da7c91e8c330cc2bd4aae0f1a3f3e008808a8661
+Product address: addr_test1wqfra7j2lfvl3g760jg73seses4af2hq7x3l8cqgsz9gvcgy24uy9
+Tag: tag_solarpanel_v1
