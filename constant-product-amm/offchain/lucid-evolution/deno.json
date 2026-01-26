@@ -1,0 +1,10 @@
+{
+  "nodeModulesDir": "auto",
+  "imports": {
+    "@evolution-sdk/lucid": "npm:@evolution-sdk/lucid@2.0.1"
+  },
+  "allowScripts": ["npm:cbor-extract", "npm:libsodium-wrappers-sumo"],
+  "tasks": {
+    "prepare": "deno run --allow-read --allow-write --allow-net amm.ts prepare"
+  }
+}
