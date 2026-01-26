@@ -1,0 +1,14 @@
+# System Files
+.DS_Store
+Thumbs.db
+
+# Dependencies
+node_modules/
+
+# Local Wallet Keys
+wallet_*.txt
+wallet.txt
+
+# Logs and Temporary files
+*.log
+time_diff.txt
