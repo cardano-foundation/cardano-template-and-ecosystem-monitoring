@@ -1,8 +1,10 @@
 {
   "tasks": {
     "dev": "deno run --unstable-detect-cjs --watch atomic-transaction.ts",
-    "mint": "deno run -A --unstable-detect-cjs atomic-transaction.ts mint",
+    "mint": "deno run -A --unstable-detect-cjs atomic-transaction.ts mintAndLock",
     "burn": "deno run -A --unstable-detect-cjs atomic-transaction.ts burn",
+    "collect": "deno run -A --unstable-detect-cjs atomic-transaction.ts collect",
+    "test": "deno run -A --unstable-detect-cjs atomic-transaction.ts test",
     "prepare": "deno run -A --unstable-detect-cjs atomic-transaction.ts prepare"
   },
   "imports": {
