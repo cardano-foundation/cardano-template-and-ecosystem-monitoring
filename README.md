@@ -24,21 +24,21 @@ The 21 use cases identified in the research paper are as follows:
 3. [Token transfer](token-transfer/README.md)
 4. [HTLC](htlc/README.md)  
 5. [Escrow](escrow/README.md)  
-6. Auction  
+6. [Auction](auction/README.md)  
 7. [Crowdfund](crowdfund/README.md)  
 8. [Vault](vault/README.md)
 9. [Vesting](vesting/README.md)  
-10. Storage  
-11. Simple wallet  
+10. [Storage](storage/README.md)  
+11. [Simple wallet](simple-wallet/README.md)  
 12. [Price Bet](pricebet/README.md)  
 13. [Payment splitter](payment-splitter/README.md)
-14. Lottery  
-15. Constant-product AMM  
+14. [Lottery](lottery/README.md)  
+15. [Constant-product AMM](constant-product-amm/README.md)  
 16. [Upgradeable Proxy](upgradable-proxy/README.md)  
-17. Factory  
-18. Decentralized identity  
-19. Editable NFT  
-20. Anonymous Data  
+17. Factory 
+18. [Decentralized identity](decentralized-identity/README.md)  
+19. [Editable NFT](editable-nft/README.md)  
+20. [Anonymous Data](anonymous-data/README.md)  
 21. [Atomic Transactions](atomic-transaction/README.md)
 
 ### 🛠 Running a Use Case
