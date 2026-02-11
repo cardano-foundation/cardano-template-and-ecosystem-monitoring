@@ -1,0 +1,9 @@
+{
+    "nodeModulesDir": "auto",
+    "imports": {
+        "@meshsdk/core": "npm:@meshsdk/core@1.9.0-beta.93",
+        "@meshsdk/core-csl": "npm:@meshsdk/core-csl@1.9.0-beta.93",
+        "@meshsdk/common": "npm:@meshsdk/common@1.9.0-beta.93"
+    },
+    "allowScripts": ["npm:bufferutil@4.1.0", "npm:chacha-native@2.0.3", "npm:node-datachannel@0.12.0", "npm:utf-8-validate@6.0.6", "npm:utp-native@2.5.3"]
+}
