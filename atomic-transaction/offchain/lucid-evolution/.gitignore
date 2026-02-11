@@ -1,0 +1,4 @@
+/node_modules
+wallet_*.txt
+wallet.txt
+*.lock
