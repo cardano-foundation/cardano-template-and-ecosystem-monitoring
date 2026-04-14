@@ -30,16 +30,19 @@ jobs:
         id: discovery
         run: |
           chmod +x scripts/local-test-discovery.sh
-          mkdir -p $GITHUB_WORKSPACE/.local-test-results
-          scripts/local-test-discovery.sh > $GITHUB_WORKSPACE/.local-test-results/discovery-output.txt 2>&1
-          echo "After script:"
-          ls -la $GITHUB_WORKSPACE/.local-test-results
+          mkdir -p .local-test-results
+          scripts/local-test-discovery.sh 2>&1 | tee .local-test-results/discovery-output.txt
+
+      - name: Debug file sizes
+        run: |
+          ls -l .local-test-results
+          wc -c .local-test-results/* || true
 
       - name: Upload discovery results
         uses: actions/upload-artifact@v4
         with:
           name: discovery-results
-          path: ${{ github.workspace }}/.local-test-results/
+          path: .local-test-results/
           retention-days: 1
 
   compile-aiken:
