@@ -370,7 +370,7 @@ jobs:
   publish-results:
     name: Publish Dashboard Results
     needs: [discover, compile-aiken, test-ccl-java, test-mesh, test-lucid, report]
-    if: always() && github.ref == 'refs/heads/main'
+    if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
