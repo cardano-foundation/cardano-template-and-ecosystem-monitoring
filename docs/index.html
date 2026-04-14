@@ -433,7 +433,7 @@
   // ── fetch results ─────────────────────────────────────
   let data;
   try {
-    const res = await fetch('results.json');
+    const res = await fetch('./results.json');
     if (!res.ok) throw new Error('not found');
     data = await res.json();
   } catch {
