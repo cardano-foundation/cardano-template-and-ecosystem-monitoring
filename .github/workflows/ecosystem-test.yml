@@ -51,7 +51,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: discovery-results
-          path: ${{ github.workspace }}/.local-test-results/*.txt
+          path: |
+            .local-test-results/aiken-examples.txt
+            .local-test-results/ccl-examples.txt
+            .local-test-results/discovery-output.txt
+            .local-test-results/lucid-examples.txt
+            .local-test-results/mesh-examples.txt
+            .local-test-results/scalus-examples.txt
           retention-days: 1
 
   compile-aiken:
