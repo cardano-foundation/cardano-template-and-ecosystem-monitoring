@@ -30,7 +30,15 @@ jobs:
         id: discovery
         run: |
           chmod +x scripts/local-test-discovery.sh
-          scripts/local-test-discovery.sh
+          mkdir -p .local-test-results
+          scripts/local-test-discovery.sh 2>&1 | tee .local-test-results/discovery-output.txt
+
+      - name: Upload discovery results
+        uses: actions/upload-artifact@v4
+        with:
+          name: discovery-results
+          path: .local-test-results/
+          retention-days: 1
 
   compile-aiken:
     name: Compile Aiken - ${{ matrix.example }}
