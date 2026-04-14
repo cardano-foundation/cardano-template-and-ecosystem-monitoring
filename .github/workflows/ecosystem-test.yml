@@ -51,7 +51,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: discovery-results
-          path: ${{ github.workspace }}/.local-test-results/**
+          path: ${{ github.workspace }}/.local-test-results/*.txt
           retention-days: 1
 
   compile-aiken:
