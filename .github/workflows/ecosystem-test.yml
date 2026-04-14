@@ -366,3 +366,50 @@ jobs:
               repo: context.repo.repo,
               body: report
             });
+
+  publish-results:
+    name: Publish Dashboard Results
+    needs: [discover, compile-aiken, test-ccl-java, test-mesh, test-lucid, report]
+    if: always() && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write   # needed to push to gh-pages
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Restore discovery results
+        run: |
+          mkdir -p .local-test-results
+          if [ -d artifacts/discovery-results ]; then
+            cp -r artifacts/discovery-results/. .local-test-results/
+          fi
+
+      - name: Generate results.json
+        env:
+          ARTIFACTS_DIR: ${{ github.workspace }}/artifacts
+          JOB_DISCOVER:      ${{ needs.discover.result }}
+          JOB_COMPILE_AIKEN: ${{ needs.compile-aiken.result }}
+          JOB_TEST_CCL:      ${{ needs.test-ccl-java.result }}
+          JOB_TEST_MESH:     ${{ needs.test-mesh.result }}
+          JOB_TEST_LUCID:    ${{ needs.test-lucid.result }}
+          JOB_REPORT:        ${{ needs.report.result }}
+        run: |
+          chmod +x scripts/generate-results.sh
+          scripts/generate-results.sh
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir:  ./docs
+          publish_branch: gh-pages
+          keep_files: false
+          commit_message: "ci: update dashboard results [skip ci]"
