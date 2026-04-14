@@ -35,14 +35,23 @@ jobs:
 
       - name: Debug file sizes
         run: |
-          ls -l .local-test-results
-          wc -c .local-test-results/* || true
+          echo "PWD: $(pwd)"
+          echo "Workspace: $GITHUB_WORKSPACE"
+          
+          echo "List workspace:"
+          ls -la $GITHUB_WORKSPACE
+          
+          echo "List target dir:"
+          ls -la $GITHUB_WORKSPACE/.local-test-results
+          
+          echo "Find files:"
+          find $GITHUB_WORKSPACE/.local-test-results -type f
 
       - name: Upload discovery results
         uses: actions/upload-artifact@v4
         with:
           name: discovery-results
-          path: .local-test-results
+          path: ${{ github.workspace }}/.local-test-results/**
           retention-days: 1
 
   compile-aiken:
