@@ -1,10 +1,10 @@
 {
   "run": {
-    "timestamp": "2026-04-14T13:49:04Z",
+    "timestamp": "2026-04-14T13:54:06Z",
     "branch": "43/merge",
-    "commit_sha": "1ac6300684a3d3fda8fb5f0ce3af2f97a7525a84",
-    "commit_url": "https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/commit/1ac6300684a3d3fda8fb5f0ce3af2f97a7525a84",
-    "workflow_url": "https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/runs/24402545830"
+    "commit_sha": "df042b925579bc95c84cf351e4d0c0cb4998082e",
+    "commit_url": "https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/commit/df042b925579bc95c84cf351e4d0c0cb4998082e",
+    "workflow_url": "https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/runs/24402822923"
   },
   "jobs": {
     "discover": {
@@ -16,7 +16,7 @@
       "duration_seconds": null
     },
     "test_ccl_java": {
-      "status": "failure",
+      "status": "cancelled",
       "duration_seconds": null
     },
     "test_mesh": {
@@ -33,11 +33,63 @@
     }
   },
   "discovery": {
-    "aiken": [],
-    "scalus": [],
-    "ccl_java": [],
-    "meshjs": [],
-    "lucid": []
+    "aiken": [
+      "payment-splitter",
+      "vault",
+      "storage",
+      "auction",
+      "escrow",
+      "simple-transfer",
+      "bet",
+      "pricebet",
+      "vesting",
+      "htlc",
+      "anonymous-data",
+      "lottery",
+      "decentralized-identity",
+      "factory",
+      "token-transfer",
+      "crowdfund",
+      "upgradable-proxy",
+      "simple-wallet",
+      "atomic-transaction"
+    ],
+    "scalus": [
+      "payment-splitter"
+    ],
+    "ccl_java": [
+      "payment-splitter",
+      "simple-transfer",
+      "htlc",
+      "token-transfer",
+      "crowdfund",
+      "atomic-transaction"
+    ],
+    "meshjs": [
+      "payment-splitter",
+      "vault",
+      "auction",
+      "escrow",
+      "simple-transfer",
+      "htlc",
+      "anonymous-data",
+      "lottery",
+      "factory",
+      "simple-wallet",
+      "atomic-transaction"
+    ],
+    "lucid": [
+      "vault",
+      "auction",
+      "escrow",
+      "simple-transfer",
+      "bet",
+      "pricebet",
+      "htlc",
+      "decentralized-identity",
+      "upgradable-proxy",
+      "atomic-transaction"
+    ]
   },
   "results": {
     "aiken": [
@@ -233,5 +285,5 @@
       }
     ]
   },
-  "discovery_output": ""
+  "discovery_output": "\u001b[0;34m🔍 Discovering Cardano Examples\u001b[0m\n========================================\n\n\u001b[1;33mScanning for Aiken examples...\u001b[0m\n  - payment-splitter\n  - vault\n  - storage\n  - auction\n  - escrow\n  - simple-transfer\n  - bet\n  - pricebet\n  - vesting\n  - htlc\n  - anonymous-data\n  - lottery\n  - decentralized-identity\n  - factory\n  - token-transfer\n  - crowdfund\n  - upgradable-proxy\n  - simple-wallet\n  - atomic-transaction\n\n\u001b[1;33mScanning for Scalus examples...\u001b[0m\n  - payment-splitter\n\n\u001b[1;33mScanning for CCL Java examples...\u001b[0m\n  - payment-splitter\n  - simple-transfer\n  - htlc\n  - token-transfer\n  - crowdfund\n  - atomic-transaction\n\n\u001b[1;33mScanning for Mesh.js examples...\u001b[0m\n  - payment-splitter\n  - vault\n  - auction\n  - escrow\n  - simple-transfer\n  - htlc\n  - anonymous-data\n  - lottery\n  - factory\n  - simple-wallet\n  - atomic-transaction\n\n\u001b[1;33mScanning for Lucid Evolution examples...\u001b[0m\n  - vault\n  - auction\n  - escrow\n  - simple-transfer\n  - bet\n  - pricebet\n  - htlc\n  - decentralized-identity\n  - upgradable-proxy\n  - atomic-transaction\n\n\u001b[0;32m========================================\nDiscovery Summary\n========================================\\033[0m\nAiken examples:          19\nScalus examples:         1\nCCL Java examples:       6\nMesh.js examples:        11\nLucid Evolution examples: 10\n----------------------------------------\nTotal:                   47\n\n\u001b[0;32m✅ Discovery complete!\u001b[0m"
 }
