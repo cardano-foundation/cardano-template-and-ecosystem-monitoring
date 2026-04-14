@@ -1,0 +1,237 @@
+{
+  "run": {
+    "timestamp": "2026-04-14T12:01:50Z",
+    "branch": "43/merge",
+    "commit_sha": "b5603826d5d3f8d3cca2b36d194bf2ae550070a1",
+    "commit_url": "https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/commit/b5603826d5d3f8d3cca2b36d194bf2ae550070a1",
+    "workflow_url": "https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/runs/24397640981"
+  },
+  "jobs": {
+    "discover": {
+      "status": "success",
+      "duration_seconds": null
+    },
+    "compile_aiken": {
+      "status": "success",
+      "duration_seconds": null
+    },
+    "test_ccl_java": {
+      "status": "failure",
+      "duration_seconds": null
+    },
+    "test_mesh": {
+      "status": "failure",
+      "duration_seconds": null
+    },
+    "test_lucid": {
+      "status": "failure",
+      "duration_seconds": null
+    },
+    "report": {
+      "status": "success",
+      "duration_seconds": null
+    }
+  },
+  "discovery": {
+    "aiken": [],
+    "scalus": [],
+    "ccl_java": [],
+    "meshjs": [],
+    "lucid": []
+  },
+  "results": {
+    "aiken": [
+      {
+        "name": "atomic-transaction",
+        "status": "success"
+      },
+      {
+        "name": "upgradable-proxy",
+        "status": "success"
+      },
+      {
+        "name": "simple-wallet",
+        "status": "success"
+      },
+      {
+        "name": "bet",
+        "status": "success"
+      },
+      {
+        "name": "vesting",
+        "status": "success"
+      },
+      {
+        "name": "htlc",
+        "status": "success"
+      },
+      {
+        "name": "auction",
+        "status": "success"
+      },
+      {
+        "name": "payment-splitter",
+        "status": "success"
+      },
+      {
+        "name": "storage",
+        "status": "success"
+      },
+      {
+        "name": "pricebet",
+        "status": "success"
+      },
+      {
+        "name": "decentralized-identity",
+        "status": "success"
+      },
+      {
+        "name": "crowdfund",
+        "status": "success"
+      },
+      {
+        "name": "anonymous-data",
+        "status": "success"
+      },
+      {
+        "name": "lottery",
+        "status": "success"
+      },
+      {
+        "name": "escrow",
+        "status": "success"
+      },
+      {
+        "name": "vault",
+        "status": "success"
+      },
+      {
+        "name": "simple-transfer",
+        "status": "success"
+      },
+      {
+        "name": "token-transfer",
+        "status": "success"
+      },
+      {
+        "name": "factory",
+        "status": "success"
+      }
+    ],
+    "ccl_java": [
+      {
+        "name": "payment-splitter",
+        "status": "success"
+      },
+      {
+        "name": "token-transfer",
+        "status": "success"
+      },
+      {
+        "name": "htlc",
+        "status": "success"
+      },
+      {
+        "name": "crowdfund",
+        "status": "success"
+      },
+      {
+        "name": "simple-transfer",
+        "status": "success"
+      },
+      {
+        "name": "atomic-transaction",
+        "status": "success"
+      }
+    ],
+    "meshjs": [
+      {
+        "name": "auction",
+        "status": "success"
+      },
+      {
+        "name": "simple-wallet",
+        "status": "success"
+      },
+      {
+        "name": "simple-transfer",
+        "status": "success"
+      },
+      {
+        "name": "payment-splitter",
+        "status": "success"
+      },
+      {
+        "name": "htlc",
+        "status": "success"
+      },
+      {
+        "name": "escrow",
+        "status": "success"
+      },
+      {
+        "name": "anonymous-data",
+        "status": "success"
+      },
+      {
+        "name": "vault",
+        "status": "success"
+      },
+      {
+        "name": "factory",
+        "status": "success"
+      },
+      {
+        "name": "atomic-transaction",
+        "status": "success"
+      },
+      {
+        "name": "lottery",
+        "status": "success"
+      }
+    ],
+    "lucid": [
+      {
+        "name": "auction",
+        "status": "success"
+      },
+      {
+        "name": "simple-transfer",
+        "status": "success"
+      },
+      {
+        "name": "decentralized-identity",
+        "status": "success"
+      },
+      {
+        "name": "upgradable-proxy",
+        "status": "success"
+      },
+      {
+        "name": "atomic-transaction",
+        "status": "success"
+      },
+      {
+        "name": "bet",
+        "status": "success"
+      },
+      {
+        "name": "escrow",
+        "status": "success"
+      },
+      {
+        "name": "htlc",
+        "status": "success"
+      },
+      {
+        "name": "pricebet",
+        "status": "success"
+      },
+      {
+        "name": "vault",
+        "status": "success"
+      }
+    ]
+  },
+  "discovery_output": ""
+}
