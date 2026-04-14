@@ -42,7 +42,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: discovery-results
-          path: .local-test-results/
+          path: .local-test-results
           retention-days: 1
 
   compile-aiken:
