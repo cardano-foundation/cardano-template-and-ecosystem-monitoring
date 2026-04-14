@@ -1,10 +1,10 @@
 {
   "run": {
-    "timestamp": "2026-04-14T13:54:06Z",
+    "timestamp": "2026-04-14T13:57:18Z",
     "branch": "43/merge",
-    "commit_sha": "df042b925579bc95c84cf351e4d0c0cb4998082e",
-    "commit_url": "https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/commit/df042b925579bc95c84cf351e4d0c0cb4998082e",
-    "workflow_url": "https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/runs/24402822923"
+    "commit_sha": "982f81b6248b27264ea1120042cafc031916386b",
+    "commit_url": "https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/commit/982f81b6248b27264ea1120042cafc031916386b",
+    "workflow_url": "https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/runs/24402909807"
   },
   "jobs": {
     "discover": {
@@ -16,7 +16,7 @@
       "duration_seconds": null
     },
     "test_ccl_java": {
-      "status": "cancelled",
+      "status": "failure",
       "duration_seconds": null
     },
     "test_mesh": {
