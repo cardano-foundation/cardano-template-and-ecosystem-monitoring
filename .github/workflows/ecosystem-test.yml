@@ -1,9 +1,10 @@
 name: Cardano Ecosystem Tests
 
 # The matrix is generic over framework descriptors (frameworks/*.yml) and
-# use-case manifests (<use-case>/example.yml); legacy use cases without a
-# manifest fall through the dual-mode discovery in
-# scripts/local-test-discovery.sh.
+# use-case manifests (<use-case>/example.yml). Every use-case directory
+# under the repo root must ship an example.yml; scripts/local-test-discovery.sh
+# hard-errors on missing manifests, unknown manifest_keys, and section/kind
+# mismatches.
 #
 # Tool versions are pinned by versions.yml at the repo root and exported by
 # the .github/actions/load-versions/ composite action.

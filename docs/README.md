@@ -10,7 +10,13 @@ Once you have picked a use case, its top-level `README.md` (e.g. [`escrow/README
 
 ## I'm here to track ecosystem health
 
-The repo's CI matrix runs every (use case × onchain language × offchain SDK) combination on every push and on a nightly drift schedule. The current matrix is rendered in the GitHub Actions step summary of every workflow run. A public dashboard rendering the same data lives at [TBD — Phase 4 deliverable]; until that ships, the workflow run logs are the canonical source.
+The repo's CI matrix runs every (use case × onchain language × offchain SDK) combination on every push and PR. The full matrix is rendered in the GitHub Actions step summary of every workflow run.
+
+A separate nightly **drift workflow** runs at 02:00 UTC: it resolves the latest stable release of every pinned tool and re-runs a *subset* of the matrix (today: discovery + Aiken compile across every onchain example) against those floating versions. It does NOT today re-run the full offchain matrix; that's deferred until the workflow is refactored as a reusable workflow callable with override inputs.
+
+The README badges embedded in every use-case page point at the **overall** workflow status — not at that specific use case. Per-cell badges driven by `matrix.json` land alongside the public dashboard from Phase 4 (the dashboard URL will be inserted here when it ships).
+
+Until the dashboard ships, the workflow run logs are the canonical source for per-cell pass/fail.
 
 ## I'm contributing
 

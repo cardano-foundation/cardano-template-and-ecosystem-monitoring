@@ -22,7 +22,7 @@
 #   - registered-onchain:        JSON array of registered onchain framework names
 #   - registered-offchain:       JSON array of registered offchain framework names
 #   - use-cases-with-offchain:   JSON array of use cases with ≥ 1 offchain framework
-#   - manifest-coverage:         JSON {total, with_manifest, with_heuristic}
+#   - manifest-coverage:         JSON {total, with_manifest}
 #
 # Schema reference (descriptors): frameworks/SCHEMA.md
 
