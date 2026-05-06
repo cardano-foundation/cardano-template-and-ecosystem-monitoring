@@ -1,0 +1,16 @@
+# Use-case manifest for editable-nft
+#
+# Schema reference: frameworks/SCHEMA.md.
+#
+# This use case is a placeholder — no onchain or offchain implementation is
+# shipped yet. The empty onchain: and offchain: sections are intentional, so
+# the matrix renders this use case as transparently not-yet-implemented
+# rather than hiding it.
+
+use_case: editable-nft
+description: >-
+  An NFT whose metadata can be updated by the holder under a defined
+  policy — useful for evolving collectibles. Implementation pending.
+
+onchain: {}
+offchain: {}

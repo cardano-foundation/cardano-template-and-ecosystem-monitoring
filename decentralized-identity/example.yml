@@ -1,0 +1,17 @@
+# Use-case manifest for decentralized-identity
+#
+# Schema reference: frameworks/SCHEMA.md.
+
+use_case: decentralized-identity
+description: >-
+  A self-sovereign identity contract (loosely modeled on EIP-1056): identity
+  addresses, ownership control, and delegate management.
+
+onchain:
+  aiken:
+    path: onchain/aiken
+
+offchain:
+  lucid-evolution:
+    path: offchain/lucid-evolution
+    entry: did.ts

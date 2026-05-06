@@ -1,0 +1,17 @@
+# Use-case manifest for bet
+#
+# Schema reference: frameworks/SCHEMA.md.
+
+use_case: bet
+description: >-
+  A two-player betting contract with oracle-based resolution: trustless
+  wagering where an external oracle settles the bet.
+
+onchain:
+  aiken:
+    path: onchain/aiken
+
+offchain:
+  lucid-evolution:
+    path: offchain/lucid-evolution
+    entry: bet.ts

@@ -1,0 +1,26 @@
+# Use-case manifest for payment-splitter
+#
+# Schema reference: frameworks/SCHEMA.md.
+#
+# Note: payment-splitter also ships an onchain/scalus/ implementation. The
+# Scalus framework has no descriptor in frameworks/ at this time, so it is
+# not declared here. Add a frameworks/scalus.yml descriptor (and an entry
+# under onchain: here) to wire Scalus into CI.
+
+use_case: payment-splitter
+description: >-
+  A payment splitter that distributes funds among a fixed list of payees.
+  The validator enforces that every output goes to a registered payee in the
+  expected proportion.
+
+onchain:
+  aiken:
+    path: onchain/aiken
+
+offchain:
+  meshjs:
+    path: offchain/meshjs
+    entry: payment-splitter.ts
+  ccl-java:
+    path: offchain/ccl-java
+    entry: PaymentSplitter.java

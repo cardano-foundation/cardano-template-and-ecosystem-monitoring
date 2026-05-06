@@ -1,0 +1,17 @@
+# Use-case manifest for pricebet
+#
+# Schema reference: frameworks/SCHEMA.md.
+
+use_case: pricebet
+description: >-
+  A price-prediction betting contract: participants bet on future exchange
+  rates between tokens, settled by an oracle price feed.
+
+onchain:
+  aiken:
+    path: onchain/aiken
+
+offchain:
+  lucid-evolution:
+    path: offchain/lucid-evolution
+    entry: price-bet.ts

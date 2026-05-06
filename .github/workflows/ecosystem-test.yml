@@ -49,8 +49,8 @@ jobs:
       # automatically discovered as <framework>-examples step outputs.
       aiken-examples: ${{ steps.discovery.outputs.aiken-examples }}
       # Offchain matrix axis. The job per use case dynamically iterates the
-      # manifest's declared offchain frameworks (or heuristic fallback against
-      # registered frameworks) — no per-framework outputs needed at this layer.
+      # manifest's declared offchain frameworks — no per-framework outputs
+      # needed at this layer.
       use-cases-with-offchain: ${{ steps.discovery.outputs.use-cases-with-offchain }}
       registered-onchain: ${{ steps.discovery.outputs.registered-onchain }}
       registered-offchain: ${{ steps.discovery.outputs.registered-offchain }}

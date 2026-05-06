@@ -1,0 +1,18 @@
+# Use-case manifest for token-transfer
+#
+# Schema reference: frameworks/SCHEMA.md.
+
+use_case: token-transfer
+description: >-
+  A contract that locks a specific native asset (PolicyId + AssetName)
+  spendable only by a designated receiver. Prevents stuck funds by allowing
+  anyone to spend UTxOs that do not contain the specified asset.
+
+onchain:
+  aiken:
+    path: onchain/aiken
+
+offchain:
+  ccl-java:
+    path: offchain/ccl-java
+    entry: TokenTransfer.java

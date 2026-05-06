@@ -1,0 +1,24 @@
+# Use-case manifest for htlc
+#
+# Schema reference: frameworks/SCHEMA.md.
+
+use_case: htlc
+description: >-
+  A Hash Timed Locked Contract: the owner locks funds with an expiration time
+  and a secret; the guesser claims by revealing the matching pre-image, or
+  the owner reclaims after expiration.
+
+onchain:
+  aiken:
+    path: onchain/aiken
+
+offchain:
+  meshjs:
+    path: offchain/meshjs
+    entry: htlc.ts
+  lucid-evolution:
+    path: offchain/lucid-evolution
+    entry: htlc.ts
+  ccl-java:
+    path: offchain/ccl-java
+    entry: Htlc.java
