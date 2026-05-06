@@ -1,0 +1,13 @@
+{
+  "id": "encoding/datum-cbor-roundtrip/conway/bare-bytes",
+  "primitive": "encoding/datum-cbor-roundtrip",
+  "era": "conway",
+  "description": "A bare bytestring plutus_data value. CBOR major type 2 with a length prefix. Catches SDKs that wrap bare bytestrings in unnecessary Constr or that mis-handle length prefixes.",
+  "input": {
+    "plutus_data": { "bytes": "cafebabe" }
+  },
+  "expected": {
+    "cbor_hex": "44cafebabe",
+    "blake2b_256": "56cdc0b052c9adef9b66f93a93a520f468350b2fd9a143c66dd4c6f289292628"
+  }
+}

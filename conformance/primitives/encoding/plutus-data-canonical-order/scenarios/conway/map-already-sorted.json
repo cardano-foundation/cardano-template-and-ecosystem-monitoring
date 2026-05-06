@@ -1,0 +1,18 @@
+{
+  "id": "encoding/plutus-data-canonical-order/conway/map-already-sorted",
+  "primitive": "encoding/plutus-data-canonical-order",
+  "era": "conway",
+  "description": "A plutus_data Map with keys already in canonical (lexicographic-on-CBOR-encoded-key) order. Tests that the SDK preserves the order without reordering. Bytestring keys 0x01 < 0x02 are trivially in order; this is the baseline against which the scrambled-input scenario is compared.",
+  "input": {
+    "plutus_data": {
+      "map": [
+        { "k": { "bytes": "01" }, "v": { "int": 10 } },
+        { "k": { "bytes": "02" }, "v": { "int": 20 } }
+      ]
+    }
+  },
+  "expected": {
+    "cbor_hex": "bf41010a410214ff",
+    "blake2b_256": "ae313d8e1d208b2aef5a9e16e3d208543336a4704e1b6961aeb5e15d034e1016"
+  }
+}
