@@ -83,7 +83,9 @@ for scenario in "${SCENARIOS[@]}"; do
     echo
     echo "::group::${scenario_id} / ${adapter}"
     cell_start=$(date +%s%N)
-    if (cd "$tmp" && "${REPO_ROOT}/conformance/adapters/${adapter}/run-primitive.sh" "${REPO_ROOT}/${scenario}") > "${REPO_ROOT}/${log_file}" 2>&1; then
+    (cd "$tmp" && "${REPO_ROOT}/conformance/adapters/${adapter}/run-primitive.sh" "${REPO_ROOT}/${scenario}") > "${REPO_ROOT}/${log_file}" 2>&1
+    cell_exit=$?
+    if [[ "$cell_exit" == "0" ]]; then
       cell_status=pass
       echo "  ✅ ${scenario_id} / ${adapter}"
     else
@@ -135,7 +137,7 @@ PY
       # failure regardless of exit code — adapters MUST write result.json
       # before the exit code is meaningful. Synthesize a fail with a clear
       # error, so the cell appears in matrix.json instead of vanishing.
-      synthesize_fail "adapter exited without writing result.json (exit code: $cell_status path); see ${log_file#${REPO_ROOT}/}"
+      synthesize_fail "adapter exited (exit code ${cell_exit}) without writing result.json; see ${log_file#${REPO_ROOT}/}"
     fi
     rm -rf "$tmp"
     echo "::endgroup::"
