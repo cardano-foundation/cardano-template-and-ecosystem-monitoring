@@ -1,0 +1,32 @@
+# Framework descriptor: Mesh.js (offchain TypeScript SDK on Deno)
+#
+# Schema reference: frameworks/SCHEMA.md
+# How-to (manual): docs/how-to/add-framework.md (lands in P1W2)
+# Versions: versions.yml (`meshjs:`, `deno:` fields)
+
+name: meshjs
+kind: offchain
+manifest_key: meshjs
+
+default_entry: "*.ts"
+
+setup:
+  - name: Setup Deno ${{ env.DENO_VERSION }}
+    uses: denoland/setup-deno@v2
+    with:
+      deno-version: ${{ env.DENO_VERSION }}
+
+run:
+  cwd_relative_to_example: "offchain/meshjs"
+  # $ENTRY is the file declared in the use-case manifest's
+  # offchain.meshjs.entry field, or the first match of default_entry.
+  command: "deno run --allow-all $ENTRY"
+
+# Tests are migrated to result-json incrementally during P1W1's runner-contract
+# pass. Examples that have not yet been migrated will fall through the legacy
+# exit-code path; the aggregator synthesizes a result.json for them. After all
+# pilot examples are migrated, this becomes `result-json`.
+result:
+  convention: exit-code
+
+needs_yaci: true

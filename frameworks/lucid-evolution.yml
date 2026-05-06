@@ -1,0 +1,26 @@
+# Framework descriptor: Lucid Evolution (offchain TypeScript SDK on Deno)
+#
+# Schema reference: frameworks/SCHEMA.md
+# How-to (manual): docs/how-to/add-framework.md (lands in P1W2)
+# Versions: versions.yml (`lucid_evolution:`, `deno:` fields)
+
+name: lucid-evolution
+kind: offchain
+manifest_key: lucid-evolution
+
+default_entry: "*.ts"
+
+setup:
+  - name: Setup Deno ${{ env.DENO_VERSION }}
+    uses: denoland/setup-deno@v2
+    with:
+      deno-version: ${{ env.DENO_VERSION }}
+
+run:
+  cwd_relative_to_example: "offchain/lucid-evolution"
+  command: "deno run --allow-all $ENTRY"
+
+result:
+  convention: exit-code
+
+needs_yaci: true
