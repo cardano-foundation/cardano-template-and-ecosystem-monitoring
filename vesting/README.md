@@ -1,7 +1,7 @@
 # Vesting
 
 <!-- CI_BADGE_BLOCK_BEGIN -->
-[![Ecosystem tests · vesting](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml/badge.svg?branch=main)](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml)
+[![Ecosystem tests · vesting](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml/badge.svg?branch=feat/ecosystem-monitoring-and-learning-enhancement)](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml)
 <!-- CI_BADGE_BLOCK_END -->
 
 > A time-locked vesting contract. Locks funds for a beneficiary; the beneficiary can withdraw only after a deadline; the owner can cancel and reclaim at any time.

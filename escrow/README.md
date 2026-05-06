@@ -1,7 +1,7 @@
 # Escrow
 
 <!-- CI_BADGE_BLOCK_BEGIN -->
-[![Ecosystem tests · escrow](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml/badge.svg?branch=main)](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml)
+[![Ecosystem tests · escrow](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml/badge.svg?branch=feat/ecosystem-monitoring-and-learning-enhancement)](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml)
 <!-- CI_BADGE_BLOCK_END -->
 
 > A trustless asset-exchange contract: an initiator and a recipient lock complementary assets at the script; the swap completes only when both have signed off. Either party can cancel before completion.

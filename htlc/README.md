@@ -1,7 +1,7 @@
 # Hash Timed Locked Contract (HTLC)
 
 <!-- CI_BADGE_BLOCK_BEGIN -->
-[![Ecosystem tests · htlc](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml/badge.svg?branch=main)](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml)
+[![Ecosystem tests · htlc](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml/badge.svg?branch=feat/ecosystem-monitoring-and-learning-enhancement)](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml)
 <!-- CI_BADGE_BLOCK_END -->
 
 > The owner locks funds with a deadline and a hash. A guesser can claim before the deadline by revealing the matching pre-image; after the deadline, the owner reclaims.

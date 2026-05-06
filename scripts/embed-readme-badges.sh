@@ -31,7 +31,13 @@ else
   ORG_REPO="cardano-foundation/cardano-template-and-ecosystem-monitoring"
 fi
 
-WORKFLOW_BADGE="https://github.com/${ORG_REPO}/actions/workflows/ecosystem-test.yml/badge.svg?branch=main"
+# TEMPORARY: while the roadmap is in progress, the badge points at the
+# long-running roadmap branch (feat/ecosystem-monitoring-and-learning-enhancement)
+# rather than `main`. P1W1 and P1W2 work hasn't merged to main yet, so a
+# `branch=main` badge would show no recent runs. Flip back to `branch=main`
+# when the roadmap branch merges to main (same time the workflow's
+# `TEMPORARY: long-running feature branch` line is removed).
+WORKFLOW_BADGE="https://github.com/${ORG_REPO}/actions/workflows/ecosystem-test.yml/badge.svg?branch=feat/ecosystem-monitoring-and-learning-enhancement"
 WORKFLOW_LINK="https://github.com/${ORG_REPO}/actions/workflows/ecosystem-test.yml"
 
 readonly BEGIN="<!-- CI_BADGE_BLOCK_BEGIN -->"
