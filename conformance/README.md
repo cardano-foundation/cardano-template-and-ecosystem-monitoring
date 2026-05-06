@@ -32,16 +32,20 @@ An **adapter** = a small program in a registered offchain SDK that knows how to 
 
 ## How to run
 
+Locally:
+
 ```sh
 # Run every primitive scenario across every SDK adapter
 scripts/run-conformance.sh
 
-# Run a single scenario locally for debugging
+# Run a single scenario for debugging
 conformance/adapters/meshjs/run-primitive.sh \
     conformance/primitives/encoding/datum-cbor-roundtrip/scenarios/conway/simple-int.json
 ```
 
-Results land in `.ci-results/<primitive-id>__<framework>.result.json` and are aggregated into `matrix.json` by `scripts/aggregate-results.sh`. The matrix renderer ([`scripts/render-matrix.sh`](../scripts/render-matrix.sh)) groups primitive results separately from use-case examples.
+Each adapter writes a `result.json` to its working directory (the runner-contract format). `scripts/run-conformance.sh` collects those into `.ci-results/<scenario-id>__<framework>.result.json` so the existing `scripts/aggregate-results.sh` and `scripts/render-matrix.sh` can produce the same matrix.json + markdown report shape used by the rest of the repo.
+
+**Status — CI integration**: P2W1 ships the conformance directory tree and the locally-runnable adapter scaffolding. A dedicated `primitives` matrix job in `.github/workflows/ecosystem-test.yml` that runs `scripts/run-conformance.sh` and merges the results into the canonical `matrix.json` is **deferred** to a follow-on iteration — adapter impls need verification against working SDK environments before the matrix is allowed to surface them on the dashboard.
 
 ## Reading order for learners
 
