@@ -1,13 +1,12 @@
 name: Run framework cell
 description: >-
-  Runs one (use case, framework) cell. Executes a command in a working
-  directory, captures stdout/stderr to a log, and writes a result.json to the
-  output directory describing pass/fail/duration. The caller is responsible for
-  resolving the command, working directory, and entry file from the framework
-  registry and use case manifest. This action is intentionally minimal —
-  Wave 1 keeps descriptor parsing in the workflow, not in the composite action,
-  to avoid building a mini CI platform before the framework contract is proven.
-  Wave 2 may take over more of this logic once the contract is settled.
+  Runs one (use case, framework) cell using the framework registry. Reads
+  frameworks/<framework>.yml for cwd_relative_to_example, run.command,
+  default_entry, and result.convention; reads <use-case>/example.yml for
+  the explicit entry under <kind>.<manifest_key>.entry; runs the descriptor's
+  command from the resolved working directory; captures log + result.json.
+  Thin wrapper around scripts/ci/run-cell.sh — the script does the work, the
+  action gives callers a stable input shape.
 
 inputs:
   framework:
@@ -16,31 +15,10 @@ inputs:
   use_case:
     description: Use case directory name (e.g. "escrow").
     required: true
-  era:
-    description: Cardano protocol era this run is tagged with (e.g. "conway").
-    required: true
-  working_directory:
-    description: Directory to cd into before running the command (relative to repo root).
-    required: true
-  command:
-    description: Shell command to execute. May reference $ENTRY if `entry` is provided.
-    required: true
-  entry:
-    description: Optional entry file name to expose as $ENTRY in the command.
-    required: false
-    default: ""
   output_dir:
-    description: Directory to write result.json and the log file into. Created if missing.
+    description: Directory to write result.json and log into. Created if missing.
     required: false
     default: .ci-results
-  trust_authored_result_json:
-    description: >-
-      If "true" and the run writes a result.json into its working directory,
-      that file is used verbatim and the action's exit-code synthesis is
-      skipped. This is the runner-contract path. Default "false" until the
-      example is migrated to the contract.
-    required: false
-    default: "false"
 
 outputs:
   status:
@@ -53,98 +31,22 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Run cell and emit result.json
+    - name: Run cell via descriptor
       id: run
       shell: bash
+      env:
+        USE_CASE: ${{ inputs.use_case }}
+        FRAMEWORK: ${{ inputs.framework }}
+        OUT_DIR: ${{ inputs.output_dir }}
       run: |
         set -uo pipefail
-        FW="${{ inputs.framework }}"
-        UC="${{ inputs.use_case }}"
-        ERA="${{ inputs.era }}"
-        WORKDIR="${{ inputs.working_directory }}"
-        CMD="${{ inputs.command }}"
-        ENTRY="${{ inputs.entry }}"
-        OUT="${{ inputs.output_dir }}"
-        TRUST="${{ inputs.trust_authored_result_json }}"
-
-        mkdir -p "$OUT"
-
-        if [[ ! -d "$WORKDIR" ]]; then
-          echo "::error::$WORKDIR does not exist"
-          python3 -c "
-        import json
-        print(json.dumps({
-          'tier': 'use-case-example',
-          'id': '${UC}/${FW}',
-          'use_case': '${UC}',
-          'framework': '${FW}',
-          'era': '${ERA}',
-          'status': 'fail',
-          'duration_ms': 0,
-          'error_summary': 'working directory ${WORKDIR} does not exist',
-        }, indent=2))
-        " > "${OUT}/${UC}__${FW}.result.json"
-          echo "status=fail" >> "$GITHUB_OUTPUT"
-          echo "result_path=${OUT}/${UC}__${FW}.result.json" >> "$GITHUB_OUTPUT"
-          exit 1
-        fi
-
-        CELL_LOG="${OUT}/${UC}__${FW}.log"
-        START_NS=$(date +%s%N)
-        (
-          cd "$WORKDIR"
-          ENTRY="$ENTRY" bash -c "$CMD"
-        ) 2>&1 | tee "$CELL_LOG"
-        EXIT_CODE=${PIPESTATUS[0]}
-        END_NS=$(date +%s%N)
-        DURATION_MS=$(( (END_NS - START_NS) / 1000000 ))
-
-        AUTHORED="$WORKDIR/result.json"
-        FINAL="${OUT}/${UC}__${FW}.result.json"
-
-        if [[ "$TRUST" == "true" && -f "$AUTHORED" ]]; then
-          # Runner-contract path: trust the authored result.json verbatim.
-          cp "$AUTHORED" "$FINAL"
-          STATUS=$(python3 -c "
-        import json, sys
-        try:
-          print(json.load(open(sys.argv[1])).get('status', 'fail'))
-        except Exception:
-          print('fail')
-        " "$FINAL")
+        chmod +x scripts/ci/run-cell.sh
+        # The script reads PROTOCOL_VERSION_VERSION from env (set by load-versions).
+        if scripts/ci/run-cell.sh "$USE_CASE" "$FRAMEWORK" "$OUT_DIR"; then
+          STATUS=pass
         else
-          # Legacy / synthesized path: derive status from exit code.
-          if [[ "$EXIT_CODE" == "0" ]]; then
-            STATUS=pass
-            ERR_SUMMARY=""
-          else
-            STATUS=fail
-            ERR_SUMMARY="exit code $EXIT_CODE; see $(basename "$CELL_LOG")"
-          fi
-          UC="$UC" FW="$FW" ERA="$ERA" STATUS="$STATUS" \
-            DURATION_MS="$DURATION_MS" ERR_SUMMARY="${ERR_SUMMARY}" \
-            python3 - > "$FINAL" <<'PY'
-        import json, os
-        out = {
-          "tier": "use-case-example",
-          "id": f"{os.environ['UC']}/{os.environ['FW']}",
-          "use_case": os.environ["UC"],
-          "framework": os.environ["FW"],
-          "era": os.environ["ERA"],
-          "status": os.environ["STATUS"],
-          "duration_ms": int(os.environ["DURATION_MS"]),
-        }
-        if os.environ.get("ERR_SUMMARY"):
-          out["error_summary"] = os.environ["ERR_SUMMARY"]
-        print(json.dumps(out, indent=2))
-        PY
+          STATUS=fail
         fi
-
-        echo "status=$STATUS" >> "$GITHUB_OUTPUT"
-        echo "result_path=$FINAL" >> "$GITHUB_OUTPUT"
-
-        if [[ "$STATUS" == "pass" || "$STATUS" == "skipped" ]]; then
-          exit 0
-        else
-          exit 1
-        fi
+        RESULT="${OUT_DIR}/${USE_CASE}__${FRAMEWORK}.result.json"
+        echo "status=${STATUS}" >> "$GITHUB_OUTPUT"
+        echo "result_path=${RESULT}" >> "$GITHUB_OUTPUT"
