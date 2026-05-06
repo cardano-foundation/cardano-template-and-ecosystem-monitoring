@@ -189,6 +189,8 @@ mkdir -p "$TMP_DIR/uc"
 echo
 echo -e "${YELLOW}Manifest-mode discovery${NC}"
 MISSING_MANIFESTS=()
+UNKNOWN_KEYS=()
+KIND_MISMATCHES=()
 for uc_dir in */; do
   uc="${uc_dir%/}"
   # Skip non-use-case top-level directories
@@ -212,11 +214,15 @@ for uc_dir in */; do
       fi
       fw="${KEY_TO_FRAMEWORK[$key]:-}"
       if [[ -z "$fw" ]]; then
-        echo -e "    ${YELLOW}note${NC} ${section}.${key} — no descriptor at frameworks/${key}.yml or no descriptor with manifest_key=${key}"
+        # Hard error: a manifest key with no matching descriptor would
+        # silently drop a cell from the matrix. Better to fail discovery.
+        echo -e "    ${YELLOW}::error::${NC} ${uc}/${section}.${key} — no descriptor at frameworks/${key}.yml or no descriptor with manifest_key=${key}"
+        UNKNOWN_KEYS+=("${uc}/${section}.${key}")
         continue
       fi
       if [[ "${FRAMEWORK_KIND[$fw]}" != "$section" ]]; then
-        echo -e "    ${YELLOW}note${NC} ${section}.${key} — descriptor's kind (${FRAMEWORK_KIND[$fw]}) does not match section"
+        echo -e "    ${YELLOW}::error::${NC} ${uc}/${section}.${key} — descriptor's kind (${FRAMEWORK_KIND[$fw]}) does not match section"
+        KIND_MISMATCHES+=("${uc}/${section}.${key}")
         continue
       fi
       echo "    $section $fw"
@@ -235,7 +241,21 @@ if [[ ${#MISSING_MANIFESTS[@]} -gt 0 ]]; then
     echo -e "  ${YELLOW}- $uc${NC}" >&2
   done
   echo -e "${YELLOW}Every use case directory under the repo root must ship an example.yml.${NC}" >&2
-  echo -e "${YELLOW}For not-yet-implemented placeholders, write `onchain: {}` / `offchain: {}` (see constant-product-amm/example.yml).${NC}" >&2
+  echo -e "${YELLOW}For not-yet-implemented placeholders, write \`onchain: {}\` / \`offchain: {}\` (see constant-product-amm/example.yml).${NC}" >&2
+  exit 1
+fi
+if [[ ${#UNKNOWN_KEYS[@]} -gt 0 || ${#KIND_MISMATCHES[@]} -gt 0 ]]; then
+  echo
+  echo -e "${YELLOW}::error::discovery rejected one or more manifest entries${NC}" >&2
+  for entry in "${UNKNOWN_KEYS[@]:-}"; do
+    [[ -z "$entry" ]] && continue
+    echo -e "  ${YELLOW}- ${entry} (no matching descriptor under frameworks/)${NC}" >&2
+  done
+  for entry in "${KIND_MISMATCHES[@]:-}"; do
+    [[ -z "$entry" ]] && continue
+    echo -e "  ${YELLOW}- ${entry} (descriptor's kind: does not match the manifest section)${NC}" >&2
+  done
+  echo -e "${YELLOW}Either fix the typo in the manifest, register the framework via scripts/scaffold-framework.sh, or correct the descriptor's kind: field. Silent skips would drop a cell from the matrix.${NC}" >&2
   exit 1
 fi
 

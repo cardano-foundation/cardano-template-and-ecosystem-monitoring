@@ -6,7 +6,7 @@ This is the entry point for everything that is not a use-case `README.md`. The r
 
 Read [`learn.md`](learn.md). It is a curated tour of the 21 use cases in a recommended reading order, with notes on what each one teaches and which SDK to start with.
 
-Once you have picked a use case, its top-level `README.md` (e.g. [`escrow/README.md`](../escrow/README.md)) walks you through that contract specifically.
+Once you have picked a use case, its top-level `README.md` (e.g. [`escrow/README.md`](../escrow/README.md)) walks you through that contract specifically. **README quality varies today**: some use cases have full tutorial content (with onchain walkthrough, offchain example, "try it yourself" commands); others currently just describe the contract pattern at a high level. The 5 use cases on `learn.md`'s recommended starting path (simple-transfer → vesting → htlc → escrow → atomic-transaction) are the ones first targeted for tutorial-grade rewrites. Improvements to the rest are tracked as ongoing work.
 
 ## I'm here to track ecosystem health
 

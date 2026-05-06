@@ -4,12 +4,16 @@
 # README.md. Idempotent: re-running the script is safe — it skips READMEs
 # that already have the badge marker.
 #
-# Today the badge points at the GitHub Actions workflow status (overall pass
-# / fail of ecosystem-test.yml on the default branch). Per-cell badges
-# (use case × framework) wait until the public dashboard from Phase 4 is
-# live; at that point shields.io endpoint badges fed by the dashboard's
-# matrix.json can replace these workflow-level ones. The marker comment
-# (CI_BADGE_BLOCK_*) lets that future migration be a sed replacement.
+# **Limitation**: today every embedded badge points at the SAME thing — the
+# overall pass/fail of the ecosystem-test.yml workflow on the default
+# branch. The per-use-case README badge does NOT yet reflect that specific
+# use case's status; it reflects the whole repo's last green run.
+#
+# This is a known interim. Per-use-case (and per-cell) badges driven by
+# matrix.json land alongside the public dashboard, where shields.io
+# endpoint badges can pull from a JSON fed by the dashboard deploy. The
+# CI_BADGE_BLOCK_BEGIN/END marker comments make that future migration a
+# sed replacement.
 
 set -euo pipefail
 

@@ -4,193 +4,83 @@
 [![Ecosystem tests · simple-transfer](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml/badge.svg?branch=main)](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml)
 <!-- CI_BADGE_BLOCK_END -->
 
+> A script that locks ADA at an address; only a specific receiver — set when the script is parameterised — can unlock it.
 
-This contract allows a user to deposit native assets define who can withdraw the assets. The receiver can then withdraw the assets. 
+## What this is
 
-## ⛓ On-chain
+The minimum-viable Cardano dApp. A sender locks ADA at a script address; the redeemer carries no information; the validator only checks that the transaction is signed by the receiver whose verification-key hash was baked into the script when it was deployed.
 
-### Aiken
+It is the smallest contract that exercises every concept of the eUTxO model: a parameterised validator (the receiver pubkey hash is a *parameter*, not a datum), a datum (unused here), a redeemer (also unused), and a signature requirement enforced on chain.
 
-#### 🔌 Prerequirements
+## Why it matters
 
-- [Aiken](https://aiken-lang.org/installation-instructions#from-aikup-linux--macos-only)
+Real example: payroll. An employer wants to send 5 ADA to an employee on Friday. The employer locks the funds at a script parameterised with the employee's pubkey hash. Anyone watching the chain can see the funds are reserved. Only the employee can spend them, and the employer cannot recall the funds without the employee's signature — solving "I sent the funds to the wrong address" by making the receiver explicit at lock time.
 
-#### 🪄 Test and build
+Once you can read and modify *this* contract, every other pattern in this repo is the same shape with more conditions in the validator.
 
-```zsh
+## How the onchain logic works
+
+[`onchain/aiken/validators/simple-transfer.ak`](onchain/aiken/validators/simple-transfer.ak), the whole thing:
+
+```aiken
+validator simpleTransfer(receiver: VerificationKeyHash) {
+  spend(_datum_opt: Option<Data>, _redeemer: Data, _utxo: OutputReference, self: Transaction) {
+    key_signed(self.extra_signatories, receiver)
+  }
+}
+```
+
+- `simpleTransfer` is a **parameterised** validator. Different receivers produce different on-chain script addresses; the receiver's pubkey hash is fixed at the moment the script is built (off-chain) and cannot be changed afterwards.
+- The `spend` handler ignores both the datum and the redeemer — neither carries information for this contract — and only checks that `receiver`'s pubkey hash appears in the transaction's `extra_signatories` list.
+- Anyone can lock funds at the address (the validator runs only on *spend*); only the receiver can unlock them.
+
+## How to use it offchain
+
+The Lucid Evolution implementation is the most readable starting point. [`offchain/lucid-evolution/simple-transfer.ts`](offchain/lucid-evolution/simple-transfer.ts) exposes four CLI subcommands:
+
+| Command | What it does |
+|---------|--------------|
+| `prepare <count>` | Generates `<count>` test wallets in the working directory (`wallet_0.txt`, …) seeded with fresh mnemonics. |
+| `lock <amount> <receiverAddress> [walletIndex]` | Builds the parameterised script for `receiverAddress`, sends `<amount>` lovelace to that script address. |
+| `claim [walletIndex]` | Looks up UTxOs at the parameterised script address for this wallet's pubkey hash, builds a spend transaction, and submits. |
+| `balance [walletIndex]` | Shows the wallet's balance (utility). |
+
+The Mesh.js and CCL-Java implementations follow the same pattern with their respective SDK idioms — read either after the Lucid one to see how the same logic shows up in a different stack.
+
+## Try it yourself
+
+You'll need [Yaci DevKit](https://devkit.yaci.xyz/) running locally:
+
+```sh
+yaci-devkit up --enable-yaci-store
+```
+
+Build the contract:
+
+```sh
 cd onchain/aiken
-aiken check
-aiken build
+aiken check && aiken build
+cd -
 ```
 
-## 📄 Off-chain
+Then exercise the offchain flow (Lucid Evolution):
 
-### Lucid Evolution (Deno)
-
-This offchain implementation uses [Lucid Evolution](https://github.com/Evolution-SDK/lucid-evolution).
-
-#### Prerequisites
-- [Deno](https://deno.land/)
-
-#### Usage
-```zsh
+```sh
 cd offchain/lucid-evolution
-deno task prepare 2
-deno task lock 5000000 <ADDRESS_OF_WALLET_1> 0
-deno task claim 1
+deno task prepare 2                  # creates wallet_0.txt and wallet_1.txt
+# Lock 5 ADA for wallet 1's address (you'll need wallet 1's address here)
+deno task lock 5000000 <addr_of_wallet_1>
+deno task claim 1                    # wallet 1 claims
 ```
 
-### Java Cardano Client Lib 
-This offchain code is written by using the [Cardano Client Lib](https://github.com/bloxbean/cardano-client-lib).
-It assumes that the addresses are topped up. If you need some tAda, you can get some from the [Cardano Testnets Faucet](https://docs.cardano.org/cardano-testnets/tools/faucet/).
+For the CCL-Java equivalent: `cd offchain/ccl-java && jbang SimpleTransfer.java`. For Mesh.js: `cd offchain/meshjs && deno run --allow-all simple-transfer.ts deposit ...` (see [`offchain/meshjs/`](offchain/meshjs/) for the CLI).
 
-To simplify execution, all the code is contained in a single file, which can be run using `jbang`.
+## What's tested in CI
 
-#### Prerequisites
+The CI workflow ([`../.github/workflows/ecosystem-test.yml`](../.github/workflows/ecosystem-test.yml)) runs every implementation on every push and PR. Today the offchain examples are CLI tools that exit with a usage error on no-args (so the cells appear as red — see the milestone P6 follow-on for proper end-to-end integration tests). The `aiken check` step exercises the validator's built-in unit tests.
 
-Before running the code, ensure you have the following tools installed:
+## Variations to explore
 
-##### 1. Install JBang
-You can install JBang using various methods:
-
-- Using **SDKMAN**:
-    ```shell
-    sdk install jbang
-    ```
-
-- Using **cURL**:
-    ```shell
-    curl -Ls https://sh.jbang.dev | bash -s - app setup
-    ```
-
-For other installation methods, refer to the [JBang installation guide](https://www.jbang.dev/download/).
-
-**Note:** If Java is not installed on your machine, JBang will download a Java runtime for you.
-
-##### 2. Install and Start Yaci DevKit
-You need to download and start the Yaci DevKit. This can be done using either the Docker version or the NPM distribution.
-
-###### a. Docker Version:
-Follow the instructions [here](https://devkit.yaci.xyz/yaci_cli_distribution).
-
-After installing Yaci Devkit Docker distribution, you can start DevKit in non-interactive mode in just one command:
-
-```shell
-devkit start create-node -o --start
-```
-
-###### b. NPM Distribution:
-Follow the instructions [here](https://devkit.yaci.xyz/yaci_cli_npm_distr).
-
-**Important:**  
-When starting the Yaci DevKit using NPM distribution, be sure to include the `--enable-yaci-store` option with the `up` command.
-
-#### Running the Code
-
-To run the code, use the following command:
-
-```shell
-cd offchain/ccl-java
-jbang simple-transfer.java
-```
-
-## Verify the Output
-
-After running the code, you can verify the output in Yaci Viewer. To access Yaci Viewer in docker distribution, use the following url
-
-```html
-http://localhost:5173
-```
-
----
-
-## 📄 Off-chain (MeshJS – Deno)
-
-This repository also includes an alternative off-chain implementation using **MeshJS**, written in **TypeScript** and executed with **Deno**.
-
-This implementation follows the same logical flow as the Java example:
-
-* A sender deposits ADA at the script address
-* A designated receiver (identified by payment key hash) is allowed to collect the funds
-
-### 📁 Location
-
-```text
-simple-transfer/offchain/meshjs
-```
-
----
-
-### 🔌 Prerequisites
-
-Ensure the following are available:
-
-* [Deno](https://deno.land/)
-* A running Cardano devnet or testnet (for example via Yaci DevKit)
-* Wallet JSON files funded with test ADA
-
-Wallet files (e.g. `wallet_0.json`, `wallet_1.json`) are expected to contain addresses and signing keys compatible with MeshJS.
-
----
-
-### ▶️ Running the MeshJS Off-chain Code
-
-Navigate to the MeshJS off-chain directory:
-
-```shell
-cd simple-transfer/offchain/meshjs
-```
-
-All commands below are executed from this directory.
-
----
-
-## 🧪 Example Flow
-
-### Alice deposits 20 ADA for Bob
-
-Alice locks **20 ADA** at the script address and specifies Bob’s **payment key hash (PKH)** as the receiver.
-
-```shell
-deno run -A simple-transfer.ts deposit wallet_0.json <receiverPkh> 20000000
-```
-
-Example with a concrete PKH:
-
-```shell
-deno run -A simple-transfer.ts deposit wallet_0.json 332353c1231a76c19a9a7d44ef4252759e5feba6c9bb13a4c38ae712 20000000
-```
-
-#### Sample Output
-
-```text
-ADA locked at script
-Receiver PKH: 332353c1231a76c19a9a7d44ef4252759e5feba6c9bb13a4c38ae712
-Amount (lovelace): 20000000
-TxHash: 8a8ae9bf2f76706fb61114007f05fbd0c1a62e42e4dbf35c68d01999db12b05b
-```
-
----
-
-### Bob collects the ADA using his wallet
-
-Bob collects the locked ADA from the script using his wallet.
-
-```shell
-deno run -A simple-transfer.ts collect wallet_1.json
-```
-
-#### Sample Output
-
-```text
-ADA collected from script
-Receiver PKH: 332353c1231a76c19a9a7d44ef4252759e5feba6c9bb13a4c38ae712
-TxHash: 51c93f78c00424532778c9217e608f114ce31e99f4b36b19761b2bc9e2c5f911
-```
-
----
-
-### 🔍 Verification
-
-The transactions can be inspected using:
-* Any Cardano explorer compatible with preprod testnet
+- **Make the receiver a script address, not a pubkey hash.** Replace the `key_signed` check with an "any input is from script X" check. Now the receiver can be any contract, opening the door to programmable payouts.
+- **Add an expiry.** Borrow the `valid_after` pattern from [`htlc`](../htlc/) and let the sender reclaim funds after a deadline.
+- **Add a fee.** Have the script require a small payment to a fee address as part of any unlock — a primitive smart-contract toll.

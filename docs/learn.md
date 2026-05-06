@@ -46,8 +46,8 @@ Every use case has the same shape:
 
 For a given use case, read in this order:
 
-1. **The README.** Every use-case README answers: *what does this contract do, why does it matter, how does the on-chain logic work, how do I use it, what's tested.*
-2. **The validator** (`onchain/aiken/validators/*.ak`). The validator is the source of truth for what the contract enforces.
+1. **The README.** A use-case README at its best answers: *what does this contract do, why does it matter, how does the on-chain logic work, how do I use it, what's tested.* **In practice today, README quality varies**: the 5 use cases on the recommended starting path above have tutorial-grade content; many of the others currently describe the contract pattern but skip the walkthrough. If a README isn't enough, jump to step 2.
+2. **The validator** (`onchain/aiken/validators/*.ak`). The validator is the source of truth for what the contract enforces — and it's often the most concise way to understand a use case in detail.
 3. **One offchain implementation.** Pick the SDK you're already using (or the most-readable one — Lucid Evolution is a good first pick if you're new). The offchain code shows how to build the transaction the validator expects.
 4. **A second offchain implementation, if you want to compare.** Reading the same contract through two SDKs is the fastest way to understand which differences are SDK-cosmetic and which are protocol-essential.
 
