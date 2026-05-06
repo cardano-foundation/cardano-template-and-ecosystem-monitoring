@@ -179,7 +179,14 @@ jobs:
   test-offchain:
     name: Test offchain — ${{ matrix.example }}
     needs: [discover, compile-aiken]
-    if: needs.discover.outputs.use-cases-with-offchain != '[]'
+    # `always()` is required so this job is not silently skipped when
+    # `compile-aiken` is skipped (e.g., when aiken is not registered, per the
+    # onchain CI pilot limitation). We still gate on offchain frameworks
+    # actually being present.
+    if: |
+      always() &&
+      needs.discover.result == 'success' &&
+      needs.discover.outputs.use-cases-with-offchain != '[]'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     strategy:
@@ -240,6 +247,14 @@ jobs:
           exit 1
 
       - name: Download plutus.json artifact
+        # Only attempt the download when compile-aiken actually produced the
+        # artifact for this matrix child. If aiken is not registered (the
+        # onchain CI pilot limitation), compile-aiken is skipped and there is
+        # no artifact to download. Examples that depend on plutus.json will
+        # then fail at run time with a clear error in their own log; those
+        # failures correctly surface in matrix.json instead of being masked
+        # by an artifact-system error here.
+        if: needs.compile-aiken.result == 'success'
         uses: actions/download-artifact@v4
         with:
           name: plutus-${{ matrix.example }}

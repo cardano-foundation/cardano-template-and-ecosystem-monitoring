@@ -1,6 +1,9 @@
 # `frameworks/<name>.yml` schema
 
-Each file under `frameworks/` registers one onchain language or offchain SDK with the CI matrix. The CI workflow's discovery step lists `frameworks/*.yml`, groups by `kind`, and emits the matrix axes. **Adding a new framework requires no workflow YAML edits** — only a new descriptor file under this directory.
+Each file under `frameworks/` registers one onchain language or offchain SDK with the CI matrix. The CI workflow's discovery step lists `frameworks/*.yml`, groups by `kind`, and emits the matrix axes.
+
+- **Adding a new offchain SDK**: one new descriptor file is sufficient. Zero workflow YAML edits, zero discovery-script edits required.
+- **Adding a new onchain language**: descriptor + a sibling `compile-<framework>` job in the workflow. The workflow side is genuinely generic for matrix membership but framework-specific for setup and artifact handling. See "Pilot limitations (P1W1)" below.
 
 When the milestone-level Codex review fires (see [docs/design.md](../docs/design.md) once that lands; in the interim, see the plan), descriptors are part of the diff Codex evaluates.
 
