@@ -1,5 +1,10 @@
 # Upgradable Proxy Smart Contract
 
+<!-- CI_BADGE_BLOCK_BEGIN -->
+[![Ecosystem tests · upgradable-proxy](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml/badge.svg?branch=main)](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml)
+<!-- CI_BADGE_BLOCK_END -->
+
+
 A two-contract system implementing upgradable logic through proxy delegation using Cardano's atomic transactions. The proxy contract has a datum with a script hash and validates that spending transactions based on that script hash are part of the transaction and mints a token as proof of execution.
 
 ## 🌟 What is this Upgradable Proxy Pattern?

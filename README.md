@@ -4,6 +4,11 @@ The goal of this repository is to implement the 21 most common blockchain use ca
 
 ## 🎡 Overview
 
+<!-- CI_BADGE_BLOCK_BEGIN -->
+[![Cardano ecosystem tests](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml/badge.svg?branch=main)](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml)
+<!-- CI_BADGE_BLOCK_END -->
+
+
 This repository is divided into directories based on use cases and the technologies used for their implementation. The structure is as follows:
 
 - `/use-case/onchain/<technology>/`: Contains the on-chain implementation of a specific use case using a particular technology (e.g. aiken, scalus, plu-ts, etc.).

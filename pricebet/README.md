@@ -1,5 +1,10 @@
 # 📈 Blockchain Price Betting Smart Contract
 
+<!-- CI_BADGE_BLOCK_BEGIN -->
+[![Ecosystem tests · pricebet](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml/badge.svg?branch=main)](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml)
+<!-- CI_BADGE_BLOCK_END -->
+
+
 A decentralized price prediction betting system built on Cardano, allowing participants to bet on future exchange rates between tokens using oracle price feeds.
 
 ## 🌟 What is a Blockchain Price Bet?

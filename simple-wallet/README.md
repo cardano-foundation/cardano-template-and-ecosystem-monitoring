@@ -1,5 +1,10 @@
 # Simple Wallet
 
+<!-- CI_BADGE_BLOCK_BEGIN -->
+[![Ecosystem tests · simple-wallet](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml/badge.svg?branch=main)](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml)
+<!-- CI_BADGE_BLOCK_END -->
+
+
 This repository implements the **Simple Wallet** use case as defined in the Rosetta specification.
 
 The Simple Wallet acts as a native ADA deposit contract. The owner can create payment intents, execute them to transfer funds to a recipient, and withdraw the entire balance at any time.

@@ -1,5 +1,10 @@
 # 🆔 Decentralized Identity Smart Contract
 
+<!-- CI_BADGE_BLOCK_BEGIN -->
+[![Ecosystem tests · decentralized-identity](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml/badge.svg?branch=main)](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml)
+<!-- CI_BADGE_BLOCK_END -->
+
+
 A blockchain-based identity management system built on Cardano, implementing self-sovereign identity with identity addresses, ownership control, and delegate management based on EIP 1056.
 
 ## What is Decentralized Identity?

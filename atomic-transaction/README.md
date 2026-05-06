@@ -1,5 +1,10 @@
 # ⚛️ Atomic Transaction
 
+<!-- CI_BADGE_BLOCK_BEGIN -->
+[![Ecosystem tests · atomic-transaction](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml/badge.svg?branch=main)](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml)
+<!-- CI_BADGE_BLOCK_END -->
+
+
 This smart contract demonstrates Cardano's native atomic transaction guarantees. In this example, we build a transaction that executes two validator operations simultaneously: spending from a script (with a validator that always returns `true`) and minting a token (with a validator that requires a password). This showcases how Cardano transactions are atomic by design - all operations either succeed together or fail together.
 
 ## 🌟 What are Atomic Transactions?

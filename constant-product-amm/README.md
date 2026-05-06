@@ -1,5 +1,10 @@
 # 💱 Constant Product AMM Smart Contract
 
+<!-- CI_BADGE_BLOCK_BEGIN -->
+[![Ecosystem tests · constant-product-amm](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml/badge.svg?branch=main)](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml)
+<!-- CI_BADGE_BLOCK_END -->
+
+
 A decentralized automated market maker built on Cardano, implementing the constant product formula (x * y = k) to enable trustless token swaps and liquidity provision.
 
 ## 🌟 What is a Constant Product AMM?

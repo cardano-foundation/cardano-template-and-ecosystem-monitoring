@@ -1,5 +1,10 @@
 # 🔐 Blockchain Vault Smart Contract
 
+<!-- CI_BADGE_BLOCK_BEGIN -->
+[![Ecosystem tests · vault](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml/badge.svg?branch=main)](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml)
+<!-- CI_BADGE_BLOCK_END -->
+
+
 A decentralized security vault built on Cardano that implements time-delayed withdrawals and recovery mechanisms to protect funds against private key theft and unauthorized access.
 
 ## 🌟 What is a Blockchain Vault?

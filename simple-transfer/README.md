@@ -1,5 +1,10 @@
 # Simple transfer
 
+<!-- CI_BADGE_BLOCK_BEGIN -->
+[![Ecosystem tests · simple-transfer](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml/badge.svg?branch=main)](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml)
+<!-- CI_BADGE_BLOCK_END -->
+
+
 This contract allows a user to deposit native assets define who can withdraw the assets. The receiver can then withdraw the assets. 
 
 ## ⛓ On-chain

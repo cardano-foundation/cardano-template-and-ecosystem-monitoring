@@ -1,5 +1,10 @@
 # Escrow
 
+<!-- CI_BADGE_BLOCK_BEGIN -->
+[![Ecosystem tests · escrow](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml/badge.svg?branch=main)](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml)
+<!-- CI_BADGE_BLOCK_END -->
+
+
 Escrow contract facilitates the secure exchange of assets between two parties by acting as a trusted intermediary that holds the assets until the conditions of the agreement are met.
 The escrow smart contract allows two parties to exchange assets securely. The contract holds the assets until both parties agree and sign off on the transaction.
 

@@ -1,5 +1,10 @@
 # Hash Timed Locked Contract (HTLC)
 
+<!-- CI_BADGE_BLOCK_BEGIN -->
+[![Ecosystem tests · htlc](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml/badge.svg?branch=main)](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml)
+<!-- CI_BADGE_BLOCK_END -->
+
+
 The Hash Timed Locked Contract (HTLC) involves two users, the owner and the guesser.
 This contract allows the owner to lock funds within a contract by providing an expiration time and a secret.
 Others can try to unlock the funds before the expiration by trying to guess the secret.
