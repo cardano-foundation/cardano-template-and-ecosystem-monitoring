@@ -1,0 +1,24 @@
+# Use-case manifest for atomic-transaction
+#
+# Schema reference: docs/reference/example-manifest.md (lands in P1W2).
+
+use_case: atomic-transaction
+description: >-
+  Demonstrates atomic transactions on Cardano: a single transaction that
+  spends a script UTxO and mints a token under a password-gated minting
+  policy, with the spend and the mint succeeding or failing together.
+
+onchain:
+  aiken:
+    path: onchain/aiken
+
+offchain:
+  meshjs:
+    path: offchain/meshjs
+    entry: atomic-transaction.ts
+  lucid-evolution:
+    path: offchain/lucid-evolution
+    entry: atomic-transaction.ts
+  ccl-java:
+    path: offchain/ccl-java
+    entry: AtomicTransaction.java

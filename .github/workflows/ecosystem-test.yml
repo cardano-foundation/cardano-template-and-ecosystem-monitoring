@@ -1,18 +1,39 @@
 name: Cardano Ecosystem Tests
 
+# Rewritten in P1W1 (see plan & frameworks/SCHEMA.md). The matrix is generic
+# over framework descriptors (frameworks/*.yml) and use-case manifests
+# (<use-case>/example.yml); legacy use cases without a manifest fall through
+# the dual-mode discovery in scripts/local-test-discovery.sh.
+#
+# Tool versions are pinned by versions.yml at the repo root and exported by
+# the .github/actions/load-versions/ composite action.
+#
+# Yaci DevKit runs once per offchain test job (matrix={use_case}) rather than
+# three times (once per offchain framework). See .codex-reviews/p1w1-yaci-poc.md
+# for the rationale.
+#
+# Untrusted-input note: matrix.example flows from discovery output (filesystem
+# directory names of checked-in use cases). Even so, every shell `run:` block
+# pipes matrix.example through env: rather than direct ${{ … }} interpolation
+# to satisfy GitHub Actions injection-hardening practice.
+
 on:
   push:
     branches:
       - main
+      # TEMPORARY: roadmap branch — remove when feat/ecosystem-monitoring-and-learning-enhancement merges to main.
+      - feat/ecosystem-monitoring-and-learning-enhancement
   pull_request:
   workflow_dispatch:
 
-# Cancel in-progress runs for the same workflow and branch
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # Discovery
+  # ---------------------------------------------------------------------------
   discover:
     name: Discover Examples
     runs-on: ubuntu-latest
@@ -22,18 +43,21 @@ jobs:
       ccl-examples: ${{ steps.discovery.outputs.ccl-examples }}
       mesh-examples: ${{ steps.discovery.outputs.mesh-examples }}
       lucid-examples: ${{ steps.discovery.outputs.lucid-examples }}
+      use-cases-with-offchain: ${{ steps.discovery.outputs.use-cases-with-offchain }}
+      manifest-coverage: ${{ steps.discovery.outputs.manifest-coverage }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
+      - uses: actions/checkout@v4
       - name: Run discovery script
         id: discovery
         run: |
           chmod +x scripts/local-test-discovery.sh
           scripts/local-test-discovery.sh
 
+  # ---------------------------------------------------------------------------
+  # Compile onchain (Aiken). One matrix child per use case with onchain/aiken/.
+  # ---------------------------------------------------------------------------
   compile-aiken:
-    name: Compile Aiken - ${{ matrix.example }}
+    name: Compile Aiken — ${{ matrix.example }}
     needs: discover
     if: needs.discover.outputs.aiken-examples != '[]'
     runs-on: ubuntu-latest
@@ -42,42 +66,73 @@ jobs:
       fail-fast: false
       matrix:
         example: ${{ fromJson(needs.discover.outputs.aiken-examples) }}
+    env:
+      USE_CASE: ${{ matrix.example }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Install Aiken
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Install Aiken (pinned)
         run: |
-          # Install aikup and aiken
           curl --proto '=https' --tlsv1.2 -LsSf https://install.aiken-lang.org | sh
-          # Source the environment to add aiken to PATH
           source $HOME/.aiken/bin/env
-          # Install the default/latest stable version
-          aikup
+          aikup install "${AIKEN_VERSION}"
           aiken --version
 
-      - name: Cache Aiken dependencies
+      - name: Cache Aiken build
         uses: actions/cache@v4
         with:
           path: |
             ~/.aiken
             ${{ matrix.example }}/onchain/aiken/build
-          key: aiken-${{ matrix.example }}-${{ hashFiles(format('{0}/onchain/aiken/aiken.toml', matrix.example)) }}
+          key: aiken-${{ steps.versions.outputs.aiken }}-${{ matrix.example }}-${{ hashFiles(format('{0}/onchain/aiken/aiken.toml', matrix.example)) }}
 
-      - name: Run aiken check and build
-        working-directory: ${{ matrix.example }}/onchain/aiken
+      - name: Run aiken check + build, emit result.json
         run: |
+          mkdir -p .ci-results
           export PATH="$HOME/.aiken/bin:$PATH"
-          aiken check
-          aiken build
+          START_NS=$(date +%s%N)
+          if (cd "${USE_CASE}/onchain/aiken" && aiken check && aiken build); then
+            STATUS=pass
+            ERR=""
+          else
+            STATUS=fail
+            ERR="aiken check or build failed"
+          fi
+          END_NS=$(date +%s%N)
+          DUR_MS=$(( (END_NS - START_NS) / 1000000 ))
+
+          UC="$USE_CASE" FW="aiken" ERA="${PROTOCOL_VERSION_VERSION}" \
+            STATUS="$STATUS" DUR_MS="$DUR_MS" ERR="$ERR" \
+            python3 - > ".ci-results/${USE_CASE}__aiken.result.json" <<'PY'
+          import json, os
+          out = {
+              "tier": "use-case-example",
+              "id": f"{os.environ['UC']}/aiken",
+              "use_case": os.environ["UC"],
+              "framework": "aiken",
+              "era": os.environ.get("ERA", "unknown"),
+              "status": os.environ["STATUS"],
+              "duration_ms": int(os.environ["DUR_MS"]),
+          }
+          if os.environ.get("ERR"):
+              out["error_summary"] = os.environ["ERR"]
+          print(json.dumps(out, indent=2))
+          PY
+
+          if [[ "$STATUS" != "pass" ]]; then exit 1; fi
 
       - name: Verify plutus.json generated
         run: |
-          if [ ! -f "${{ matrix.example }}/onchain/aiken/plutus.json" ]; then
-            echo "❌ plutus.json not generated"
+          PJ="${USE_CASE}/onchain/aiken/plutus.json"
+          if [[ ! -f "$PJ" ]]; then
+            echo "::error::plutus.json not generated for ${USE_CASE}"
             exit 1
           fi
-          echo "✅ plutus.json generated ($(wc -c < ${{ matrix.example }}/onchain/aiken/plutus.json) bytes)"
+          echo "plutus.json size: $(wc -c < "$PJ") bytes"
 
       - name: Upload plutus.json artifact
         uses: actions/upload-artifact@v4
@@ -86,59 +141,80 @@ jobs:
           path: ${{ matrix.example }}/onchain/aiken/plutus.json
           retention-days: 1
 
-  test-ccl-java:
-    name: Test CCL Java - ${{ matrix.example }}
+      - name: Upload aiken cell result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: result-aiken-${{ matrix.example }}
+          path: .ci-results/${{ matrix.example }}__aiken.result.json
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  # Test offchain. One matrix child per use-case (collapsed). All offchain
+  # frameworks declared by the use-case manifest run sequentially against a
+  # single Yaci DevKit instance.
+  # ---------------------------------------------------------------------------
+  test-offchain:
+    name: Test offchain — ${{ matrix.example }}
     needs: [discover, compile-aiken]
-    if: needs.discover.outputs.ccl-examples != '[]'
+    if: needs.discover.outputs.use-cases-with-offchain != '[]'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
-        example: ${{ fromJson(needs.discover.outputs.ccl-examples) }}
+        example: ${{ fromJson(needs.discover.outputs.use-cases-with-offchain) }}
+    env:
+      USE_CASE: ${{ matrix.example }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup JDK 24
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ steps.versions.outputs.node }}
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: ${{ steps.versions.outputs.deno }}
+
+      - name: Setup JDK
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
-          java-version: '24'
+          distribution: temurin
+          java-version: ${{ steps.versions.outputs.jdk }}
 
-      - name: Install JBang
+      - name: Install JBang (pinned)
         run: |
           curl -Ls https://sh.jbang.dev | bash -s - app setup
           echo "$HOME/.jbang/bin" >> $GITHUB_PATH
+          "$HOME/.jbang/bin/jbang" version
 
-      - name: Verify JBang installation
-        run: jbang version
-
-      - name: Cache JBang dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/.jbang/cache
-          key: jbang-${{ matrix.example }}-${{ hashFiles(format('{0}/offchain/ccl-java/*.java', matrix.example)) }}
-
-      - name: Setup Node.js (for Yaci DevKit)
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install and Start Yaci DevKit
+      - name: Install Yaci DevKit (pinned)
         run: |
-          npm install -g @bloxbean/yaci-devkit
+          npm install -g "@bloxbean/yaci-devkit@${YACI_DEVKIT_VERSION}"
+
+      - name: Start Yaci DevKit
+        run: |
           nohup yaci-devkit up --enable-yaci-store > yaci-devkit.log 2>&1 &
+          echo $! > /tmp/yaci.pid
 
       - name: Wait for Yaci DevKit
         run: |
           for i in {1..30}; do
             if nc -z localhost 8080; then
-              echo "✅ Yaci DevKit ready"
+              echo "Yaci DevKit ready after ${i} attempt(s)"
               exit 0
             fi
             sleep 5
           done
+          echo "::error::Yaci DevKit did not become ready within 150s"
+          tail -100 yaci-devkit.log || true
           exit 1
 
       - name: Download plutus.json artifact
@@ -147,210 +223,185 @@ jobs:
           name: plutus-${{ matrix.example }}
           path: ${{ matrix.example }}/onchain/aiken/
 
-      - name: Run CCL Java test
-        working-directory: ${{ matrix.example }}/offchain/ccl-java
+      - name: Determine declared offchain frameworks
+        id: frameworks
         run: |
-          set -o pipefail
-          JAVA_FILE=$(ls *.java | head -1)
-          echo "Running: jbang $JAVA_FILE"
-          timeout 300 jbang "$JAVA_FILE" | tee test-output.log
+          MANIFEST="${USE_CASE}/example.yml"
+          mkdir -p .ci-meta
+          OUT_FILE=".ci-meta/${USE_CASE}-frameworks.txt"
+          : > "$OUT_FILE"
+          if [[ -f "$MANIFEST" ]]; then
+            python3 - "$MANIFEST" >> "$OUT_FILE" <<'PY'
+          import re, sys
+          with open(sys.argv[1]) as fh:
+            lines = fh.readlines()
+          in_off = False
+          off_indent = -1
+          for raw in lines:
+            line = raw.rstrip("\n")
+            stripped = line.lstrip()
+            if not stripped or stripped.startswith("#"):
+              continue
+            indent = len(line) - len(stripped)
+            m = re.match(r'([A-Za-z_][A-Za-z0-9_-]*)\s*:\s*(.*)$', stripped)
+            if not m:
+              continue
+            key, val = m.group(1), m.group(2).strip()
+            if not in_off:
+              if indent == 0 and key == "offchain" and not val:
+                in_off = True
+                off_indent = indent
+              continue
+            if indent <= off_indent:
+              break
+            if (indent == off_indent + 2 or indent == off_indent + 4) and not val:
+              print(key)
+          PY
+          else
+            for fw in meshjs lucid-evolution ccl-java; do
+              if [[ -d "${USE_CASE}/offchain/$fw" ]]; then
+                echo "$fw" >> "$OUT_FILE"
+              fi
+            done
+          fi
+          echo "Declared frameworks for ${USE_CASE}:"
+          cat "$OUT_FILE" || true
 
-      # Exit code indicates success/failure - all CCL Java examples throw AssertionError on failure
+      - name: Run meshjs cell (if declared)
+        if: ${{ always() }}
+        env:
+          ENTRY_DEFAULT_GLOB: "*.ts"
+          FRAMEWORK: meshjs
+          CMD: "deno run --allow-all"
+        run: |
+          set -uo pipefail
+          if ! grep -qx 'meshjs' ".ci-meta/${USE_CASE}-frameworks.txt" 2>/dev/null; then
+            echo "meshjs not declared for ${USE_CASE} — skipping"
+            exit 0
+          fi
+          chmod +x scripts/ci/run-cell.sh
+          scripts/ci/run-cell.sh \
+            "$USE_CASE" \
+            "$FRAMEWORK" \
+            "${USE_CASE}/offchain/meshjs" \
+            "$ENTRY_DEFAULT_GLOB" \
+            "$CMD" \
+            ".ci-results"
+        continue-on-error: true
 
-      - name: Upload test logs
+      - name: Run lucid-evolution cell (if declared)
+        if: ${{ always() }}
+        env:
+          ENTRY_DEFAULT_GLOB: "*.ts"
+          FRAMEWORK: lucid-evolution
+          CMD: "deno run --allow-all"
+        run: |
+          set -uo pipefail
+          if ! grep -qx 'lucid-evolution' ".ci-meta/${USE_CASE}-frameworks.txt" 2>/dev/null; then
+            echo "lucid-evolution not declared for ${USE_CASE} — skipping"
+            exit 0
+          fi
+          chmod +x scripts/ci/run-cell.sh
+          scripts/ci/run-cell.sh \
+            "$USE_CASE" \
+            "$FRAMEWORK" \
+            "${USE_CASE}/offchain/lucid-evolution" \
+            "$ENTRY_DEFAULT_GLOB" \
+            "$CMD" \
+            ".ci-results"
+        continue-on-error: true
+
+      - name: Run ccl-java cell (if declared)
+        if: ${{ always() }}
+        env:
+          ENTRY_DEFAULT_GLOB: "*.java"
+          FRAMEWORK: ccl-java
+          CMD: "jbang"
+        run: |
+          set -uo pipefail
+          if ! grep -qx 'ccl-java' ".ci-meta/${USE_CASE}-frameworks.txt" 2>/dev/null; then
+            echo "ccl-java not declared for ${USE_CASE} — skipping"
+            exit 0
+          fi
+          chmod +x scripts/ci/run-cell.sh
+          scripts/ci/run-cell.sh \
+            "$USE_CASE" \
+            "$FRAMEWORK" \
+            "${USE_CASE}/offchain/ccl-java" \
+            "$ENTRY_DEFAULT_GLOB" \
+            "$CMD" \
+            ".ci-results"
+        continue-on-error: true
+
+      - name: Stop Yaci DevKit
+        if: always()
+        run: |
+          if [[ -f /tmp/yaci.pid ]]; then
+            kill "$(cat /tmp/yaci.pid)" 2>/dev/null || true
+          fi
+          pkill -f yaci-devkit 2>/dev/null || true
+
+      - name: Upload offchain cell results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: logs-ccl-${{ matrix.example }}
-          path: ${{ matrix.example }}/offchain/ccl-java/test-output.log
+          name: result-offchain-${{ matrix.example }}
+          path: |
+            .ci-results/${{ matrix.example }}__*.result.json
+            .ci-results/${{ matrix.example }}__*.log
           retention-days: 30
 
-  test-mesh:
-    name: Test Mesh.js - ${{ matrix.example }}
-    needs: [discover, compile-aiken]
-    if: needs.discover.outputs.mesh-examples != '[]'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        example: ${{ fromJson(needs.discover.outputs.mesh-examples) }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Deno
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: v2.x
-
-      - name: Cache Deno dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/deno
-          key: deno-${{ matrix.example }}-${{ hashFiles(format('{0}/offchain/meshjs/deno.json', matrix.example)) }}
-
-      - name: Setup Node.js (for Yaci DevKit)
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install and Start Yaci DevKit
-        run: |
-          npm install -g @bloxbean/yaci-devkit
-          nohup yaci-devkit up --enable-yaci-store > yaci-devkit.log 2>&1 &
-
-      - name: Wait for Yaci DevKit
-        run: |
-          for i in {1..30}; do
-            if nc -z localhost 8080; then
-              echo "✅ Yaci DevKit ready"
-              exit 0
-            fi
-            sleep 5
-          done
-          exit 1
-
-      - name: Download plutus.json artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: plutus-${{ matrix.example }}
-          path: ${{ matrix.example }}/onchain/aiken/
-
-      - name: Run Mesh.js test
-        working-directory: ${{ matrix.example }}/offchain/meshjs
-        run: |
-          set -o pipefail
-          TS_FILE=$(ls *.ts | head -1)
-          echo "Running: deno run --allow-all $TS_FILE"
-          timeout 300 deno run --allow-all "$TS_FILE" | tee test-output.log
-
-      - name: Upload test logs
-        if: always()
+      - name: Upload Yaci log on failure
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: logs-mesh-${{ matrix.example }}
-          path: ${{ matrix.example }}/offchain/meshjs/test-output.log
-          retention-days: 30
+          name: yaci-log-${{ matrix.example }}
+          path: yaci-devkit.log
+          retention-days: 7
 
-  test-lucid:
-    name: Test Lucid Evolution - ${{ matrix.example }}
-    needs: [discover, compile-aiken]
-    if: needs.discover.outputs.lucid-examples != '[]'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        example: ${{ fromJson(needs.discover.outputs.lucid-examples) }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Deno
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: v2.x
-
-      - name: Setup Node.js (for Yaci DevKit)
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install and Start Yaci DevKit
-        run: |
-          npm install -g @bloxbean/yaci-devkit
-          nohup yaci-devkit up --enable-yaci-store > yaci-devkit.log 2>&1 &
-
-      - name: Wait for Yaci DevKit
-        run: |
-          for i in {1..30}; do
-            if nc -z localhost 8080; then
-              echo "✅ Yaci DevKit ready"
-              exit 0
-            fi
-            sleep 5
-          done
-          exit 1
-
-      - name: Download plutus.json artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: plutus-${{ matrix.example }}
-          path: ${{ matrix.example }}/onchain/aiken/
-
-      - name: Run Lucid Evolution test
-        working-directory: ${{ matrix.example }}/offchain/lucid-evolution
-        run: |
-          set -o pipefail
-          TS_FILE=$(ls *.ts | head -1)
-          timeout 300 deno run --allow-all "$TS_FILE" | tee test-output.log
-
-      - name: Upload test logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: logs-lucid-${{ matrix.example }}
-          path: ${{ matrix.example }}/offchain/lucid-evolution/test-output.log
-          retention-days: 30
-
+  # ---------------------------------------------------------------------------
+  # Aggregate per-cell result.json files into matrix.json + render markdown.
+  # ---------------------------------------------------------------------------
   report:
-    name: Generate Ecosystem Report
-    needs: [compile-aiken, test-ccl-java, test-mesh, test-lucid]
+    name: Aggregate matrix.json + render report
+    needs: [compile-aiken, test-offchain]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Download all artifacts
+      - name: Download all cell-result artifacts
         uses: actions/download-artifact@v4
         with:
-          path: artifacts/
+          path: .ci-artifacts/
 
-      - name: Generate report
+      - name: Collect result.json files
         run: |
-          mkdir -p .local-test-results
+          mkdir -p .ci-results
+          find .ci-artifacts -name '*.result.json' -exec cp {} .ci-results/ \;
+          echo "Collected $(ls -1 .ci-results | wc -l) result.json file(s)"
 
-          # Process Aiken compilation results
-          echo "# 🔍 Cardano Ecosystem Test Report" > report.md
-          echo "" >> report.md
-          echo "**Generated**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> report.md
-          echo "**Workflow Run**: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> report.md
-          echo "" >> report.md
+      - name: Aggregate matrix.json
+        run: |
+          chmod +x scripts/aggregate-results.sh
+          scripts/aggregate-results.sh .ci-results matrix.json
+          cat matrix.json
 
-          echo "## Summary" >> report.md
-          echo "" >> report.md
+      - name: Render matrix report
+        run: |
+          chmod +x scripts/render-matrix.sh
+          scripts/render-matrix.sh matrix.json > matrix-report.md
+          cat matrix-report.md >> "$GITHUB_STEP_SUMMARY"
 
-          # Count artifacts
-          AIKEN_COUNT=$(find artifacts -name "plutus-*" -type d 2>/dev/null | wc -l)
-          CCL_COUNT=$(find artifacts -name "logs-ccl-*" -type d 2>/dev/null | wc -l)
-          MESH_COUNT=$(find artifacts -name "logs-mesh-*" -type d 2>/dev/null | wc -l)
-          LUCID_COUNT=$(find artifacts -name "logs-lucid-*" -type d 2>/dev/null | wc -l)
-
-          echo "- **Aiken Examples Compiled**: $AIKEN_COUNT" >> report.md
-          echo "- **CCL Java Tests**: $CCL_COUNT" >> report.md
-          echo "- **Mesh.js Tests**: $MESH_COUNT" >> report.md
-          echo "- **Lucid Evolution Tests**: $LUCID_COUNT" >> report.md
-          echo "" >> report.md
-
-          echo "## Artifacts" >> report.md
-          echo "" >> report.md
-          echo "All test logs and build artifacts are available in the workflow artifacts." >> report.md
-          echo "" >> report.md
-
-          cat report.md
-
-      - name: Upload report as artifact
+      - name: Upload matrix.json + report
         uses: actions/upload-artifact@v4
         with:
-          name: ecosystem-report
-          path: report.md
+          name: ecosystem-matrix
+          path: |
+            matrix.json
+            matrix-report.md
           retention-days: 30
-
-      - name: Add report to workflow summary
-        run: cat report.md >> $GITHUB_STEP_SUMMARY
 
       - name: Comment on PR
         if: github.event_name == 'pull_request'
@@ -358,11 +409,10 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const report = fs.readFileSync('report.md', 'utf8');
-
+            const report = fs.readFileSync('matrix-report.md', 'utf8');
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: report
+              body: report,
             });

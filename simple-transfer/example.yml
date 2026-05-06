@@ -1,0 +1,29 @@
+# Use-case manifest for simple-transfer
+#
+# Schema reference: docs/reference/example-manifest.md (lands in P1W2).
+#
+# Note: simple-transfer/offchain/gradle/ exists as another implementation
+# attempt but has no registered framework descriptor (no frameworks/gradle.yml).
+# It's deliberately omitted here until a Gradle framework is registered —
+# manifest entries pointing at unregistered frameworks would be a CI error.
+
+use_case: simple-transfer
+description: >-
+  The minimum-viable Cardano dApp: a script that locks ADA and a single
+  redeemer that releases it. The smallest end-to-end onchain + offchain
+  demonstration.
+
+onchain:
+  aiken:
+    path: onchain/aiken
+
+offchain:
+  meshjs:
+    path: offchain/meshjs
+    entry: simple-transfer.ts
+  lucid-evolution:
+    path: offchain/lucid-evolution
+    entry: simple-transfer.ts
+  ccl-java:
+    path: offchain/ccl-java
+    entry: SimpleTransfer.java
