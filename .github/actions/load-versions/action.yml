@@ -1,0 +1,141 @@
+name: Load versions
+description: >-
+  Reads versions.yml at the repo root and exports each pinned version as a
+  GITHUB_ENV variable. Keys become uppercase + the suffix _VERSION (e.g. an
+  aiken: "1.1.17" entry becomes AIKEN_VERSION=1.1.17). Framework descriptors
+  and workflow steps reference these via the env context (env.AIKEN_VERSION,
+  env.DENO_VERSION, etc.). versions.yml is expected to be flat (top-level
+  scalar key:value pairs only).
+
+inputs:
+  path:
+    description: Path to the versions YAML file relative to the repo root.
+    required: false
+    default: versions.yml
+
+outputs:
+  # The era this run is tagged with — surfaced as a step output so workflow
+  # logic can branch on it.
+  protocol_version:
+    description: The Cardano protocol era this run targets (e.g. "conway").
+    value: ${{ steps.parse.outputs.protocol_version }}
+  # Common toolchain versions surfaced as explicit outputs so the GitHub
+  # Actions language server can resolve them when used in `with:` blocks
+  # (env vars set via GITHUB_ENV are not visible to the linter at parse time).
+  aiken:
+    description: Pinned Aiken version (versions.yml `aiken:`).
+    value: ${{ steps.parse.outputs.aiken }}
+  deno:
+    description: Pinned Deno version (versions.yml `deno:`).
+    value: ${{ steps.parse.outputs.deno }}
+  node:
+    description: Pinned Node.js version (versions.yml `node:`).
+    value: ${{ steps.parse.outputs.node }}
+  jdk:
+    description: Pinned JDK version (versions.yml `jdk:`).
+    value: ${{ steps.parse.outputs.jdk }}
+  jbang:
+    description: Pinned JBang version (versions.yml `jbang:`).
+    value: ${{ steps.parse.outputs.jbang }}
+  yaci_devkit:
+    description: Pinned Yaci DevKit version (versions.yml `yaci_devkit:`).
+    value: ${{ steps.parse.outputs.yaci_devkit }}
+
+runs:
+  using: composite
+  steps:
+    - name: Parse versions.yml and export to GITHUB_ENV
+      id: parse
+      shell: bash
+      run: |
+        set -euo pipefail
+        VFILE="${{ inputs.path }}"
+        if [[ ! -f "$VFILE" ]]; then
+          echo "::error file=$VFILE::versions.yml not found at $VFILE"
+          exit 1
+        fi
+
+        # Flat key:value parser. Handles scalar values, optional double quotes,
+        # comments after the value, and ignores comment-only lines and lists.
+        # Multi-line / nested YAML is rejected by design (see SCHEMA expectation).
+        TMP_ENV="$(mktemp)"
+        awk '
+          # Skip blank and comment-only lines
+          /^[[:space:]]*(#.*)?$/ { next }
+
+          # Match `key: value` at top level (no leading whitespace).
+          # Reject nested mappings (a key whose value continues on subsequent
+          # indented lines would be a structural change requiring schema review).
+          /^[A-Za-z_][A-Za-z0-9_]*[[:space:]]*:/ {
+            line = $0
+            # Strip trailing comments (anything after an unquoted #).
+            # Simple heuristic: split on first " #" or "#" not inside quotes.
+            n = index(line, ":")
+            key = substr(line, 1, n - 1)
+            val = substr(line, n + 1)
+            # Strip leading/trailing whitespace from val
+            sub(/^[[:space:]]+/, "", val)
+            sub(/[[:space:]]+$/, "", val)
+            # Strip trailing comment (only handles unquoted #)
+            if (match(val, /[[:space:]]+#/)) {
+              val = substr(val, 1, RSTART - 1)
+              sub(/[[:space:]]+$/, "", val)
+            }
+            # Strip surrounding double quotes
+            if (val ~ /^".*"$/) {
+              val = substr(val, 2, length(val) - 2)
+            }
+            # An empty value means this is a parent key (unsupported in flat schema).
+            if (val == "") {
+              next
+            }
+            # Strip leading/trailing whitespace from key
+            sub(/^[[:space:]]+/, "", key)
+            sub(/[[:space:]]+$/, "", key)
+            # Uppercase and replace non-alphanumeric chars with underscore
+            ukey = ""
+            for (i = 1; i <= length(key); i++) {
+              c = substr(key, i, 1)
+              if (c ~ /[A-Za-z0-9]/) {
+                ukey = ukey toupper(c)
+              } else {
+                ukey = ukey "_"
+              }
+            }
+            print ukey "_VERSION=" val
+          }
+        ' "$VFILE" > "$TMP_ENV"
+
+        if [[ ! -s "$TMP_ENV" ]]; then
+          echo "::error file=$VFILE::versions.yml parsed to zero key:value pairs"
+          exit 1
+        fi
+
+        cat "$TMP_ENV" >> "$GITHUB_ENV"
+
+        # Also surface specific versions as step outputs so `with:` blocks
+        # in calling workflows can resolve them through the linter (env vars
+        # set via $GITHUB_ENV are not visible to the GitHub Actions language
+        # server at parse time, which produces "Context access might be invalid"
+        # warnings even though the runtime works fine).
+        emit_output() {
+          local env_key="$1"
+          local out_key="$2"
+          if grep -q "^${env_key}=" "$TMP_ENV"; then
+            local val
+            val=$(grep "^${env_key}=" "$TMP_ENV" | head -1 | cut -d= -f2-)
+            echo "${out_key}=${val}" >> "$GITHUB_OUTPUT"
+          fi
+        }
+
+        emit_output PROTOCOL_VERSION_VERSION protocol_version
+        emit_output AIKEN_VERSION             aiken
+        emit_output DENO_VERSION              deno
+        emit_output NODE_VERSION              node
+        emit_output JDK_VERSION               jdk
+        emit_output JBANG_VERSION             jbang
+        emit_output YACI_DEVKIT_VERSION       yaci_devkit
+
+        echo "Loaded versions from $VFILE:"
+        sed 's/^/  /' "$TMP_ENV"
+        rm -f "$TMP_ENV"
