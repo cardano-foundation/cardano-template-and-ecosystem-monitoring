@@ -1,21 +1,37 @@
 #!/usr/bin/env bash
 #
-# Cardano Ecosystem Test Discovery (dual-mode)
+# Cardano Ecosystem Test Discovery (registry-driven, dual-mode).
 #
-# Reads <use-case>/example.yml manifests where they exist; falls back to the
-# legacy filename heuristics for use cases that haven't been migrated yet.
+# Enumerates `frameworks/*.yml` to discover which onchain languages and
+# offchain SDKs are registered, then walks every use case and decides which
+# of those frameworks each use case ships:
+#
+#   * Manifest mode (preferred): use cases with `<use-case>/example.yml`
+#     declare frameworks explicitly via `manifest_key` keys under onchain:
+#     and offchain:.
+#   * Heuristic mode (fallback): use cases without a manifest are matched by
+#     directory presence — `<use-case>/<run.cwd_relative_to_example>` must
+#     exist for the framework to be considered present.
+#
 # This dual-mode is intentional and temporary — it lets P1W1 ship without
-# forcing a 21-file manifest migration before the format is reviewed. P1W2
-# completes the migration and removes the heuristic fallback.
+# forcing a 21-file manifest migration before the format is reviewed.
+# P1W2 completes the migration and removes the heuristic fallback.
+#
+# Adding a new framework = one new descriptor under `frameworks/`. This
+# script reads it and any matching use case is automatically discovered.
+# No edits to this script are required.
 #
 # Outputs (to stdout, GitHub Actions $GITHUB_OUTPUT, and .local-test-results/):
-#   - aiken-examples:           JSON array of use-case names with onchain/aiken
-#   - ccl-examples:             JSON array of use-case names with offchain/ccl-java
-#   - mesh-examples:            JSON array of use-case names with offchain/meshjs
-#   - lucid-examples:           JSON array of use-case names with offchain/lucid-evolution
-#   - manifest-coverage:        JSON {total, with_manifest, with_heuristic}
+#   - <fw>-examples (one per registered framework, e.g. `aiken-examples`,
+#     `meshjs-examples`, `lucid-evolution-examples`, `ccl-java-examples`):
+#       JSON array of use-case names
+#   - registered-onchain:        JSON array of registered onchain framework names
+#   - registered-offchain:       JSON array of registered offchain framework names
+#   - use-cases-with-offchain:   JSON array of use cases with ≥ 1 offchain framework
+#   - manifest-coverage:         JSON {total, with_manifest, with_heuristic}
 #
-# Schema reference (manifest): docs/reference/example-manifest.md (lands in P1W2).
+# Schema reference (manifest):    docs/reference/example-manifest.md (lands in P1W2)
+# Schema reference (descriptors): frameworks/SCHEMA.md
 
 set -euo pipefail
 
@@ -36,41 +52,63 @@ mkdir -p "$OUT_DIR"
 TMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TMP_DIR"' EXIT
 
-AIKEN_FILE="$TMP_DIR/aiken-examples.txt"
-SCALUS_FILE="$TMP_DIR/scalus-examples.txt"
-CCL_FILE="$TMP_DIR/ccl-examples.txt"
-MESH_FILE="$TMP_DIR/mesh-examples.txt"
-LUCID_FILE="$TMP_DIR/lucid-examples.txt"
-: > "$AIKEN_FILE"
-: > "$SCALUS_FILE"
-: > "$CCL_FILE"
-: > "$MESH_FILE"
-: > "$LUCID_FILE"
-
+# Per-framework example lists are built dynamically. Each registered framework
+# gets a TMP_DIR/<fw>.txt file populated during the scan.
 WITH_MANIFEST=0
 WITH_HEURISTIC=0
 
-# ---- Manifest-mode discovery ------------------------------------------------
-#
-# A use case has a manifest iff <use-case>/example.yml exists. The manifest
-# names which onchain languages and offchain SDKs the use case ships, keyed
-# by the framework's `manifest_key` from frameworks/<name>.yml. We extract
-# those keys and append the use-case name to the matching per-framework list.
+# Returns the value of a dotted-path field from a small flat-or-shallow YAML
+# file. See frameworks/SCHEMA.md for the YAML subset we support.
+yaml_get() {
+  local file="$1"
+  local path="$2"
+  YAML_FILE="$file" YAML_PATH="$path" python3 - <<'PY'
+import os, re
+target = os.environ["YAML_PATH"]
+out = None
+with open(os.environ["YAML_FILE"]) as fh:
+    lines = fh.readlines()
+stack = []
+for raw in lines:
+    line = raw.rstrip("\n")
+    stripped = line.lstrip()
+    if not stripped or stripped.startswith("#"):
+        continue
+    indent = len(line) - len(stripped)
+    m = re.match(r'([A-Za-z_][A-Za-z0-9_-]*)\s*:\s*(.*)$', stripped)
+    if not m:
+        continue
+    key, val = m.group(1), m.group(2)
+    if val and not val.startswith('"'):
+        val = re.sub(r'\s+#.*$', '', val)
+    val = val.strip()
+    while stack and stack[-1][0] >= indent:
+        stack.pop()
+    full = ".".join([k for _, k in stack] + [key])
+    if val:
+        if val.startswith('"') and val.endswith('"'):
+            val = val[1:-1]
+        if full == target:
+            out = val
+            break
+    else:
+        stack.append((indent, key))
+if out is not None:
+    print(out)
+PY
+}
 
-# Returns the list of immediate-child keys under a top-level mapping in a
-# small flat YAML manifest. Mirrors the parsing in
-# .github/actions/run-framework/action.yml so behaviour stays consistent.
+# Returns the immediate-child keys of a top-level YAML mapping (e.g. all
+# framework keys under `offchain:`).
 manifest_keys_under() {
   local file="$1"
-  local section="$2"  # onchain | offchain
-  python3 - "$file" "$section" <<'PY'
-import re, sys
-path = sys.argv[1]
-section = sys.argv[2]
-with open(path) as fh:
+  local section="$2"
+  YAML_FILE="$file" YAML_SECTION="$section" python3 - <<'PY'
+import os, re
+section = os.environ["YAML_SECTION"]
+with open(os.environ["YAML_FILE"]) as fh:
     lines = fh.readlines()
-in_section = False
-section_indent = -1
+in_section, section_indent = False, -1
 for raw in lines:
     line = raw.rstrip("\n")
     stripped = line.lstrip()
@@ -83,21 +121,72 @@ for raw in lines:
     key, val = m.group(1), m.group(2).strip()
     if not in_section:
         if indent == 0 and key == section and not val:
-            in_section = True
-            section_indent = indent
+            in_section, section_indent = True, indent
         continue
-    # Inside the section
     if indent <= section_indent:
-        # Left the section
         break
-    # Direct children: one indent deeper than the section header
     if (indent == section_indent + 2 or indent == section_indent + 4) and not val:
-        # First-time, lock the child indent so we don't accidentally pick
-        # grand-children (entry: under each framework key)
-        # We rely on the fact that children appear before grandchildren.
         print(key)
 PY
 }
+
+# ---- Step 1: enumerate registered frameworks ------------------------------
+
+if [[ ! -d frameworks ]] || [[ -z "$(ls frameworks/*.yml 2>/dev/null)" ]]; then
+  echo "::error::no frameworks/*.yml descriptors found — register at least one before running discovery"
+  exit 1
+fi
+
+declare -a ONCHAIN_FRAMEWORKS=()
+declare -a OFFCHAIN_FRAMEWORKS=()
+declare -A FRAMEWORK_KIND=()
+declare -A FRAMEWORK_MANIFEST_KEY=()
+declare -A FRAMEWORK_CWD=()
+
+echo
+echo -e "${YELLOW}Registered framework descriptors${NC}"
+for fw_file in frameworks/*.yml; do
+  fw=$(basename "$fw_file" .yml)
+  # Skip non-descriptor files like SCHEMA.md (compgen guards above)
+  [[ "$fw_file" == "frameworks/SCHEMA.md" ]] && continue
+
+  kind=$(yaml_get "$fw_file" "kind")
+  manifest_key=$(yaml_get "$fw_file" "manifest_key")
+  cwd=$(yaml_get "$fw_file" "run.cwd_relative_to_example")
+  : "${manifest_key:=$fw}"
+
+  if [[ -z "$kind" ]]; then
+    echo -e "  ${YELLOW}skip${NC} $fw — descriptor missing kind:"
+    continue
+  fi
+  if [[ -z "$cwd" ]]; then
+    echo -e "  ${YELLOW}skip${NC} $fw — descriptor missing run.cwd_relative_to_example:"
+    continue
+  fi
+
+  FRAMEWORK_KIND[$fw]="$kind"
+  FRAMEWORK_MANIFEST_KEY[$fw]="$manifest_key"
+  FRAMEWORK_CWD[$fw]="$cwd"
+
+  # Initialize per-framework list file
+  : > "$TMP_DIR/$fw.txt"
+
+  echo -e "  ${DIM}$fw${NC}  kind=$kind  manifest_key=$manifest_key  cwd=$cwd"
+  case "$kind" in
+    onchain)  ONCHAIN_FRAMEWORKS+=("$fw")  ;;
+    offchain) OFFCHAIN_FRAMEWORKS+=("$fw") ;;
+    *) echo -e "  ${YELLOW}note${NC} $fw has unknown kind '$kind' — must be onchain|offchain" ;;
+  esac
+done
+
+# Lookup map: manifest_key -> framework name (used to resolve manifest entries)
+declare -A KEY_TO_FRAMEWORK=()
+for fw in "${ONCHAIN_FRAMEWORKS[@]:-}" "${OFFCHAIN_FRAMEWORKS[@]:-}"; do
+  [[ -z "$fw" ]] && continue
+  KEY_TO_FRAMEWORK["${FRAMEWORK_MANIFEST_KEY[$fw]}"]="$fw"
+done
+
+# ---- Step 2: manifest-mode discovery --------------------------------------
 
 echo
 echo -e "${YELLOW}Manifest-mode discovery${NC}"
@@ -108,95 +197,64 @@ for uc_dir in */; do
   WITH_MANIFEST=$((WITH_MANIFEST + 1))
 
   printed_uc_label=false
-  while IFS= read -r key; do
-    [[ -z "$key" ]] && continue
-    if ! $printed_uc_label; then
-      echo -e "  ${DIM}$uc${NC}"
-      printed_uc_label=true
-    fi
-    echo "    onchain  $key"
-    case "$key" in
-      aiken) echo "$uc" >> "$AIKEN_FILE" ;;
-      scalus) echo "$uc" >> "$SCALUS_FILE" ;;
-      *) echo -e "    ${YELLOW}note${NC} unknown onchain framework key '$key' — no descriptor at frameworks/$key.yml" ;;
-    esac
-  done < <(manifest_keys_under "$manifest" "onchain" 2>/dev/null)
-
-  while IFS= read -r key; do
-    [[ -z "$key" ]] && continue
-    if ! $printed_uc_label; then
-      echo -e "  ${DIM}$uc${NC}"
-      printed_uc_label=true
-    fi
-    echo "    offchain $key"
-    case "$key" in
-      meshjs) echo "$uc" >> "$MESH_FILE" ;;
-      lucid-evolution) echo "$uc" >> "$LUCID_FILE" ;;
-      ccl-java) echo "$uc" >> "$CCL_FILE" ;;
-      *) echo -e "    ${YELLOW}note${NC} unknown offchain framework key '$key' — no descriptor at frameworks/$key.yml" ;;
-    esac
-  done < <(manifest_keys_under "$manifest" "offchain" 2>/dev/null)
+  for section in onchain offchain; do
+    while IFS= read -r key; do
+      [[ -z "$key" ]] && continue
+      if ! $printed_uc_label; then
+        echo -e "  ${DIM}$uc${NC}"
+        printed_uc_label=true
+      fi
+      fw="${KEY_TO_FRAMEWORK[$key]:-}"
+      if [[ -z "$fw" ]]; then
+        echo -e "    ${YELLOW}note${NC} ${section}.${key} — no descriptor at frameworks/${key}.yml"
+        continue
+      fi
+      if [[ "${FRAMEWORK_KIND[$fw]}" != "$section" ]]; then
+        echo -e "    ${YELLOW}note${NC} ${section}.${key} — descriptor's kind (${FRAMEWORK_KIND[$fw]}) does not match"
+        continue
+      fi
+      echo "    $section $fw"
+      echo "$uc" >> "$TMP_DIR/$fw.txt"
+    done < <(manifest_keys_under "$manifest" "$section" 2>/dev/null)
+  done
 done
 
-# ---- Legacy heuristic fallback ---------------------------------------------
+# ---- Step 3: heuristic fallback ------------------------------------------
 #
-# For use cases without a manifest, fall back to filename-pattern detection.
-# Identical logic to the original script. Removed in P1W2 once every use case
-# has a manifest.
+# For use cases without a manifest, presence of <use-case>/<run.cwd> is the
+# trigger. This is generic over any registered framework — adding a new
+# framework descriptor whose run.cwd points at e.g. "offchain/blaze" picks
+# up unmanifested examples automatically.
 
 echo
 echo -e "${YELLOW}Heuristic fallback (use cases without example.yml)${NC}"
 for uc_dir in */; do
   uc="${uc_dir%/}"
-  # Skip non-use-case directories
   [[ -d "$uc/onchain" || -d "$uc/offchain" ]] || continue
-  # Skip use cases that already have a manifest
   [[ -f "$uc/example.yml" ]] && continue
 
   found_anything=false
-  if [[ -f "$uc/onchain/aiken/aiken.toml" ]]; then
-    echo "$uc" >> "$AIKEN_FILE"
-    echo -e "  ${DIM}$uc${NC}  onchain/aiken (heuristic)"
-    found_anything=true
-  fi
-  if [[ -f "$uc/onchain/scalus/build.sbt" ]]; then
-    echo "$uc" >> "$SCALUS_FILE"
-    echo -e "  ${DIM}$uc${NC}  onchain/scalus (heuristic)"
-    found_anything=true
-  fi
-  if compgen -G "$uc/offchain/ccl-java/*.java" > /dev/null 2>&1; then
-    echo "$uc" >> "$CCL_FILE"
-    echo -e "  ${DIM}$uc${NC}  offchain/ccl-java (heuristic)"
-    found_anything=true
-  fi
-  if [[ -f "$uc/offchain/meshjs/deno.json" ]]; then
-    echo "$uc" >> "$MESH_FILE"
-    echo -e "  ${DIM}$uc${NC}  offchain/meshjs (heuristic)"
-    found_anything=true
-  fi
-  if [[ -f "$uc/offchain/lucid-evolution/deno.json" ]]; then
-    echo "$uc" >> "$LUCID_FILE"
-    echo -e "  ${DIM}$uc${NC}  offchain/lucid-evolution (heuristic)"
-    found_anything=true
-  fi
+  for fw in "${ONCHAIN_FRAMEWORKS[@]:-}" "${OFFCHAIN_FRAMEWORKS[@]:-}"; do
+    [[ -z "$fw" ]] && continue
+    cwd="${FRAMEWORK_CWD[$fw]}"
+    if [[ -d "$uc/$cwd" ]]; then
+      echo "$uc" >> "$TMP_DIR/$fw.txt"
+      echo -e "  ${DIM}$uc${NC}  ${FRAMEWORK_KIND[$fw]}/$fw (heuristic, found $uc/$cwd)"
+      found_anything=true
+    fi
+  done
   $found_anything && WITH_HEURISTIC=$((WITH_HEURISTIC + 1)) || true
 done
 
-# Deduplicate (manifest mode + heuristic mode could double-count if a future
-# bug ever surfaced — defensive programming).
-for f in "$AIKEN_FILE" "$SCALUS_FILE" "$CCL_FILE" "$MESH_FILE" "$LUCID_FILE"; do
-  sort -u -o "$f" "$f"
+# Deduplicate (manifest mode + heuristic mode could double-count)
+for fw in "${ONCHAIN_FRAMEWORKS[@]:-}" "${OFFCHAIN_FRAMEWORKS[@]:-}"; do
+  [[ -z "$fw" ]] && continue
+  sort -u -o "$TMP_DIR/$fw.txt" "$TMP_DIR/$fw.txt"
 done
 
-# ---- Output ----------------------------------------------------------------
+# ---- Step 4: summary + outputs --------------------------------------------
 
-count_lines() { wc -l < "$1" | tr -d ' '; }
-AIKEN_COUNT=$(count_lines "$AIKEN_FILE")
-SCALUS_COUNT=$(count_lines "$SCALUS_FILE")
-CCL_COUNT=$(count_lines "$CCL_FILE")
-MESH_COUNT=$(count_lines "$MESH_FILE")
-LUCID_COUNT=$(count_lines "$LUCID_FILE")
-TOTAL=$((AIKEN_COUNT + SCALUS_COUNT + CCL_COUNT + MESH_COUNT + LUCID_COUNT))
+count_lines() { [[ -f "$1" ]] && wc -l < "$1" | tr -d ' ' || echo 0; }
 
 echo
 echo -e "${GREEN}========================================"
@@ -205,60 +263,66 @@ echo "========================================${NC}"
 printf "  Manifest-mode use cases:    %d\n"  "$WITH_MANIFEST"
 printf "  Heuristic-mode use cases:   %d\n"  "$WITH_HEURISTIC"
 echo "  ----------------------------------------"
-printf "  Aiken examples:             %d\n"  "$AIKEN_COUNT"
-printf "  Scalus examples:            %d\n"  "$SCALUS_COUNT"
-printf "  CCL Java examples:          %d\n"  "$CCL_COUNT"
-printf "  Mesh.js examples:           %d\n"  "$MESH_COUNT"
-printf "  Lucid Evolution examples:   %d\n"  "$LUCID_COUNT"
+TOTAL=0
+for fw in "${ONCHAIN_FRAMEWORKS[@]:-}" "${OFFCHAIN_FRAMEWORKS[@]:-}"; do
+  [[ -z "$fw" ]] && continue
+  c=$(count_lines "$TMP_DIR/$fw.txt")
+  TOTAL=$((TOTAL + c))
+  printf "  %-26s %d\n" "$fw examples:" "$c"
+done
 echo "  ----------------------------------------"
 printf "  Total cells:                %d\n"  "$TOTAL"
 echo
 
-# JSON-array output
 to_json_array() {
   python3 -c "
 import json, sys
-items = [line.strip() for line in open(sys.argv[1]) if line.strip()]
+items = [line.strip() for line in open(sys.argv[1]) if line.strip()] if sys.argv[1] else []
 print(json.dumps(items))
 " "$1"
 }
 
-AIKEN_JSON=$(to_json_array "$AIKEN_FILE")
-SCALUS_JSON=$(to_json_array "$SCALUS_FILE")
-CCL_JSON=$(to_json_array "$CCL_FILE")
-MESH_JSON=$(to_json_array "$MESH_FILE")
-LUCID_JSON=$(to_json_array "$LUCID_FILE")
+# Build use-cases-with-offchain by union of all offchain framework lists
+USE_CASES_WITH_OFFCHAIN_FILE="$TMP_DIR/use-cases-with-offchain.txt"
+: > "$USE_CASES_WITH_OFFCHAIN_FILE"
+for fw in "${OFFCHAIN_FRAMEWORKS[@]:-}"; do
+  [[ -z "$fw" ]] && continue
+  cat "$TMP_DIR/$fw.txt" >> "$USE_CASES_WITH_OFFCHAIN_FILE"
+done
+sort -u -o "$USE_CASES_WITH_OFFCHAIN_FILE" "$USE_CASES_WITH_OFFCHAIN_FILE"
+USE_CASES_WITH_OFFCHAIN_JSON=$(to_json_array "$USE_CASES_WITH_OFFCHAIN_FILE")
 
-# Union of all offchain framework lists — one matrix axis driving the
-# collapsed-offchain CI job (matrix={use_case}, one job per use case running
-# every declared offchain framework against a shared Yaci).
-USE_CASES_WITH_OFFCHAIN=$(cat "$CCL_FILE" "$MESH_FILE" "$LUCID_FILE" 2>/dev/null | sort -u)
-echo "$USE_CASES_WITH_OFFCHAIN" > "$OUT_DIR/use-cases-with-offchain.txt"
-USE_CASES_WITH_OFFCHAIN_JSON=$(echo "$USE_CASES_WITH_OFFCHAIN" \
-  | python3 -c "
-import json, sys
-items = [line.strip() for line in sys.stdin if line.strip()]
-print(json.dumps(items))
-")
+# Per-framework JSON arrays
+declare -A FW_JSON=()
+for fw in "${ONCHAIN_FRAMEWORKS[@]:-}" "${OFFCHAIN_FRAMEWORKS[@]:-}"; do
+  [[ -z "$fw" ]] && continue
+  FW_JSON[$fw]=$(to_json_array "$TMP_DIR/$fw.txt")
+done
+
+ONCHAIN_JSON=$(printf '%s\n' "${ONCHAIN_FRAMEWORKS[@]:-}" \
+  | python3 -c "import json, sys; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))")
+OFFCHAIN_JSON=$(printf '%s\n' "${OFFCHAIN_FRAMEWORKS[@]:-}" \
+  | python3 -c "import json, sys; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))")
 
 # GitHub Actions output
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
   {
-    echo "aiken-examples=$AIKEN_JSON"
-    echo "scalus-examples=$SCALUS_JSON"
-    echo "ccl-examples=$CCL_JSON"
-    echo "mesh-examples=$MESH_JSON"
-    echo "lucid-examples=$LUCID_JSON"
+    echo "registered-onchain=$ONCHAIN_JSON"
+    echo "registered-offchain=$OFFCHAIN_JSON"
     echo "use-cases-with-offchain=$USE_CASES_WITH_OFFCHAIN_JSON"
+    for fw in "${ONCHAIN_FRAMEWORKS[@]:-}" "${OFFCHAIN_FRAMEWORKS[@]:-}"; do
+      [[ -z "$fw" ]] && continue
+      echo "${fw}-examples=${FW_JSON[$fw]}"
+    done
     echo "manifest-coverage={\"total\":$((WITH_MANIFEST + WITH_HEURISTIC)),\"with_manifest\":$WITH_MANIFEST,\"with_heuristic\":$WITH_HEURISTIC}"
   } >> "$GITHUB_OUTPUT"
 fi
 
-# Local artifacts (used by local-test-*.sh)
-cp "$AIKEN_FILE"  "$OUT_DIR/aiken-examples.txt"
-cp "$SCALUS_FILE" "$OUT_DIR/scalus-examples.txt"
-cp "$CCL_FILE"    "$OUT_DIR/ccl-examples.txt"
-cp "$MESH_FILE"   "$OUT_DIR/mesh-examples.txt"
-cp "$LUCID_FILE"  "$OUT_DIR/lucid-examples.txt"
+# Local artifacts
+for fw in "${ONCHAIN_FRAMEWORKS[@]:-}" "${OFFCHAIN_FRAMEWORKS[@]:-}"; do
+  [[ -z "$fw" ]] && continue
+  cp "$TMP_DIR/$fw.txt" "$OUT_DIR/${fw}-examples.txt"
+done
+cp "$USE_CASES_WITH_OFFCHAIN_FILE" "$OUT_DIR/use-cases-with-offchain.txt"
 
 echo -e "${GREEN}✅ Discovery complete${NC}  (${WITH_HEURISTIC} use cases still using heuristic fallback — migrate them in P1W2)"

@@ -60,8 +60,10 @@ needs_yaci: true             # true | false. When true, the offchain test job
 
 ## Notes
 
-- The CI workflow consumes descriptors via `.github/actions/run-framework/` (lands in P1W1). That composite action takes the framework name and the use case path as inputs and resolves the descriptor's `setup` and `run` blocks at runtime.
-- A descriptor whose `kind: onchain` participates in the `compile-onchain` matrix job; its `run.command` is expected to compile the contract and emit any artifacts the offchain side needs (e.g. `plutus.json`).
-- A descriptor whose `kind: offchain` participates in the `test-offchain` matrix job (one job per use case, all configured offchain frameworks running sequentially against the shared Yaci).
-- Adding a fifth offchain SDK is one PR adding one file under `frameworks/`. Zero workflow YAML edits, zero discovery-script edits.
+- **Runtime entry**: the CI workflow consumes descriptors via [`scripts/ci/run-cell.sh`](../scripts/ci/run-cell.sh). The script reads the descriptor's `kind`, `manifest_key`, `run.cwd_relative_to_example`, `run.command`, `default_entry`, and `result.convention`, resolves the entry file from the use-case manifest, and runs the cell. A `composite action` previously wrapped the script but added no value beyond a thin parameter shape, so it was removed in P1W1's iteration 2 cleanup; the script is the public interface.
+- **Discovery**: [`scripts/local-test-discovery.sh`](../scripts/local-test-discovery.sh) enumerates `frameworks/*.yml` to know which frameworks are registered, then walks every use case and decides which of those frameworks each use case ships (manifest mode preferred, heuristic fallback for unmanifested use cases). Discovery is generic over registered frameworks — adding a new descriptor is sufficient.
+- **Onchain frameworks** (`kind: onchain`) participate in the `compile-onchain` matrix job; the `run.command` is expected to compile the contract and emit any artifacts the offchain side needs (e.g. `plutus.json`).
+- **Offchain frameworks** (`kind: offchain`) participate in the `test-offchain` matrix job (one job per use case; every registered offchain framework declared by the use case runs sequentially against the shared Yaci DevKit instance).
+- **Pilot limitation (P1W1)**: the workflow installs every offchain runtime (Deno, JDK + JBang, Yaci) unconditionally for each offchain job. The descriptor's `setup:` block and `needs_yaci:` flag are not yet consumed by the workflow — they are documentation for how a contributor would write a new descriptor. P1W2 may take over selective runtime setup once the contract is settled.
+- **Adding a new framework**: one PR adding one file under `frameworks/` (and per-use-case, one `manifest_key:` entry under `<use-case>/example.yml`). Zero workflow YAML edits, zero discovery-script edits required.
 - See `docs/how-to/add-framework.md` (lands in P1W2) for the contributor walkthrough.

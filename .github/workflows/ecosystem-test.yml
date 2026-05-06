@@ -39,11 +39,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
+      # Onchain matrix axis. Only aiken today; new onchain languages are
+      # automatically discovered as <framework>-examples step outputs.
       aiken-examples: ${{ steps.discovery.outputs.aiken-examples }}
-      ccl-examples: ${{ steps.discovery.outputs.ccl-examples }}
-      mesh-examples: ${{ steps.discovery.outputs.mesh-examples }}
-      lucid-examples: ${{ steps.discovery.outputs.lucid-examples }}
+      # Offchain matrix axis. The job per use case dynamically iterates the
+      # manifest's declared offchain frameworks (or heuristic fallback against
+      # registered frameworks) — no per-framework outputs needed at this layer.
       use-cases-with-offchain: ${{ steps.discovery.outputs.use-cases-with-offchain }}
+      registered-onchain: ${{ steps.discovery.outputs.registered-onchain }}
+      registered-offchain: ${{ steps.discovery.outputs.registered-offchain }}
       manifest-coverage: ${{ steps.discovery.outputs.manifest-coverage }}
     steps:
       - uses: actions/checkout@v4

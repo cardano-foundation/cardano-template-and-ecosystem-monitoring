@@ -68,13 +68,22 @@ fi
 RESULTS_DIR="$RESULTS_DIR" ERA="$ERA" python3 - <<'PY' > "$OUTPUT_FILE"
 import datetime, json, os, sys, glob
 
-# result.json schema (validated minimally — invalid cells are converted to
-# a fail status with a `schema_violation` reason rather than dropped, so the
-# matrix surfaces malformed cells instead of hiding them).
-ALLOWED_TIERS   = {"primitive", "use-case-scenario", "use-case-example"}
-ALLOWED_STATUS  = {"pass", "fail", "skipped"}
-REQUIRED_FIELDS = ("framework",)  # at minimum we need to know which framework
-                                  # the cell belongs to to render it on the matrix
+# result.json schema validation. Invalid cells are surfaced in the matrix as
+# `fail` cells with `error_summary: "schema violation: …"` rather than dropped
+# or weakly defaulted. This catches example bugs in the runner contract instead
+# of hiding them.
+ALLOWED_TIERS  = {"primitive", "use-case-scenario", "use-case-example"}
+ALLOWED_STATUS = {"pass", "fail", "skipped"}
+
+# Common required fields across all tiers
+COMMON_REQUIRED = ("status", "framework", "duration_ms")
+
+# Tier-specific required identity fields
+TIER_REQUIRED = {
+    "use-case-example":  ("use_case",),
+    "use-case-scenario": ("use_case", "id"),
+    "primitive":         ("id",),
+}
 
 results_dir = os.environ["RESULTS_DIR"]
 era_default = os.environ["ERA"]
@@ -83,27 +92,44 @@ violations = []
 
 def coerce(cell, source_path):
     """Validate and lightly coerce a cell. Returns (cell, violation_or_none)."""
-    # Required fields
-    for field in REQUIRED_FIELDS:
-        if not cell.get(field):
-            return cell, f"missing required field {field!r}"
-    # Tier and status normalization
-    if cell.get("tier") not in ALLOWED_TIERS:
-        if cell.get("tier") is None:
-            cell["tier"] = "use-case-example"
-        else:
-            return cell, f"invalid tier {cell.get('tier')!r}"
-    if cell.get("status") not in ALLOWED_STATUS:
-        return cell, f"invalid status {cell.get('status')!r}"
-    cell.setdefault("era", era_default)
+    # Tier (required, with fallback for very old result.json files)
+    tier = cell.get("tier")
+    if tier is None:
+        cell["tier"] = "use-case-example"
+        tier = "use-case-example"
+    elif tier not in ALLOWED_TIERS:
+        return cell, f"invalid tier {tier!r}"
+
+    # Status (required, validated)
+    status = cell.get("status")
+    if status not in ALLOWED_STATUS:
+        return cell, f"invalid or missing status {status!r}"
+
+    # duration_ms (required, integer-coercible)
+    if "duration_ms" not in cell:
+        return cell, "missing required field 'duration_ms'"
     try:
-        cell["duration_ms"] = int(cell.get("duration_ms", 0))
+        cell["duration_ms"] = int(cell["duration_ms"])
     except (TypeError, ValueError):
         return cell, f"non-integer duration_ms {cell.get('duration_ms')!r}"
-    # Auto-derive id if missing — not strictly required but useful for the dashboard
+
+    # framework (common to all tiers)
+    if not cell.get("framework"):
+        return cell, "missing required field 'framework'"
+
+    # Tier-specific identity fields
+    for field in TIER_REQUIRED.get(tier, ()):
+        if not cell.get(field):
+            return cell, f"missing required field {field!r} for tier {tier!r}"
+
+    # Era — set to the default (versions.yml protocol_version) if absent.
+    cell.setdefault("era", era_default)
+
+    # Auto-derive id where it can be unambiguous.
     if not cell.get("id"):
         if cell.get("use_case") and cell.get("framework"):
             cell["id"] = f"{cell['use_case']}/{cell['framework']}"
+
     return cell, None
 
 cells = []
