@@ -1,0 +1,61 @@
+# versions.yml — single source of truth for tool and library versions
+#
+# Every CI install step reads from this file. The
+# `.github/actions/load-versions/` composite action exports each pinned
+# version as a `<KEY>_VERSION` environment variable; framework descriptors
+# under `frameworks/<name>.yml` and the workflow itself reference them via
+# the env context.
+#
+# When bumping a version:
+#   1. Update the value here.
+#   2. If the library is referenced inside any source file (`deno.json` for
+#      Mesh.js / Lucid; JBang `//DEPS` lines for cardano-client-lib;
+#      `aiken.toml` `compiler =` field), update those references too.
+#   3. Push and verify CI is still green.
+
+# Cardano protocol era this repo currently targets. Era-tagged scenarios
+# under <use-case>/conformance/scenarios/<era>/ must align with this value.
+protocol_version: conway
+
+# -- Onchain languages -------------------------------------------------------
+
+# Aiken compiler (latest stable). aiken.toml's `compiler =` field is treated
+# as a minimum by aiken itself; older toml claims (e.g. v1.1.2) compile fine
+# under a newer installed aiken. The value here is the version the CI
+# workflow installs via aikup. Note: aikup expects the version with a `v`
+# prefix (e.g. `v1.1.21`); the workflow prepends it.
+aiken: "1.1.21"
+
+# -- Offchain SDKs -----------------------------------------------------------
+
+# Mesh.js. Pinned to the version exercised by atomic-transaction (the most
+# recent example in the repo).
+meshjs: "1.9.0-beta.95"
+
+# Lucid Evolution. Use exact pins (no caret ranges) in `deno.json` files.
+lucid_evolution: "2.0.1"
+
+# Cardano Client Lib. Used by ccl-java examples through JBang //DEPS lines.
+cardano_client_lib: "0.7.0-beta2"
+
+# -- Test infrastructure -----------------------------------------------------
+
+# Yaci DevKit (npm distribution). The bloxbean/yaci-devkit Docker image is
+# not actively maintained; the npm package is the canonical, current
+# distribution.
+yaci_devkit: "0.10.6"
+
+# -- Toolchain ---------------------------------------------------------------
+
+# JDK major version. JBang //JAVA lines and any pom.xml/build.gradle must
+# align.
+jdk: "24"
+
+# Node.js. Used to install yaci-devkit npm globally.
+node: "20"
+
+# Deno runtime for offchain TypeScript examples.
+deno: "2.7.14"
+
+# JBang launcher for ccl-java examples.
+jbang: "0.138.0"

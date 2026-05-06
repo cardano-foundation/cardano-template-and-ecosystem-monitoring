@@ -1,0 +1,22 @@
+# Use-case manifest for vesting
+#
+# Schema reference: frameworks/SCHEMA.md.
+#
+# Note: this manifest fixes a discovery gap — vesting/offchain/meshjs/ has
+# no deno.json, so the legacy filename heuristic in
+# scripts/local-test-discovery.sh missed it. The manifest now declares it
+# explicitly and the rewritten discovery script picks it up.
+
+use_case: vesting
+description: >-
+  A linear time-locked vesting contract: a beneficiary receives funds over a
+  schedule, with the contract enforcing the cliff and release rules.
+
+onchain:
+  aiken:
+    path: onchain/aiken
+
+offchain:
+  meshjs:
+    path: offchain/meshjs
+    entry: vesting.ts

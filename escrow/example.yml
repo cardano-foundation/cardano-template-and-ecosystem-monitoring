@@ -1,0 +1,29 @@
+# Use-case manifest for escrow
+#
+# Schema reference: frameworks/SCHEMA.md (the manifest schema is documented
+# alongside the framework descriptor schema there).
+#
+# Discovery: scripts/local-test-discovery.sh reads this file and falls back
+# to legacy filename heuristics for use cases without a manifest until every
+# use case is migrated.
+#
+# Keys under onchain: and offchain: are framework `manifest_key` values from
+# the registry under frameworks/<name>.yml. A key referenced here without a
+# matching descriptor is a CI error.
+
+use_case: escrow
+description: >-
+  A two-party escrow contract: a depositor locks funds for a recipient under
+  a deadline, with refund-after-deadline and release-on-completion paths.
+
+onchain:
+  aiken:
+    path: onchain/aiken
+
+offchain:
+  meshjs:
+    path: offchain/meshjs
+    entry: escrow.ts
+  lucid-evolution:
+    path: offchain/lucid-evolution
+    entry: escrow.ts

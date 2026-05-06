@@ -1,0 +1,30 @@
+# Framework descriptor: Aiken (onchain language)
+#
+# Schema reference: frameworks/SCHEMA.md
+# Versions: versions.yml (`aiken:` field)
+
+name: aiken
+kind: onchain
+manifest_key: aiken
+
+setup:
+  - name: Install aikup (Aiken installer)
+    shell: bash
+    run: |
+      curl --proto '=https' --tlsv1.2 -LsSf https://install.aiken-lang.org | sh
+      echo "$HOME/.aiken/bin" >> $GITHUB_PATH
+  - name: Install Aiken ${{ env.AIKEN_VERSION }}
+    shell: bash
+    run: |
+      aikup install ${{ env.AIKEN_VERSION }}
+      aiken --version
+
+run:
+  cwd_relative_to_example: "onchain/aiken"
+  # `aiken check` runs unit tests; `aiken build` emits plutus.json.
+  command: "aiken check && aiken build"
+
+result:
+  convention: exit-code
+
+needs_yaci: false

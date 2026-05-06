@@ -40,6 +40,10 @@ plutus.json
 build/
 .local-test-results
 
+# Autonomous milestone-level Codex review logs — local-only audit trail.
+# See plan: "Development process: autonomous milestone-level Codex review".
+.codex-reviews/
+
 wallet.txt
 
 wallet_*.txt

@@ -1,0 +1,99 @@
+name: Load versions
+description: >-
+  Reads versions.yml at the repo root and exports each pinned version as a
+  GITHUB_ENV variable. Keys become uppercase plus the suffix _VERSION (an
+  entry of aiken set to 1.1.17 becomes the env var AIKEN_VERSION with value
+  1.1.17). Framework descriptors, workflow run blocks, and with blocks all
+  reference these via the env context. versions.yml is expected to be flat
+  (top-level scalar key:value pairs only).
+
+  No step outputs are surfaced. Earlier iterations declared explicit outputs
+  for libraries used in with blocks so the GitHub Actions language server
+  could resolve them at parse time, but that broke the "zero edits to add a
+  new library" promise — every new pinned tool that flowed into a with
+  block required a static outputs entry here. Now: only versions.yml needs
+  editing. The trade-off is that calling workflows that reference an env
+  var inside a with block see a yellow linter warning ("Context access
+  might be invalid"). Runtime works correctly.
+
+inputs:
+  path:
+    description: Path to the versions YAML file relative to the repo root.
+    required: false
+    default: versions.yml
+
+runs:
+  using: composite
+  steps:
+    - name: Parse versions.yml and export to GITHUB_ENV
+      id: parse
+      shell: bash
+      run: |
+        set -euo pipefail
+        VFILE="${{ inputs.path }}"
+        if [[ ! -f "$VFILE" ]]; then
+          echo "::error file=$VFILE::versions.yml not found at $VFILE"
+          exit 1
+        fi
+
+        # Flat key:value parser. Handles scalar values, optional double quotes,
+        # comments after the value, and ignores comment-only lines and lists.
+        # Multi-line / nested YAML is rejected by design (see SCHEMA expectation).
+        TMP_ENV="$(mktemp)"
+        awk '
+          # Skip blank and comment-only lines
+          /^[[:space:]]*(#.*)?$/ { next }
+
+          # Match `key: value` at top level (no leading whitespace).
+          # Reject nested mappings (a key whose value continues on subsequent
+          # indented lines would be a structural change requiring schema review).
+          /^[A-Za-z_][A-Za-z0-9_]*[[:space:]]*:/ {
+            line = $0
+            # Strip trailing comments (anything after an unquoted #).
+            # Simple heuristic: split on first " #" or "#" not inside quotes.
+            n = index(line, ":")
+            key = substr(line, 1, n - 1)
+            val = substr(line, n + 1)
+            # Strip leading/trailing whitespace from val
+            sub(/^[[:space:]]+/, "", val)
+            sub(/[[:space:]]+$/, "", val)
+            # Strip trailing comment (only handles unquoted #)
+            if (match(val, /[[:space:]]+#/)) {
+              val = substr(val, 1, RSTART - 1)
+              sub(/[[:space:]]+$/, "", val)
+            }
+            # Strip surrounding double quotes
+            if (val ~ /^".*"$/) {
+              val = substr(val, 2, length(val) - 2)
+            }
+            # An empty value means this is a parent key (unsupported in flat schema).
+            if (val == "") {
+              next
+            }
+            # Strip leading/trailing whitespace from key
+            sub(/^[[:space:]]+/, "", key)
+            sub(/[[:space:]]+$/, "", key)
+            # Uppercase and replace non-alphanumeric chars with underscore
+            ukey = ""
+            for (i = 1; i <= length(key); i++) {
+              c = substr(key, i, 1)
+              if (c ~ /[A-Za-z0-9]/) {
+                ukey = ukey toupper(c)
+              } else {
+                ukey = ukey "_"
+              }
+            }
+            print ukey "_VERSION=" val
+          }
+        ' "$VFILE" > "$TMP_ENV"
+
+        if [[ ! -s "$TMP_ENV" ]]; then
+          echo "::error file=$VFILE::versions.yml parsed to zero key:value pairs"
+          exit 1
+        fi
+
+        cat "$TMP_ENV" >> "$GITHUB_ENV"
+
+        echo "Loaded versions from $VFILE:"
+        sed 's/^/  /' "$TMP_ENV"
+        rm -f "$TMP_ENV"

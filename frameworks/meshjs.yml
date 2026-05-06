@@ -1,0 +1,32 @@
+# Framework descriptor: Mesh.js (offchain TypeScript SDK on Deno)
+#
+# Schema reference: frameworks/SCHEMA.md
+# Versions: versions.yml (`meshjs:`, `deno:` fields)
+
+name: meshjs
+kind: offchain
+manifest_key: meshjs
+
+default_entry: "*.ts"
+
+setup:
+  - name: Setup Deno ${{ env.DENO_VERSION }}
+    uses: denoland/setup-deno@v2
+    with:
+      deno-version: ${{ env.DENO_VERSION }}
+
+run:
+  cwd_relative_to_example: "offchain/meshjs"
+  # $ENTRY is the file declared in the use-case manifest's
+  # offchain.meshjs.entry field, or the first match of default_entry.
+  command: "deno run --allow-all $ENTRY"
+
+# `exit-code`: examples signal pass/fail via process exit code only. The
+# runner synthesizes a result.json from the exit code. The alternative is
+# `result-json`, where the example writes its own result.json describing
+# observed-vs-expected; switch this when examples are migrated to that
+# pattern.
+result:
+  convention: exit-code
+
+needs_yaci: true

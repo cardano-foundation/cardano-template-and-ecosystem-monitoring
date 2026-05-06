@@ -74,6 +74,10 @@ public class AtomicTransaction {
                                 .feePayer(account.baseAddress())
                                 .completeAndWait();
                 System.out.println("Script Address Funded in Tx: " + scriptTopUp);
+                if (!scriptTopUp.isSuccessful()) {
+                        throw new AssertionError("Script top-up transaction failed: "
+                                        + scriptTopUp);
+                }
 
                 UtxoSupplier utxoSupplier = new DefaultUtxoSupplier(backendService.getUtxoService());
                 List<Utxo> utxos = utxoSupplier.getAll(scriptAddress.getAddress());
@@ -96,7 +100,15 @@ public class AtomicTransaction {
                                 .withSigner(SignerProviders.signerFrom(account))
                                 .feePayer(account.baseAddress())
                                 .completeAndWait();
-                System.out.println("Transaction with wrong password failed as expected: " + txWrongPassword.isSuccessful());
+                System.out.println("Transaction with wrong password isSuccessful: "
+                                + txWrongPassword.isSuccessful());
+                // The atomic-transaction contract MUST reject the wrong-password
+                // mint+spend pair. A successful tx here would mean the password
+                // gate is broken.
+                if (txWrongPassword.isSuccessful()) {
+                        throw new AssertionError(
+                                        "Wrong-password transaction unexpectedly succeeded — atomicity violated");
+                }
 
                 // // Now try to unlock the script UTXO and mint a demo token with the correct password
                 // Since both verifications will pass, the transaction will be successful
@@ -115,7 +127,13 @@ public class AtomicTransaction {
                                 .withSigner(SignerProviders.signerFrom(account))
                                 .feePayer(account.baseAddress())
                                 .completeAndWait();
-                System.out.println("Transaction with correct password success: " + txCorrectPassword.isSuccessful());
+                System.out.println("Transaction with correct password isSuccessful: "
+                                + txCorrectPassword.isSuccessful());
+                if (!txCorrectPassword.isSuccessful()) {
+                        throw new AssertionError(
+                                        "Correct-password transaction failed: " + txCorrectPassword);
+                }
+                System.out.println("AtomicTransaction CCL test passed");
         }
 
         private static PlutusScript getPlutusScript() {
