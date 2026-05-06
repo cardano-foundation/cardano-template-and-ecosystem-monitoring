@@ -1,0 +1,19 @@
+# Use-case manifest for storage
+#
+# Schema reference: frameworks/SCHEMA.md.
+#
+# Note: storage also ships an offchain/blaze/ implementation. The Blaze
+# framework has no descriptor in frameworks/ at this time, so it is not
+# declared here — discovery would error on a manifest entry without a
+# matching descriptor. Add a frameworks/blaze.yml descriptor (and an entry
+# under offchain: here) to wire Blaze into CI.
+
+use_case: storage
+description: >-
+  Anchor cryptographic commitments (SHA-256 hashes) of off-chain data
+  on-chain so that anyone can later verify data integrity and proof of
+  existence.
+
+onchain:
+  aiken:
+    path: onchain/aiken

@@ -1,9 +1,10 @@
 name: Cardano Ecosystem Tests
 
 # The matrix is generic over framework descriptors (frameworks/*.yml) and
-# use-case manifests (<use-case>/example.yml); legacy use cases without a
-# manifest fall through the dual-mode discovery in
-# scripts/local-test-discovery.sh.
+# use-case manifests (<use-case>/example.yml). Every use-case directory
+# under the repo root must ship an example.yml; scripts/local-test-discovery.sh
+# hard-errors on missing manifests, unknown manifest_keys, and section/kind
+# mismatches.
 #
 # Tool versions are pinned by versions.yml at the repo root and exported by
 # the .github/actions/load-versions/ composite action.
@@ -49,8 +50,8 @@ jobs:
       # automatically discovered as <framework>-examples step outputs.
       aiken-examples: ${{ steps.discovery.outputs.aiken-examples }}
       # Offchain matrix axis. The job per use case dynamically iterates the
-      # manifest's declared offchain frameworks (or heuristic fallback against
-      # registered frameworks) — no per-framework outputs needed at this layer.
+      # manifest's declared offchain frameworks — no per-framework outputs
+      # needed at this layer.
       use-cases-with-offchain: ${{ steps.discovery.outputs.use-cases-with-offchain }}
       registered-onchain: ${{ steps.discovery.outputs.registered-onchain }}
       registered-offchain: ${{ steps.discovery.outputs.registered-offchain }}

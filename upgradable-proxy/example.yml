@@ -1,0 +1,18 @@
+# Use-case manifest for upgradable-proxy
+#
+# Schema reference: frameworks/SCHEMA.md.
+
+use_case: upgradable-proxy
+description: >-
+  A two-contract upgradable-logic system: a proxy contract holds a datum
+  with a script hash and validates that spending transactions delegate to
+  that script, minting a token as proof of execution.
+
+onchain:
+  aiken:
+    path: onchain/aiken
+
+offchain:
+  lucid-evolution:
+    path: offchain/lucid-evolution
+    entry: helper.ts

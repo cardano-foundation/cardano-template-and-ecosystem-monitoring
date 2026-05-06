@@ -1,0 +1,18 @@
+# Use-case manifest for simple-wallet
+#
+# Schema reference: frameworks/SCHEMA.md.
+
+use_case: simple-wallet
+description: >-
+  The Simple Wallet use case from the Rosetta specification: a minimum-
+  viable wallet contract demonstrating basic UTxO management and transaction
+  signing.
+
+onchain:
+  aiken:
+    path: onchain/aiken
+
+offchain:
+  meshjs:
+    path: offchain/meshjs
+    entry: wallet-cli-test.ts

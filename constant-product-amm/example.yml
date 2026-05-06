@@ -1,0 +1,16 @@
+# Use-case manifest for constant-product-amm
+#
+# Schema reference: frameworks/SCHEMA.md.
+#
+# This use case is a placeholder — no onchain or offchain implementation is
+# shipped yet. The empty onchain: and offchain: sections are intentional, so
+# the matrix renders this use case as transparently not-yet-implemented
+# rather than hiding it.
+
+use_case: constant-product-amm
+description: >-
+  A constant-product automated market maker (Uniswap-style xy=k) for token
+  swaps. Implementation pending.
+
+onchain: {}
+offchain: {}

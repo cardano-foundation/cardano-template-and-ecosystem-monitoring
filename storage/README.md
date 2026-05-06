@@ -1,5 +1,10 @@
 # Storage: Verifiable Audit Snapshots
 
+<!-- CI_BADGE_BLOCK_BEGIN -->
+[![Ecosystem tests · storage](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml/badge.svg?branch=feat/ecosystem-monitoring-and-learning-enhancement)](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml)
+<!-- CI_BADGE_BLOCK_END -->
+
+
 A reference implementation of the **Storage** use case (#10) for the Cardano blockchain. This project demonstrates how to anchor cryptographic commitments (SHA-256 hashes) of off-chain data on-chain, enabling anyone to verify data integrity and proof of existence.
 
 ## Overview

@@ -1,25 +1,19 @@
 #!/usr/bin/env bash
 #
-# Cardano Ecosystem Test Discovery (registry-driven, dual-mode).
+# Cardano Ecosystem Test Discovery (registry-driven, manifest-only).
 #
 # Enumerates `frameworks/*.yml` to discover which onchain languages and
-# offchain SDKs are registered, then walks every use case and decides which
-# of those frameworks each use case ships:
+# offchain SDKs are registered, then walks every `<use-case>/example.yml`
+# manifest to decide which of those frameworks each use case ships.
 #
-#   * Manifest mode (preferred): use cases with `<use-case>/example.yml`
-#     declare frameworks explicitly via `manifest_key` keys under onchain:
-#     and offchain:.
-#   * Heuristic mode (fallback): use cases without a manifest are matched by
-#     directory presence — `<use-case>/<run.cwd_relative_to_example>` must
-#     exist for the framework to be considered present.
-#
-# This dual-mode is intentional and temporary. It lets the manifest format
-# settle on a small set of pilot use cases before forcing a full migration.
-# Once every use case has a manifest, the heuristic fallback can be deleted.
+# Every use case in the repository is required to ship an `example.yml`
+# manifest (including placeholder ones with empty `onchain: {}` /
+# `offchain: {}`). A use case directory without a manifest is treated as a
+# discovery error.
 #
 # Adding a new framework = one new descriptor under `frameworks/`. This
-# script reads it and any matching use case is automatically discovered.
-# No edits to this script are required.
+# script reads it and any matching manifest entry is automatically
+# discovered. No edits to this script are required.
 #
 # Outputs (to stdout, GitHub Actions $GITHUB_OUTPUT, and .local-test-results/):
 #   - <fw>-examples (one per registered framework, e.g. `aiken-examples`,
@@ -28,7 +22,7 @@
 #   - registered-onchain:        JSON array of registered onchain framework names
 #   - registered-offchain:       JSON array of registered offchain framework names
 #   - use-cases-with-offchain:   JSON array of use cases with ≥ 1 offchain framework
-#   - manifest-coverage:         JSON {total, with_manifest, with_heuristic}
+#   - manifest-coverage:         JSON {total, with_manifest}
 #
 # Schema reference (descriptors): frameworks/SCHEMA.md
 
@@ -54,7 +48,6 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 # Per-framework example lists are built dynamically. Each registered framework
 # gets a TMP_DIR/<fw>.txt file populated during the scan.
 WITH_MANIFEST=0
-WITH_HEURISTIC=0
 
 # Returns the value of a dotted-path field from a small flat-or-shallow YAML
 # file. See frameworks/SCHEMA.md for the YAML subset we support.
@@ -185,7 +178,7 @@ for fw in "${ONCHAIN_FRAMEWORKS[@]:-}" "${OFFCHAIN_FRAMEWORKS[@]:-}"; do
   KEY_TO_FRAMEWORK["${FRAMEWORK_MANIFEST_KEY[$fw]}"]="$fw"
 done
 
-# ---- Step 2: manifest-mode discovery --------------------------------------
+# ---- Step 2: manifest-only discovery --------------------------------------
 
 # Per-use-case offchain framework lists (descriptor names, manifest_keys
 # resolved). Written to ${TMP_DIR}/uc/<use_case>.offchain.txt and copied to
@@ -195,10 +188,19 @@ mkdir -p "$TMP_DIR/uc"
 
 echo
 echo -e "${YELLOW}Manifest-mode discovery${NC}"
+MISSING_MANIFESTS=()
+UNKNOWN_KEYS=()
+KIND_MISMATCHES=()
 for uc_dir in */; do
   uc="${uc_dir%/}"
+  # Skip non-use-case top-level directories
+  [[ -d "$uc/onchain" || -d "$uc/offchain" ]] || continue
+
   manifest="$uc/example.yml"
-  [[ -f "$manifest" ]] || continue
+  if [[ ! -f "$manifest" ]]; then
+    MISSING_MANIFESTS+=("$uc")
+    continue
+  fi
   WITH_MANIFEST=$((WITH_MANIFEST + 1))
 
   : > "$TMP_DIR/uc/${uc}.offchain.txt"
@@ -212,11 +214,15 @@ for uc_dir in */; do
       fi
       fw="${KEY_TO_FRAMEWORK[$key]:-}"
       if [[ -z "$fw" ]]; then
-        echo -e "    ${YELLOW}note${NC} ${section}.${key} — no descriptor at frameworks/${key}.yml or no descriptor with manifest_key=${key}"
+        # Hard error: a manifest key with no matching descriptor would
+        # silently drop a cell from the matrix. Better to fail discovery.
+        echo -e "    ${YELLOW}::error::${NC} ${uc}/${section}.${key} — no descriptor at frameworks/${key}.yml or no descriptor with manifest_key=${key}"
+        UNKNOWN_KEYS+=("${uc}/${section}.${key}")
         continue
       fi
       if [[ "${FRAMEWORK_KIND[$fw]}" != "$section" ]]; then
-        echo -e "    ${YELLOW}note${NC} ${section}.${key} — descriptor's kind (${FRAMEWORK_KIND[$fw]}) does not match section"
+        echo -e "    ${YELLOW}::error::${NC} ${uc}/${section}.${key} — descriptor's kind (${FRAMEWORK_KIND[$fw]}) does not match section"
+        KIND_MISMATCHES+=("${uc}/${section}.${key}")
         continue
       fi
       echo "    $section $fw"
@@ -228,38 +234,32 @@ for uc_dir in */; do
   done
 done
 
-# ---- Step 3: heuristic fallback ------------------------------------------
-#
-# For use cases without a manifest, presence of <use-case>/<run.cwd> is the
-# trigger. This is generic over any registered framework — adding a new
-# framework descriptor whose run.cwd points at e.g. "offchain/blaze" picks
-# up unmanifested examples automatically.
-
-echo
-echo -e "${YELLOW}Heuristic fallback (use cases without example.yml)${NC}"
-for uc_dir in */; do
-  uc="${uc_dir%/}"
-  [[ -d "$uc/onchain" || -d "$uc/offchain" ]] || continue
-  [[ -f "$uc/example.yml" ]] && continue
-
-  found_anything=false
-  : > "$TMP_DIR/uc/${uc}.offchain.txt"
-  for fw in "${ONCHAIN_FRAMEWORKS[@]:-}" "${OFFCHAIN_FRAMEWORKS[@]:-}"; do
-    [[ -z "$fw" ]] && continue
-    cwd="${FRAMEWORK_CWD[$fw]}"
-    if [[ -d "$uc/$cwd" ]]; then
-      echo "$uc" >> "$TMP_DIR/$fw.txt"
-      echo -e "  ${DIM}$uc${NC}  ${FRAMEWORK_KIND[$fw]}/$fw (heuristic, found $uc/$cwd)"
-      found_anything=true
-      if [[ "${FRAMEWORK_KIND[$fw]}" == "offchain" ]]; then
-        echo "$fw" >> "$TMP_DIR/uc/${uc}.offchain.txt"
-      fi
-    fi
+if [[ ${#MISSING_MANIFESTS[@]} -gt 0 ]]; then
+  echo
+  echo -e "${YELLOW}::error::missing example.yml manifests for use case(s):${NC}" >&2
+  for uc in "${MISSING_MANIFESTS[@]}"; do
+    echo -e "  ${YELLOW}- $uc${NC}" >&2
   done
-  $found_anything && WITH_HEURISTIC=$((WITH_HEURISTIC + 1)) || true
-done
+  echo -e "${YELLOW}Every use case directory under the repo root must ship an example.yml.${NC}" >&2
+  echo -e "${YELLOW}For not-yet-implemented placeholders, write \`onchain: {}\` / \`offchain: {}\` (see constant-product-amm/example.yml).${NC}" >&2
+  exit 1
+fi
+if [[ ${#UNKNOWN_KEYS[@]} -gt 0 || ${#KIND_MISMATCHES[@]} -gt 0 ]]; then
+  echo
+  echo -e "${YELLOW}::error::discovery rejected one or more manifest entries${NC}" >&2
+  for entry in "${UNKNOWN_KEYS[@]:-}"; do
+    [[ -z "$entry" ]] && continue
+    echo -e "  ${YELLOW}- ${entry} (no matching descriptor under frameworks/)${NC}" >&2
+  done
+  for entry in "${KIND_MISMATCHES[@]:-}"; do
+    [[ -z "$entry" ]] && continue
+    echo -e "  ${YELLOW}- ${entry} (descriptor's kind: does not match the manifest section)${NC}" >&2
+  done
+  echo -e "${YELLOW}Either fix the typo in the manifest, register the framework via scripts/scaffold-framework.sh, or correct the descriptor's kind: field. Silent skips would drop a cell from the matrix.${NC}" >&2
+  exit 1
+fi
 
-# Deduplicate (manifest mode + heuristic mode could double-count)
+# Deduplicate (defensive — manifest discovery should not produce duplicates)
 for fw in "${ONCHAIN_FRAMEWORKS[@]:-}" "${OFFCHAIN_FRAMEWORKS[@]:-}"; do
   [[ -z "$fw" ]] && continue
   sort -u -o "$TMP_DIR/$fw.txt" "$TMP_DIR/$fw.txt"
@@ -273,8 +273,7 @@ echo
 echo -e "${GREEN}========================================"
 echo "Discovery summary"
 echo "========================================${NC}"
-printf "  Manifest-mode use cases:    %d\n"  "$WITH_MANIFEST"
-printf "  Heuristic-mode use cases:   %d\n"  "$WITH_HEURISTIC"
+printf "  Manifested use cases:       %d\n"  "$WITH_MANIFEST"
 echo "  ----------------------------------------"
 TOTAL=0
 for fw in "${ONCHAIN_FRAMEWORKS[@]:-}" "${OFFCHAIN_FRAMEWORKS[@]:-}"; do
@@ -327,7 +326,7 @@ if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
       [[ -z "$fw" ]] && continue
       echo "${fw}-examples=${FW_JSON[$fw]}"
     done
-    echo "manifest-coverage={\"total\":$((WITH_MANIFEST + WITH_HEURISTIC)),\"with_manifest\":$WITH_MANIFEST,\"with_heuristic\":$WITH_HEURISTIC}"
+    echo "manifest-coverage={\"total\":$WITH_MANIFEST,\"with_manifest\":$WITH_MANIFEST}"
   } >> "$GITHUB_OUTPUT"
 fi
 
@@ -345,4 +344,4 @@ if compgen -G "$TMP_DIR/uc/*.offchain.txt" > /dev/null; then
   cp "$TMP_DIR"/uc/*.offchain.txt "$OUT_DIR/uc/" 2>/dev/null || true
 fi
 
-echo -e "${GREEN}✅ Discovery complete${NC}  (${WITH_HEURISTIC} use cases still using heuristic fallback — add example.yml manifests to migrate them)"
+echo -e "${GREEN}✅ Discovery complete${NC}"

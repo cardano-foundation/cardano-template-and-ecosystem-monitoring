@@ -1,5 +1,10 @@
 # Crowdfund
 
+<!-- CI_BADGE_BLOCK_BEGIN -->
+[![Ecosystem tests · crowdfund](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml/badge.svg?branch=feat/ecosystem-monitoring-and-learning-enhancement)](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml)
+<!-- CI_BADGE_BLOCK_END -->
+
+
 This Aiken smart contract implements a crowdfunding mechanism with three possible actions: DONATE, WITHDRAW, and RECLAIM. Donations are tracked in a datum mapping contributor keys to their contributions, and funds can only be withdrawn by the beneficiary if the funding goal is met after the deadline. If the goal is not met, contributors can reclaim their donations after the deadline, either fully (if claiming all funds) or partially (with checks to prevent donor data manipulation). The contract ensures safety through deadline validation, correct fund tracking, and signature verification.
 
 ## ⛓ On-chain

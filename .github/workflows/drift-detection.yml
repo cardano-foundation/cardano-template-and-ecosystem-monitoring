@@ -1,0 +1,201 @@
+name: Cardano Ecosystem Drift Detection
+
+# Nightly run that resolves every pinned tool to its latest available release,
+# overlays a fresh versions.yml in-job, and runs the foundation checks
+# (discovery + Aiken compile of every manifested use case) against those
+# floating versions. The aim is early warning: if Aiken, Yaci DevKit, Mesh.js,
+# Lucid Evolution, JBang, Deno or Node ship a release that breaks one of our
+# examples, this workflow goes red the night after the release lands —
+# *before* a contributor pushes a commit and gets surprised by a regression.
+#
+# Scope of P1W2 lite: resolve + overlay + discovery + Aiken compile across
+# every onchain example. A FULL drift matrix (compile + offchain test + Yaci)
+# requires refactoring ecosystem-test.yml as a reusable workflow that this one
+# can `workflow_call` with override inputs — that refactor is intentionally
+# deferred. The lightweight scope here already catches the most-common
+# breakage class (Aiken compiler regressions on existing contracts) and gives
+# us a daily heartbeat on tool resolution.
+#
+# Results here do NOT update the canonical matrix.json artifact (pinned-version
+# data); they go to a separate `drift-versions` artifact.
+
+on:
+  schedule:
+    # 02:00 UTC every day. Late enough that most upstream daily releases
+    # have landed; early enough that we see results in the morning EU/US.
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      override_versions:
+        description: >-
+          Comma-separated list of <key>=<version> pairs to override versions.yml.
+          Example: aiken=1.1.21,deno=2.7.14. Empty string means "use latest".
+        required: false
+        default: ''
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  resolve-and-discover:
+    name: Resolve latest tool versions and run discovery
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve "latest" for each pinned tool
+        env:
+          # Inputs are funneled through env: so untrusted text never lands
+          # directly in shell expansions or inline Python source.
+          OVERRIDES: ${{ inputs.override_versions }}
+        run: |
+          set -euo pipefail
+          # For each pinned tool we know how to query, fetch the latest stable
+          # release and produce a fresh versions.yml. Tools we do not know how
+          # to query keep their pinned value.
+          #
+          # Sources:
+          #   aiken           — github.com/aiken-lang/aiken (skip prereleases)
+          #   deno            — github.com/denoland/deno (skip pre/rc)
+          #   jbang           — github.com/jbangdev/jbang
+          #   yaci_devkit     — npm @bloxbean/yaci-devkit dist-tags.latest
+          #   meshjs          — npm @meshsdk/core dist-tags.latest
+          #   lucid_evolution — npm @evolution-sdk/lucid dist-tags.latest
+          #
+          # cardano_client_lib, node, jdk, protocol_version: keep pinned.
+
+          query_github_release() {
+            curl -fsSL "https://api.github.com/repos/$1/releases?per_page=20" \
+              | python3 -c "
+          import json, sys, re
+          for r in json.load(sys.stdin):
+              if r.get('prerelease'): continue
+              tag = r.get('tag_name', '')
+              if re.search(r'(rc|alpha|beta|preview)', tag, re.I): continue
+              print(tag.lstrip('v'))
+              break
+          "
+          }
+          query_npm_dist_latest() {
+            curl -fsSL "https://registry.npmjs.org/$1" \
+              | python3 -c "import json,sys; print(json.load(sys.stdin)['dist-tags'].get('latest',''))"
+          }
+
+          # Surface as env vars for the resolver step to consume.
+          {
+            echo "AIKEN_LATEST=$(query_github_release aiken-lang/aiken || echo)"
+            echo "DENO_LATEST=$(query_github_release denoland/deno || echo)"
+            echo "JBANG_LATEST=$(query_github_release jbangdev/jbang || echo)"
+            echo "YACI_LATEST=$(query_npm_dist_latest @bloxbean/yaci-devkit || echo)"
+            echo "MESHJS_LATEST=$(query_npm_dist_latest @meshsdk/core || echo)"
+            echo "LUCID_LATEST=$(query_npm_dist_latest @evolution-sdk/lucid || echo)"
+          } >> "$GITHUB_ENV"
+
+          echo "Resolved latest versions exported to GITHUB_ENV:"
+          tail -6 "$GITHUB_ENV"
+
+      - name: Render drift versions.yml
+        env:
+          AIKEN_LATEST:   ${{ env.AIKEN_LATEST }}
+          DENO_LATEST:    ${{ env.DENO_LATEST }}
+          JBANG_LATEST:   ${{ env.JBANG_LATEST }}
+          YACI_LATEST:    ${{ env.YACI_LATEST }}
+          MESHJS_LATEST:  ${{ env.MESHJS_LATEST }}
+          LUCID_LATEST:   ${{ env.LUCID_LATEST }}
+          OVERRIDES:      ${{ inputs.override_versions }}
+        run: |
+          set -euo pipefail
+          # Render a fresh versions.yml. Updates are read from env vars (no
+          # shell-into-Python interpolation); manual workflow_dispatch
+          # overrides are parsed in Python from the OVERRIDES env var too.
+          python3 - <<'PY' > drift-versions.yml
+          import os, re, sys
+
+          updates = {
+              "aiken":             os.environ.get("AIKEN_LATEST", "").strip(),
+              "deno":              os.environ.get("DENO_LATEST", "").strip(),
+              "jbang":             os.environ.get("JBANG_LATEST", "").strip(),
+              "yaci_devkit":       os.environ.get("YACI_LATEST", "").strip(),
+              "meshjs":            os.environ.get("MESHJS_LATEST", "").strip(),
+              "lucid_evolution":   os.environ.get("LUCID_LATEST", "").strip(),
+          }
+          for piece in os.environ.get("OVERRIDES", "").split(","):
+              piece = piece.strip()
+              if not piece or "=" not in piece:
+                  continue
+              k, v = piece.split("=", 1)
+              # Sanity: only allow simple version-shaped values to overwrite.
+              if not re.match(r'^[A-Za-z0-9._+\-]+$', v.strip()):
+                  sys.stderr.write(f"warning: skipping override {piece!r} (invalid value)\n")
+                  continue
+              updates[k.strip()] = v.strip()
+
+          with open("versions.yml") as fh:
+              for line in fh:
+                  m = re.match(r'^([a-z_][a-z0-9_]*)\s*:\s*"?([^"#]*)"?\s*(#.*)?$', line)
+                  if not m:
+                      sys.stdout.write(line)
+                      continue
+                  key = m.group(1)
+                  if key in updates and updates[key]:
+                      tail = m.group(3) or ""
+                      print(f'{key}: "{updates[key]}"  {tail}'.rstrip())
+                  else:
+                      sys.stdout.write(line)
+          PY
+
+          echo "--- drift versions.yml ---"
+          cat drift-versions.yml
+
+      - name: Overlay drift versions.yml and run discovery
+        run: |
+          set -euo pipefail
+          # Replace versions.yml with the resolved-latest one for THIS run
+          # only. The workflow does not commit anything; the pinned versions.yml
+          # on the branch is unchanged.
+          mv drift-versions.yml versions.yml
+          chmod +x scripts/local-test-discovery.sh
+          scripts/local-test-discovery.sh
+
+      - name: Load versions and install Aiken (drift)
+        uses: ./.github/actions/load-versions
+
+      - name: Install Aiken at drift version
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf https://install.aiken-lang.org | sh
+          source $HOME/.aiken/bin/env
+          aikup install "v${AIKEN_VERSION}"
+          aiken --version
+
+      - name: Compile every manifested onchain/aiken example with drift Aiken
+        run: |
+          set -uo pipefail
+          export PATH="$HOME/.aiken/bin:$PATH"
+          mkdir -p .ci-results
+          FAILURES=0
+          # `aiken-examples-list` is the .local-test-results file produced by
+          # discovery. Each line is a use case with onchain/aiken/.
+          while IFS= read -r uc; do
+            [[ -z "$uc" ]] && continue
+            echo "::group::aiken check + build for $uc (drift)"
+            if (cd "$uc/onchain/aiken" && aiken check && aiken build); then
+              echo "✅ $uc compiled with drift Aiken"
+            else
+              echo "::error::❌ $uc broke under drift Aiken (likely a compiler-version regression)"
+              FAILURES=$((FAILURES + 1))
+            fi
+            echo "::endgroup::"
+          done < .local-test-results/aiken-examples.txt
+          echo
+          echo "Drift compile summary: $FAILURES failure(s)"
+          if [[ "$FAILURES" -gt 0 ]]; then exit 1; fi
+
+      - name: Upload drift versions.yml as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: drift-versions
+          path: versions.yml
+          retention-days: 30

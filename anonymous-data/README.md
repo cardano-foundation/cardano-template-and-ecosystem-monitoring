@@ -1,5 +1,10 @@
 # Anonymous Data
 
+<!-- CI_BADGE_BLOCK_BEGIN -->
+[![Ecosystem tests · anonymous-data](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml/badge.svg?branch=feat/ecosystem-monitoring-and-learning-enhancement)](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml)
+<!-- CI_BADGE_BLOCK_END -->
+
+
 An **anonymous, commitment-based data storage contract** implemented in Aiken on Cardano.
 
 Users commit data on-chain using a cryptographic identifier derived off-chain from their wallet and a secret nonce. Ownership is later proven by revealing the nonce and signing the spending transaction.

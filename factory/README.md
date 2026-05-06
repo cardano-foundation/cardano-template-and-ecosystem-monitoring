@@ -1,5 +1,10 @@
 # Factory Pattern
 
+<!-- CI_BADGE_BLOCK_BEGIN -->
+[![Ecosystem tests · factory](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml/badge.svg?branch=feat/ecosystem-monitoring-and-learning-enhancement)](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml)
+<!-- CI_BADGE_BLOCK_END -->
+
+
 This repository implements a **Cardano-native Factory Pattern** for deterministically creating and managing multiple **Product contracts**, using **marker tokens**, **parameterised validators**, and **off-chain orchestration**.
 
 The design is fully aligned with Cardano’s **UTxO execution model** and adapts the classical Factory Pattern (like described in `rosetta-smart-contracts` spec) to a setting where:

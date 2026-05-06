@@ -1,0 +1,17 @@
+# Use-case manifest for lottery
+#
+# Schema reference: frameworks/SCHEMA.md.
+
+use_case: lottery
+description: >-
+  A two-player lottery use case based on the Rosetta smart-contract
+  specifications.
+
+onchain:
+  aiken:
+    path: onchain/aiken
+
+offchain:
+  meshjs:
+    path: offchain/meshjs
+    entry: lottery.ts

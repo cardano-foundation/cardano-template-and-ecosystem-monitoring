@@ -1,0 +1,26 @@
+# Use-case manifest for auction
+#
+# Schema reference: frameworks/SCHEMA.md.
+#
+# Note: auction also ships an onchain/scalus/ implementation. The Scalus
+# framework has no descriptor in frameworks/ at this time, so it is not
+# declared here — discovery would error on a manifest entry without a
+# matching descriptor. Add a frameworks/scalus.yml descriptor (and an entry
+# under onchain: here) to wire Scalus into CI.
+
+use_case: auction
+description: >-
+  A decentralized English auction: trustless bidding with transparent price
+  discovery for digital or physical assets.
+
+onchain:
+  aiken:
+    path: onchain/aiken
+
+offchain:
+  meshjs:
+    path: offchain/meshjs
+    entry: auction.ts
+  lucid-evolution:
+    path: offchain/lucid-evolution
+    entry: auction.ts

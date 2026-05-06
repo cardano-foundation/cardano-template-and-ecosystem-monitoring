@@ -1,0 +1,18 @@
+# Use-case manifest for anonymous-data
+#
+# Schema reference: frameworks/SCHEMA.md.
+
+use_case: anonymous-data
+description: >-
+  An anonymous, commitment-based data storage contract: anchor a cryptographic
+  commitment of off-chain data on-chain, with anonymous reveal under a
+  matching pre-image.
+
+onchain:
+  aiken:
+    path: onchain/aiken
+
+offchain:
+  meshjs:
+    path: offchain/meshjs
+    entry: anonymous-data.ts

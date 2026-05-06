@@ -1,0 +1,18 @@
+# Use-case manifest for crowdfund
+#
+# Schema reference: frameworks/SCHEMA.md.
+
+use_case: crowdfund
+description: >-
+  A crowdfunding contract with three actions (DONATE, WITHDRAW, RECLAIM):
+  beneficiary withdraws if the goal is met by deadline; donors reclaim
+  otherwise.
+
+onchain:
+  aiken:
+    path: onchain/aiken
+
+offchain:
+  ccl-java:
+    path: offchain/ccl-java
+    entry: Crowdfund.java

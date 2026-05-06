@@ -1,0 +1,21 @@
+# Use-case manifest for vault
+#
+# Schema reference: frameworks/SCHEMA.md.
+
+use_case: vault
+description: >-
+  A security vault with time-delayed withdrawals and a recovery mechanism,
+  designed to mitigate private-key theft by giving the legitimate owner a
+  delay window to cancel an unauthorized withdrawal.
+
+onchain:
+  aiken:
+    path: onchain/aiken
+
+offchain:
+  meshjs:
+    path: offchain/meshjs
+    entry: vault.ts
+  lucid-evolution:
+    path: offchain/lucid-evolution
+    entry: vault.ts

@@ -1,5 +1,10 @@
 # 🎰 Lottery – Reference Implementation
 
+<!-- CI_BADGE_BLOCK_BEGIN -->
+[![Ecosystem tests · lottery](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml/badge.svg?branch=feat/ecosystem-monitoring-and-learning-enhancement)](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml)
+<!-- CI_BADGE_BLOCK_END -->
+
+
 This repository demonstrates a two-player Lottery use case based on the Rosetta smart contract specifications.
 
 The use case implements a **fair, trust-minimized betting protocol** where two players stake an equal amount of ADA and the winner redeems the entire pot. Fairness is achieved without relying on external randomness or oracles, using a **commit–reveal–punish** protocol enforced entirely on-chain.

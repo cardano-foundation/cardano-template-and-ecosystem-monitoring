@@ -1,0 +1,18 @@
+# Use-case manifest for factory
+#
+# Schema reference: frameworks/SCHEMA.md.
+
+use_case: factory
+description: >-
+  A Cardano-native factory pattern: deterministically create and manage
+  multiple Product contracts via marker tokens, parameterised validators, and
+  off-chain orchestration.
+
+onchain:
+  aiken:
+    path: onchain/aiken
+
+offchain:
+  meshjs:
+    path: offchain/meshjs
+    entry: factory.ts

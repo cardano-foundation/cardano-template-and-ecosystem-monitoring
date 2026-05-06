@@ -2,10 +2,9 @@
 #
 # Schema reference: frameworks/SCHEMA.md.
 #
-# Note: this manifest fixes a discovery gap — vesting/offchain/meshjs/ has
-# no deno.json, so the legacy filename heuristic in
-# scripts/local-test-discovery.sh missed it. The manifest now declares it
-# explicitly and the rewritten discovery script picks it up.
+# Historical note: vesting/offchain/meshjs/ ships no deno.json, so before
+# manifests existed it was invisible to the file-pattern discovery. The
+# manifest now declares it explicitly.
 
 use_case: vesting
 description: >-

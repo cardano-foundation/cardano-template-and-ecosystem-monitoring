@@ -1,5 +1,10 @@
 # 🎲 Blockchain Betting Smart Contract
 
+<!-- CI_BADGE_BLOCK_BEGIN -->
+[![Ecosystem tests · bet](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml/badge.svg?branch=feat/ecosystem-monitoring-and-learning-enhancement)](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml)
+<!-- CI_BADGE_BLOCK_END -->
+
+
 A decentralized two-player betting system built on Cardano using Aiken, demonstrating the power of trustless wagering with oracle-based resolution.
 
 ## 🌟 What is a Blockchain Bet?

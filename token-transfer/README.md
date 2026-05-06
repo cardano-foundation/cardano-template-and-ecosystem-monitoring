@@ -1,5 +1,10 @@
 # Token Transfer
 
+<!-- CI_BADGE_BLOCK_BEGIN -->
+[![Ecosystem tests · token-transfer](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml/badge.svg?branch=feat/ecosystem-monitoring-and-learning-enhancement)](https://github.com/cardano-foundation/cardano-template-and-ecosystem-monitoring/actions/workflows/ecosystem-test.yml)
+<!-- CI_BADGE_BLOCK_END -->
+
+
 This smart contract locks a specific crypto asset, defined by its PolicyId and assetName, which can only be spent by a designated receiver. The receiver must sign the transaction to withdraw the asset, and the transaction cannot involve sending other unexpected assets to different addresses. To prevent funds from being permanently locked, the contract also allows anyone to spend UTXOs sent to its address that do not contain the specified asset.
 
 ## ⛓ On-chain
