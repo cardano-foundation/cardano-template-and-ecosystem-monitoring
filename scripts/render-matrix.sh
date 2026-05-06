@@ -43,9 +43,9 @@ for cell in cells:
     by_tier[cell.get("tier", "unknown")].append(cell)
 
 tier_order = [
-    ("primitive",          "Tier 1 — Protocol primitives"),
-    ("use-case-scenario",  "Tier 2 — Use-case conformance scenarios"),
-    ("use-case-example",   "Tier 3 — Use-case examples"),
+    ("primitive",          "Protocol primitives"),
+    ("use-case-scenario",  "Use-case conformance scenarios"),
+    ("use-case-example",   "Use cases"),
 ]
 
 ICON = {"pass": "✅", "fail": "❌", "skipped": "🟡"}
