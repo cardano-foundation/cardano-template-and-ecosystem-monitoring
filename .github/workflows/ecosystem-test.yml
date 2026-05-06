@@ -90,7 +90,6 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Load versions
-        id: versions
         uses: ./.github/actions/load-versions
 
       - name: Install Aiken (pinned)
@@ -106,7 +105,11 @@ jobs:
           path: |
             ~/.aiken
             ${{ matrix.example }}/onchain/aiken/build
-          key: aiken-${{ steps.versions.outputs.aiken }}-${{ matrix.example }}-${{ hashFiles(format('{0}/onchain/aiken/aiken.toml', matrix.example)) }}
+          # env.AIKEN_VERSION is set by the load-versions step. The yellow
+          # linter warning ("Context access might be invalid") is the
+          # documented trade-off of having a fully generic versions.yml — see
+          # .github/actions/load-versions/action.yml for the rationale.
+          key: aiken-${{ env.AIKEN_VERSION }}-${{ matrix.example }}-${{ hashFiles(format('{0}/onchain/aiken/aiken.toml', matrix.example)) }}
 
       - name: Run aiken check + build + verify plutus.json, emit result.json
         run: |
@@ -199,24 +202,29 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Load versions
-        id: versions
         uses: ./.github/actions/load-versions
 
+      # The `with:` references below pull from env vars set by load-versions.
+      # The GitHub Actions linter warns "Context access might be invalid"
+      # because it can't resolve env vars set via $GITHUB_ENV at parse time;
+      # runtime works correctly. See load-versions/action.yml for the
+      # rationale (we deliberately dropped the explicit step outputs to keep
+      # the registry truly descriptor-only).
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ steps.versions.outputs.node }}
+          node-version: ${{ env.NODE_VERSION }}
 
       - name: Setup Deno
         uses: denoland/setup-deno@v2
         with:
-          deno-version: ${{ steps.versions.outputs.deno }}
+          deno-version: ${{ env.DENO_VERSION }}
 
       - name: Setup JDK
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: ${{ steps.versions.outputs.jdk }}
+          java-version: ${{ env.JDK_VERSION }}
 
       - name: Install JBang (pinned)
         run: |

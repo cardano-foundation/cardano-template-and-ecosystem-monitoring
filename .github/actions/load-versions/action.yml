@@ -1,45 +1,26 @@
 name: Load versions
 description: >-
   Reads versions.yml at the repo root and exports each pinned version as a
-  GITHUB_ENV variable. Keys become uppercase + the suffix _VERSION (e.g. an
-  aiken: "1.1.17" entry becomes AIKEN_VERSION=1.1.17). Framework descriptors
-  and workflow steps reference these via the env context (env.AIKEN_VERSION,
-  env.DENO_VERSION, etc.). versions.yml is expected to be flat (top-level
-  scalar key:value pairs only).
+  GITHUB_ENV variable. Keys become uppercase plus the suffix _VERSION (an
+  entry of aiken set to 1.1.17 becomes the env var AIKEN_VERSION with value
+  1.1.17). Framework descriptors, workflow run blocks, and with blocks all
+  reference these via the env context. versions.yml is expected to be flat
+  (top-level scalar key:value pairs only).
+
+  No step outputs are surfaced. Earlier iterations declared explicit outputs
+  for libraries used in with blocks so the GitHub Actions language server
+  could resolve them at parse time, but that broke the "zero edits to add a
+  new library" promise — every new pinned tool that flowed into a with
+  block required a static outputs entry here. Now: only versions.yml needs
+  editing. The trade-off is that calling workflows that reference an env
+  var inside a with block see a yellow linter warning ("Context access
+  might be invalid"). Runtime works correctly.
 
 inputs:
   path:
     description: Path to the versions YAML file relative to the repo root.
     required: false
     default: versions.yml
-
-outputs:
-  # The era this run is tagged with — surfaced as a step output so workflow
-  # logic can branch on it.
-  protocol_version:
-    description: The Cardano protocol era this run targets (e.g. "conway").
-    value: ${{ steps.parse.outputs.protocol_version }}
-  # Common toolchain versions surfaced as explicit outputs so the GitHub
-  # Actions language server can resolve them when used in `with:` blocks
-  # (env vars set via GITHUB_ENV are not visible to the linter at parse time).
-  aiken:
-    description: Pinned Aiken version (versions.yml `aiken:`).
-    value: ${{ steps.parse.outputs.aiken }}
-  deno:
-    description: Pinned Deno version (versions.yml `deno:`).
-    value: ${{ steps.parse.outputs.deno }}
-  node:
-    description: Pinned Node.js version (versions.yml `node:`).
-    value: ${{ steps.parse.outputs.node }}
-  jdk:
-    description: Pinned JDK version (versions.yml `jdk:`).
-    value: ${{ steps.parse.outputs.jdk }}
-  jbang:
-    description: Pinned JBang version (versions.yml `jbang:`).
-    value: ${{ steps.parse.outputs.jbang }}
-  yaci_devkit:
-    description: Pinned Yaci DevKit version (versions.yml `yaci_devkit:`).
-    value: ${{ steps.parse.outputs.yaci_devkit }}
 
 runs:
   using: composite
@@ -112,29 +93,6 @@ runs:
         fi
 
         cat "$TMP_ENV" >> "$GITHUB_ENV"
-
-        # Also surface specific versions as step outputs so `with:` blocks
-        # in calling workflows can resolve them through the linter (env vars
-        # set via $GITHUB_ENV are not visible to the GitHub Actions language
-        # server at parse time, which produces "Context access might be invalid"
-        # warnings even though the runtime works fine).
-        emit_output() {
-          local env_key="$1"
-          local out_key="$2"
-          if grep -q "^${env_key}=" "$TMP_ENV"; then
-            local val
-            val=$(grep "^${env_key}=" "$TMP_ENV" | head -1 | cut -d= -f2-)
-            echo "${out_key}=${val}" >> "$GITHUB_OUTPUT"
-          fi
-        }
-
-        emit_output PROTOCOL_VERSION_VERSION protocol_version
-        emit_output AIKEN_VERSION             aiken
-        emit_output DENO_VERSION              deno
-        emit_output NODE_VERSION              node
-        emit_output JDK_VERSION               jdk
-        emit_output JBANG_VERSION             jbang
-        emit_output YACI_DEVKIT_VERSION       yaci_devkit
 
         echo "Loaded versions from $VFILE:"
         sed 's/^/  /' "$TMP_ENV"
