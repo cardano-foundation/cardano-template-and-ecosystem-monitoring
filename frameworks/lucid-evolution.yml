@@ -1,7 +1,6 @@
 # Framework descriptor: Lucid Evolution (offchain TypeScript SDK on Deno)
 #
 # Schema reference: frameworks/SCHEMA.md
-# How-to (manual): docs/how-to/add-framework.md (lands in P1W2)
 # Versions: versions.yml (`lucid_evolution:`, `deno:` fields)
 
 name: lucid-evolution

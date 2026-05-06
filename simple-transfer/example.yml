@@ -1,6 +1,6 @@
 # Use-case manifest for simple-transfer
 #
-# Schema reference: docs/reference/example-manifest.md (lands in P1W2).
+# Schema reference: frameworks/SCHEMA.md.
 #
 # Note: simple-transfer/offchain/gradle/ exists as another implementation
 # attempt but has no registered framework descriptor (no frameworks/gradle.yml).

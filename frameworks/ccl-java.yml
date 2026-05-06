@@ -1,7 +1,6 @@
 # Framework descriptor: cardano-client-lib via JBang (offchain Java SDK)
 #
 # Schema reference: frameworks/SCHEMA.md
-# How-to (manual): docs/how-to/add-framework.md (lands in P1W2)
 # Versions: versions.yml (`cardano_client_lib:`, `jbang:`, `jdk:` fields)
 
 name: ccl-java
@@ -26,8 +25,8 @@ setup:
 run:
   cwd_relative_to_example: "offchain/ccl-java"
   # JBang resolves //DEPS lines from the .java source itself. The
-  # cardano-client-lib version pinned in versions.yml is enforced in P1W2 by
-  # a CI sanity check that scans //DEPS lines and compares to versions.yml.
+  # cardano-client-lib version in versions.yml is the canonical value;
+  # individual .java files declare their own //DEPS pin which should match.
   command: "jbang $ENTRY"
 
 result:

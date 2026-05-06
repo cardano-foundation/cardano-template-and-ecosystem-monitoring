@@ -1,28 +1,34 @@
 name: Cardano Ecosystem Tests
 
-# Rewritten in P1W1 (see plan & frameworks/SCHEMA.md). The matrix is generic
-# over framework descriptors (frameworks/*.yml) and use-case manifests
-# (<use-case>/example.yml); legacy use cases without a manifest fall through
-# the dual-mode discovery in scripts/local-test-discovery.sh.
+# The matrix is generic over framework descriptors (frameworks/*.yml) and
+# use-case manifests (<use-case>/example.yml); legacy use cases without a
+# manifest fall through the dual-mode discovery in
+# scripts/local-test-discovery.sh.
 #
 # Tool versions are pinned by versions.yml at the repo root and exported by
 # the .github/actions/load-versions/ composite action.
 #
-# Yaci DevKit runs once per offchain test job (matrix={use_case}) rather than
-# three times (once per offchain framework). See .codex-reviews/p1w1-yaci-poc.md
-# for the rationale.
+# Yaci DevKit runs once per offchain test job (matrix={use_case}) rather
+# than once per offchain framework. The bloxbean/yaci-devkit Docker image is
+# unmaintained, so we install via npm and share one instance per use case
+# instead of running it as a service container.
 #
-# Untrusted-input note: matrix.example flows from discovery output (filesystem
-# directory names of checked-in use cases). Even so, every shell `run:` block
-# pipes matrix.example through env: rather than direct ${{ … }} interpolation
-# to satisfy GitHub Actions injection-hardening practice.
+# Untrusted-input note: matrix.example flows from discovery output
+# (filesystem directory names of checked-in use cases). Even so, every shell
+# `run:` block pipes matrix.example through env: rather than direct
+# ${{ … }} interpolation to satisfy GitHub Actions injection-hardening
+# practice.
 
 on:
   push:
     branches:
       - main
-      # TEMPORARY: roadmap branch — remove when feat/ecosystem-monitoring-and-learning-enhancement merges to main.
+      # TEMPORARY: long-running feature branch — remove when
+      # feat/ecosystem-monitoring-and-learning-enhancement merges to main.
       - feat/ecosystem-monitoring-and-learning-enhancement
+  # Every PR runs the full build matrix regardless of target branch.
+  # The only thing PRs do not run is the canonical matrix.json artifact
+  # upload that future dashboard-publishing consumes — see the report job.
   pull_request:
   workflow_dispatch:
 
@@ -60,13 +66,12 @@ jobs:
   # ---------------------------------------------------------------------------
   # Compile onchain (Aiken). One matrix child per use case with onchain/aiken/.
   #
-  # P1W1 limitation: only Aiken is supported in CI. The framework registry
-  # genuinely makes "matrix membership" generic (discovery emits any
-  # <framework>-examples for kind: onchain), but adding a new onchain language
-  # as a CI matrix child still requires a sibling job in this workflow that
-  # knows how to install the language and consume its output artifact (e.g.
-  # plutus.json for Aiken). The descriptor → CI generalization for onchain is
-  # P1W2 work. See frameworks/SCHEMA.md "Onchain CI generalization".
+  # Limitation: only Aiken is supported in CI today. The framework registry
+  # makes "matrix membership" generic (discovery emits any <framework>-examples
+  # for kind: onchain), but adding a new onchain language as a CI matrix child
+  # still requires a sibling job in this workflow that knows how to install
+  # the language and consume its output artifact (e.g. plutus.json for Aiken).
+  # See frameworks/SCHEMA.md "Limitations".
   #
   # The `if:` gate makes the limitation honest: this job only runs when aiken
   # is registered. If a non-aiken onchain framework is ever the only one
@@ -301,10 +306,8 @@ jobs:
         #
         # Discovery does the manifest_key → descriptor-name resolution AND the
         # heuristic cwd lookup, so this workflow step has no descriptor parsing
-        # of its own — eliminating the cross-cutting inconsistency Codex
-        # flagged in iteration 3 (workflow assumed manifest_key == descriptor
-        # filename and offchain dir == "offchain/<fw>"; both assumptions are
-        # gone).
+        # of its own — the workflow never assumes manifest_key == descriptor
+        # filename or offchain dir == "offchain/<fw>".
         #
         # Adding a new offchain SDK is one PR adding one descriptor + (per use
         # case) one manifest entry. No edits to this workflow required.
@@ -403,6 +406,12 @@ jobs:
           cat matrix-report.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload matrix.json + report
+        # This is the artifact the future dashboard-publish workflow will
+        # consume to update the public dashboard. PRs intentionally do NOT
+        # produce this artifact — we don't want PR-state data to drive the
+        # public dashboard. PR feedback is delivered via the step summary
+        # and the "Comment on PR" step below, both of which run regardless.
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: ecosystem-matrix

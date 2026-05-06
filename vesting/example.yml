@@ -1,9 +1,9 @@
 # Use-case manifest for vesting
 #
-# Schema reference: docs/reference/example-manifest.md (lands in P1W2).
+# Schema reference: frameworks/SCHEMA.md.
 #
-# Note: this manifest fixes a discovery gap noted in the plan's Context —
-# vesting/offchain/meshjs/ has no deno.json, so the legacy heuristic in
+# Note: this manifest fixes a discovery gap — vesting/offchain/meshjs/ has
+# no deno.json, so the legacy filename heuristic in
 # scripts/local-test-discovery.sh missed it. The manifest now declares it
 # explicitly and the rewritten discovery script picks it up.
 

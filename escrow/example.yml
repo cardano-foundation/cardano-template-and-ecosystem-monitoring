@@ -1,9 +1,11 @@
 # Use-case manifest for escrow
 #
-# Schema reference: docs/reference/example-manifest.md (lands in P1W2).
-# Discovery: scripts/local-test-discovery.sh reads this file (and falls back
-# to legacy filename heuristics for use cases without a manifest, until P1W2
-# completes the migration).
+# Schema reference: frameworks/SCHEMA.md (the manifest schema is documented
+# alongside the framework descriptor schema there).
+#
+# Discovery: scripts/local-test-discovery.sh reads this file and falls back
+# to legacy filename heuristics for use cases without a manifest until every
+# use case is migrated.
 #
 # Keys under onchain: and offchain: are framework `manifest_key` values from
 # the registry under frameworks/<name>.yml. A key referenced here without a

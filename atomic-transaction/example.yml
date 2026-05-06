@@ -1,6 +1,6 @@
 # Use-case manifest for atomic-transaction
 #
-# Schema reference: docs/reference/example-manifest.md (lands in P1W2).
+# Schema reference: frameworks/SCHEMA.md.
 
 use_case: atomic-transaction
 description: >-

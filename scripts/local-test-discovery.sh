@@ -13,9 +13,9 @@
 #     directory presence — `<use-case>/<run.cwd_relative_to_example>` must
 #     exist for the framework to be considered present.
 #
-# This dual-mode is intentional and temporary — it lets P1W1 ship without
-# forcing a 21-file manifest migration before the format is reviewed.
-# P1W2 completes the migration and removes the heuristic fallback.
+# This dual-mode is intentional and temporary. It lets the manifest format
+# settle on a small set of pilot use cases before forcing a full migration.
+# Once every use case has a manifest, the heuristic fallback can be deleted.
 #
 # Adding a new framework = one new descriptor under `frameworks/`. This
 # script reads it and any matching use case is automatically discovered.
@@ -30,7 +30,6 @@
 #   - use-cases-with-offchain:   JSON array of use cases with ≥ 1 offchain framework
 #   - manifest-coverage:         JSON {total, with_manifest, with_heuristic}
 #
-# Schema reference (manifest):    docs/reference/example-manifest.md (lands in P1W2)
 # Schema reference (descriptors): frameworks/SCHEMA.md
 
 set -euo pipefail
@@ -346,4 +345,4 @@ if compgen -G "$TMP_DIR/uc/*.offchain.txt" > /dev/null; then
   cp "$TMP_DIR"/uc/*.offchain.txt "$OUT_DIR/uc/" 2>/dev/null || true
 fi
 
-echo -e "${GREEN}✅ Discovery complete${NC}  (${WITH_HEURISTIC} use cases still using heuristic fallback — migrate them in P1W2)"
+echo -e "${GREEN}✅ Discovery complete${NC}  (${WITH_HEURISTIC} use cases still using heuristic fallback — add example.yml manifests to migrate them)"
