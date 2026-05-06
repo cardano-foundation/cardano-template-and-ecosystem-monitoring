@@ -55,6 +55,12 @@ For a given use case, read in this order:
 
 To run any use case end-to-end against a local Cardano-compatible test environment ([Yaci DevKit](https://github.com/bloxbean/yaci-devkit)), follow [`how-to/run-locally.md`](how-to/run-locally.md). For most examples this is `cd <use-case>/offchain/<sdk> && deno run --allow-all <entry>.ts` (or the equivalent jbang command for ccl-java).
 
+## Going deeper: protocol primitives
+
+Once you've worked through a few use cases, you'll start to notice that the *same low-level encoding rules* show up in every contract: datum CBOR encoding, address bech32 strings, plutus-data canonical map ordering. The [`conformance/`](../conformance/) directory has a focused tutorial per primitive — what it does, why it matters, how the spec defines it, and a worked reference implementation across multiple SDKs. Read those when you want to understand *why* a contract failure looks the way it does at the byte level.
+
+Start with [`conformance/primitives/encoding/datum-cbor-roundtrip/`](../conformance/primitives/encoding/datum-cbor-roundtrip/) — it's the most fundamental encoding rule, and reading the scenarios alongside the per-SDK reference impls is the fastest way to internalise how Cardano serialises datums.
+
 ## What you won't find here
 
 - **A Plutus / Aiken / Mesh / Lucid tutorial.** This repo expects you to know the basics of one of those tools — or to learn the basics elsewhere first ([Aiken book](https://aiken-lang.org/), [Mesh.js docs](https://meshjs.dev/), [Lucid Evolution docs](https://docs.evolution-sdk.com/), [cardano-client-lib docs](https://github.com/bloxbean/cardano-client-lib/wiki)) and use this repo to see the patterns applied.

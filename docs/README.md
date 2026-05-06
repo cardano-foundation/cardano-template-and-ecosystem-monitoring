@@ -8,6 +8,8 @@ Read [`learn.md`](learn.md). It is a curated tour of the 21 use cases in a recom
 
 Once you have picked a use case, its top-level `README.md` (e.g. [`escrow/README.md`](../escrow/README.md)) walks you through that contract specifically. **README quality varies today**: some use cases have full tutorial content (with onchain walkthrough, offchain example, "try it yourself" commands); others currently just describe the contract pattern at a high level. The 5 use cases on `learn.md`'s recommended starting path (simple-transfer → vesting → htlc → escrow → atomic-transaction) are the ones first targeted for tutorial-grade rewrites. Improvements to the rest are tracked as ongoing work.
 
+For deeper dives into single Cardano protocol features (datum CBOR encoding, address bech32, plutus-data canonical ordering), see [`../conformance/`](../conformance/). Each primitive there is both a teaching unit (with worked examples and citations to the spec) and a runnable conformance test that surfaces SDK regressions.
+
 ## I'm here to track ecosystem health
 
 The repo's CI matrix runs every (use case × onchain language × offchain SDK) combination on every push and PR. The full matrix is rendered in the GitHub Actions step summary of every workflow run.
