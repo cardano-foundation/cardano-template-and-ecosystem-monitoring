@@ -247,14 +247,28 @@ jobs:
           exit 1
 
       - name: Download plutus.json artifact
-        # Only attempt the download when compile-aiken actually produced the
-        # artifact for this matrix child. If aiken is not registered (the
-        # onchain CI pilot limitation), compile-aiken is skipped and there is
-        # no artifact to download. Examples that depend on plutus.json will
-        # then fail at run time with a clear error in their own log; those
-        # failures correctly surface in matrix.json instead of being masked
-        # by an artifact-system error here.
-        if: needs.compile-aiken.result == 'success'
+        # Two failure modes the gate handles:
+        #
+        #   (a) `compile-aiken` was skipped entirely (e.g., aiken not
+        #       registered, the onchain CI pilot limitation): result == 'skipped',
+        #       no artifacts produced, so we skip the download. Offchain
+        #       examples that depend on plutus.json fail at run time with a
+        #       clear error in their own log, surfaced via matrix.json.
+        #
+        #   (b) `compile-aiken` ran but a *different* matrix child failed for
+        #       some other use case: GitHub aggregates matrix job results, so
+        #       `needs.compile-aiken.result` becomes 'failure' even though
+        #       this use case's artifact may exist. We still attempt the
+        #       download. `continue-on-error: true` keeps a missing-artifact
+        #       error from breaking the offchain job; downstream cell scripts
+        #       fail per-cell when plutus.json isn't there, which is the
+        #       correct outcome (the use case's aiken compile is upstream-bad).
+        #
+        # The previous `result == 'success'` gate caused a localized aiken
+        # failure to blackout artifact downloads for every other use case —
+        # fixed in iteration 5.
+        if: needs.compile-aiken.result != 'skipped'
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           name: plutus-${{ matrix.example }}
