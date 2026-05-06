@@ -19,9 +19,12 @@ protocol_version: conway
 
 # -- Onchain languages -------------------------------------------------------
 
-# Aiken compiler. Each <use-case>/onchain/aiken/aiken.toml's `compiler =`
-# field should match this value.
-aiken: "1.1.17"
+# Aiken compiler (latest stable). aiken.toml's `compiler =` field is treated
+# as a minimum by aiken itself; older toml claims (e.g. v1.1.2) compile fine
+# under a newer installed aiken. The value here is the version the CI
+# workflow installs via aikup. Note: aikup expects the version with a `v`
+# prefix (e.g. `v1.1.21`); the workflow prepends it.
+aiken: "1.1.21"
 
 # -- Offchain SDKs -----------------------------------------------------------
 
