@@ -82,15 +82,41 @@ for scenario in "${SCENARIOS[@]}"; do
     tmp=$(mktemp -d)
     echo
     echo "::group::${scenario_id} / ${adapter}"
+    cell_start=$(date +%s%N)
     if (cd "$tmp" && "${REPO_ROOT}/conformance/adapters/${adapter}/run-primitive.sh" "${REPO_ROOT}/${scenario}") > "${REPO_ROOT}/${log_file}" 2>&1; then
+      cell_status=pass
       echo "  ✅ ${scenario_id} / ${adapter}"
     else
+      cell_status=fail
       echo "  ❌ ${scenario_id} / ${adapter}"
       FAILURES=$((FAILURES + 1))
     fi
+    cell_dur_ms=$(( ( $(date +%s%N) - cell_start ) / 1000000 ))
 
     if [[ -f "$tmp/result.json" ]]; then
+      # Adapter wrote its own result.json — trust it.
       mv "$tmp/result.json" "${REPO_ROOT}/${result_file}"
+    else
+      # No authored result.json. Synthesize one so the aggregator has a cell
+      # to render. This catches the failure mode where Deno/JBang/import
+      # setup fails before adapter code runs — without this synthesis the
+      # cell would silently disappear from the matrix.
+      primitive_id=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('primitive','unknown'))" "${REPO_ROOT}/${scenario}")
+      era=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('era','unknown'))" "${REPO_ROOT}/${scenario}")
+      python3 - <<PY > "${REPO_ROOT}/${result_file}"
+import json
+out = {
+    "tier": "primitive",
+    "id": "${scenario_id}",
+    "primitive": "${primitive_id}",
+    "framework": "${adapter}",
+    "era": "${era}",
+    "status": "${cell_status}",
+    "duration_ms": ${cell_dur_ms},
+    "error_summary": "adapter exited without writing result.json; see ${log_file#${REPO_ROOT}/}",
+}
+print(json.dumps(out, indent=2))
+PY
     fi
     rm -rf "$tmp"
     echo "::endgroup::"

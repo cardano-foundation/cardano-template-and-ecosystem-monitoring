@@ -56,7 +56,7 @@ Each adapter writes a `result.json` to its working directory (the runner-contrac
 
 ## Adding a new primitive
 
-See [`../docs/how-to/add-conformance-scenario.md`](../docs/how-to/add-conformance-scenario.md) (lands in P3 alongside use-case scenarios) for the full flow. Briefly:
+See [`../docs/how-to/add-conformance-scenario.md`](../docs/how-to/add-conformance-scenario.md) for the full flow (Tier 1 primitive scenarios are documented end-to-end; Tier 2 use-case scenarios are stubbed pending P3). Briefly:
 
 1. Pick a category under `primitives/` (or add a new one — `encoding/`, `tx-building/`, `plutus-eval/` exist; `governance/` is reserved).
 2. Create the directory with a teaching-grade `README.md`.
