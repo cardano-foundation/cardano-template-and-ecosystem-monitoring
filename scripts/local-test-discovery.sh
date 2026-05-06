@@ -188,6 +188,12 @@ done
 
 # ---- Step 2: manifest-mode discovery --------------------------------------
 
+# Per-use-case offchain framework lists (descriptor names, manifest_keys
+# resolved). Written to ${TMP_DIR}/uc/<use_case>.offchain.txt and copied to
+# .local-test-results/. The workflow reads these directly so it never has to
+# re-implement manifest_key → descriptor-name resolution.
+mkdir -p "$TMP_DIR/uc"
+
 echo
 echo -e "${YELLOW}Manifest-mode discovery${NC}"
 for uc_dir in */; do
@@ -196,6 +202,7 @@ for uc_dir in */; do
   [[ -f "$manifest" ]] || continue
   WITH_MANIFEST=$((WITH_MANIFEST + 1))
 
+  : > "$TMP_DIR/uc/${uc}.offchain.txt"
   printed_uc_label=false
   for section in onchain offchain; do
     while IFS= read -r key; do
@@ -206,15 +213,18 @@ for uc_dir in */; do
       fi
       fw="${KEY_TO_FRAMEWORK[$key]:-}"
       if [[ -z "$fw" ]]; then
-        echo -e "    ${YELLOW}note${NC} ${section}.${key} — no descriptor at frameworks/${key}.yml"
+        echo -e "    ${YELLOW}note${NC} ${section}.${key} — no descriptor at frameworks/${key}.yml or no descriptor with manifest_key=${key}"
         continue
       fi
       if [[ "${FRAMEWORK_KIND[$fw]}" != "$section" ]]; then
-        echo -e "    ${YELLOW}note${NC} ${section}.${key} — descriptor's kind (${FRAMEWORK_KIND[$fw]}) does not match"
+        echo -e "    ${YELLOW}note${NC} ${section}.${key} — descriptor's kind (${FRAMEWORK_KIND[$fw]}) does not match section"
         continue
       fi
       echo "    $section $fw"
       echo "$uc" >> "$TMP_DIR/$fw.txt"
+      if [[ "$section" == "offchain" ]]; then
+        echo "$fw" >> "$TMP_DIR/uc/${uc}.offchain.txt"
+      fi
     done < <(manifest_keys_under "$manifest" "$section" 2>/dev/null)
   done
 done
@@ -234,6 +244,7 @@ for uc_dir in */; do
   [[ -f "$uc/example.yml" ]] && continue
 
   found_anything=false
+  : > "$TMP_DIR/uc/${uc}.offchain.txt"
   for fw in "${ONCHAIN_FRAMEWORKS[@]:-}" "${OFFCHAIN_FRAMEWORKS[@]:-}"; do
     [[ -z "$fw" ]] && continue
     cwd="${FRAMEWORK_CWD[$fw]}"
@@ -241,6 +252,9 @@ for uc_dir in */; do
       echo "$uc" >> "$TMP_DIR/$fw.txt"
       echo -e "  ${DIM}$uc${NC}  ${FRAMEWORK_KIND[$fw]}/$fw (heuristic, found $uc/$cwd)"
       found_anything=true
+      if [[ "${FRAMEWORK_KIND[$fw]}" == "offchain" ]]; then
+        echo "$fw" >> "$TMP_DIR/uc/${uc}.offchain.txt"
+      fi
     fi
   done
   $found_anything && WITH_HEURISTIC=$((WITH_HEURISTIC + 1)) || true
@@ -324,5 +338,12 @@ for fw in "${ONCHAIN_FRAMEWORKS[@]:-}" "${OFFCHAIN_FRAMEWORKS[@]:-}"; do
   cp "$TMP_DIR/$fw.txt" "$OUT_DIR/${fw}-examples.txt"
 done
 cp "$USE_CASES_WITH_OFFCHAIN_FILE" "$OUT_DIR/use-cases-with-offchain.txt"
+
+# Per-use-case offchain framework lists (descriptor names, manifest_keys
+# already resolved). Workflow reads these to decide which cells to run.
+mkdir -p "$OUT_DIR/uc"
+if compgen -G "$TMP_DIR/uc/*.offchain.txt" > /dev/null; then
+  cp "$TMP_DIR"/uc/*.offchain.txt "$OUT_DIR/uc/" 2>/dev/null || true
+fi
 
 echo -e "${GREEN}✅ Discovery complete${NC}  (${WITH_HEURISTIC} use cases still using heuristic fallback — migrate them in P1W2)"

@@ -59,11 +59,25 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Compile onchain (Aiken). One matrix child per use case with onchain/aiken/.
+  #
+  # P1W1 limitation: only Aiken is supported in CI. The framework registry
+  # genuinely makes "matrix membership" generic (discovery emits any
+  # <framework>-examples for kind: onchain), but adding a new onchain language
+  # as a CI matrix child still requires a sibling job in this workflow that
+  # knows how to install the language and consume its output artifact (e.g.
+  # plutus.json for Aiken). The descriptor → CI generalization for onchain is
+  # P1W2 work. See frameworks/SCHEMA.md "Onchain CI generalization".
+  #
+  # The `if:` gate makes the limitation honest: this job only runs when aiken
+  # is registered. If a non-aiken onchain framework is ever the only one
+  # registered, this job is skipped and the limitation is visible in CI logs.
   # ---------------------------------------------------------------------------
   compile-aiken:
     name: Compile Aiken — ${{ matrix.example }}
     needs: discover
-    if: needs.discover.outputs.aiken-examples != '[]'
+    if: |
+      needs.discover.outputs.aiken-examples != '[]' &&
+      contains(fromJson(needs.discover.outputs.registered-onchain), 'aiken')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
@@ -231,85 +245,63 @@ jobs:
           name: plutus-${{ matrix.example }}
           path: ${{ matrix.example }}/onchain/aiken/
 
+      - name: Re-run discovery (produces per-use-case offchain lists)
+        # Discovery is idempotent and cheap. We re-run it here to generate the
+        # .local-test-results/uc/<use_case>.offchain.txt files this job
+        # consumes. Alternative would be uploading discovery artifacts from the
+        # discover job and downloading here; re-running is simpler given the
+        # workload (~21 use cases, ~4 frameworks each, sub-second).
+        run: |
+          chmod +x scripts/local-test-discovery.sh
+          scripts/local-test-discovery.sh > /dev/null
+
       - name: Run all declared offchain cells (descriptor-driven)
-        # ONE step iterates the manifest's declared offchain frameworks and
-        # invokes scripts/ci/run-cell.sh for each. The script reads
+        # ONE step iterates the offchain frameworks declared by this use case
+        # (as discovered by scripts/local-test-discovery.sh) and invokes
+        # scripts/ci/run-cell.sh for each. The script reads
         # frameworks/<name>.yml for the run command and result convention,
-        # and <use-case>/example.yml for the explicit entry. Adding a new
-        # offchain SDK is one PR adding one descriptor + one manifest entry —
-        # no edits to this workflow required.
+        # and <use-case>/example.yml for the explicit entry.
+        #
+        # Discovery does the manifest_key → descriptor-name resolution AND the
+        # heuristic cwd lookup, so this workflow step has no descriptor parsing
+        # of its own — eliminating the cross-cutting inconsistency Codex
+        # flagged in iteration 3 (workflow assumed manifest_key == descriptor
+        # filename and offchain dir == "offchain/<fw>"; both assumptions are
+        # gone).
+        #
+        # Adding a new offchain SDK is one PR adding one descriptor + (per use
+        # case) one manifest entry. No edits to this workflow required.
         if: ${{ always() }}
         run: |
           set -uo pipefail
           chmod +x scripts/ci/run-cell.sh
 
-          MANIFEST="${USE_CASE}/example.yml"
-          declare -a FRAMEWORKS=()
-
-          if [[ -f "$MANIFEST" ]]; then
-            # Manifest mode: iterate framework keys under `offchain:`.
-            mapfile -t FRAMEWORKS < <(python3 - "$MANIFEST" <<'PY'
-          import re, sys
-          with open(sys.argv[1]) as fh:
-              lines = fh.readlines()
-          in_off, off_indent = False, -1
-          for raw in lines:
-              line = raw.rstrip("\n")
-              stripped = line.lstrip()
-              if not stripped or stripped.startswith("#"):
-                  continue
-              indent = len(line) - len(stripped)
-              m = re.match(r'([A-Za-z_][A-Za-z0-9_-]*)\s*:\s*(.*)$', stripped)
-              if not m:
-                  continue
-              key, val = m.group(1), m.group(2).strip()
-              if not in_off:
-                  if indent == 0 and key == "offchain" and not val:
-                      in_off, off_indent = True, indent
-                  continue
-              if indent <= off_indent:
-                  break
-              if (indent == off_indent + 2 or indent == off_indent + 4) and not val:
-                  print(key)
-          PY
-            )
-          else
-            # Heuristic mode: any offchain/<name>/ directory whose <name> matches
-            # an existing framework descriptor.
-            for fw_file in frameworks/*.yml; do
-              fw=$(basename "$fw_file" .yml)
-              # Only offchain frameworks
-              kind=$(awk -F': ' '/^kind[[:space:]]*:/ {gsub(/[[:space:]]|"/, "", $2); print $2; exit}' "$fw_file")
-              if [[ "$kind" != "offchain" ]]; then continue; fi
-              if [[ -d "${USE_CASE}/offchain/$fw" ]]; then
-                FRAMEWORKS+=("$fw")
-              fi
-            done
+          OFFCHAIN_LIST=".local-test-results/uc/${USE_CASE}.offchain.txt"
+          if [[ ! -f "$OFFCHAIN_LIST" ]]; then
+            echo "::warning::no offchain framework list found at ${OFFCHAIN_LIST} — discovery may not have run"
+            exit 0
           fi
 
+          declare -a FRAMEWORKS=()
+          mapfile -t FRAMEWORKS < "$OFFCHAIN_LIST"
           echo "Declared offchain frameworks for ${USE_CASE}: ${FRAMEWORKS[*]:-(none)}"
 
-          OVERALL_STATUS=0
           for fw in "${FRAMEWORKS[@]:-}"; do
             [[ -z "$fw" ]] && continue
             DESCRIPTOR="frameworks/${fw}.yml"
             if [[ ! -f "$DESCRIPTOR" ]]; then
+              # Should not happen — discovery already filters to registered
+              # frameworks — but defensive.
               echo "::warning::no descriptor at ${DESCRIPTOR} for ${fw} — skipping"
               continue
             fi
             echo "::group::${USE_CASE} / ${fw}"
-            if ! scripts/ci/run-cell.sh "$USE_CASE" "$fw" ".ci-results"; then
-              OVERALL_STATUS=1
-            fi
+            scripts/ci/run-cell.sh "$USE_CASE" "$fw" ".ci-results" || true
             echo "::endgroup::"
           done
 
-          # Don't fail the workflow on individual cell failures — the
-          # aggregator captures them in matrix.json. The job exits non-zero
-          # only if Yaci or runtime setup itself broke.
-          # (continue-on-error semantics replicated here without the env hack
-          # of putting the loop in continue-on-error: it wouldn't surface
-          # which cells failed.)
+          # Always exit 0 — individual cell failures are captured in matrix.json
+          # by the report job. The job only fails if Yaci or runtime setup broke.
           exit 0
 
       - name: Stop Yaci DevKit
