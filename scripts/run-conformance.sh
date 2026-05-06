@@ -93,16 +93,11 @@ for scenario in "${SCENARIOS[@]}"; do
     fi
     cell_dur_ms=$(( ( $(date +%s%N) - cell_start ) / 1000000 ))
 
-    if [[ -f "$tmp/result.json" ]]; then
-      # Adapter wrote its own result.json — trust it.
-      mv "$tmp/result.json" "${REPO_ROOT}/${result_file}"
-    else
-      # No authored result.json. Synthesize one so the aggregator has a cell
-      # to render. This catches the failure mode where Deno/JBang/import
-      # setup fails before adapter code runs — without this synthesis the
-      # cell would silently disappear from the matrix.
-      primitive_id=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('primitive','unknown'))" "${REPO_ROOT}/${scenario}")
-      era=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('era','unknown'))" "${REPO_ROOT}/${scenario}")
+    primitive_id=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('primitive','unknown'))" "${REPO_ROOT}/${scenario}")
+    era=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('era','unknown'))" "${REPO_ROOT}/${scenario}")
+
+    synthesize_fail() {
+      local reason="$1"
       python3 - <<PY > "${REPO_ROOT}/${result_file}"
 import json
 out = {
@@ -111,12 +106,36 @@ out = {
     "primitive": "${primitive_id}",
     "framework": "${adapter}",
     "era": "${era}",
-    "status": "${cell_status}",
+    "status": "fail",
     "duration_ms": ${cell_dur_ms},
-    "error_summary": "adapter exited without writing result.json; see ${log_file#${REPO_ROOT}/}",
+    "error_summary": "${reason}",
 }
 print(json.dumps(out, indent=2))
 PY
+      # Bookkeeping: if the synthesized status changes the verdict (e.g.
+      # adapter reported exit 0 but contract violation), make sure the
+      # failure counter reflects it.
+      if [[ "$cell_status" == "pass" ]]; then
+        FAILURES=$((FAILURES + 1))
+      fi
+    }
+
+    if [[ -f "$tmp/result.json" ]]; then
+      # Adapter wrote its own result.json. Trust it — but validate it parses
+      # as JSON first. A corrupt/partial-write would otherwise silently drop
+      # the cell from the aggregated matrix (the aggregator skips unparseable
+      # files); synthesize a fail with the parse error in error_summary.
+      if python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$tmp/result.json" 2>/dev/null; then
+        mv "$tmp/result.json" "${REPO_ROOT}/${result_file}"
+      else
+        synthesize_fail "adapter wrote a result.json that is not valid JSON; see ${log_file#${REPO_ROOT}/}"
+      fi
+    else
+      # No authored result.json. Per the runner contract this is itself a
+      # failure regardless of exit code — adapters MUST write result.json
+      # before the exit code is meaningful. Synthesize a fail with a clear
+      # error, so the cell appears in matrix.json instead of vanishing.
+      synthesize_fail "adapter exited without writing result.json (exit code: $cell_status path); see ${log_file#${REPO_ROOT}/}"
     fi
     rm -rf "$tmp"
     echo "::endgroup::"
