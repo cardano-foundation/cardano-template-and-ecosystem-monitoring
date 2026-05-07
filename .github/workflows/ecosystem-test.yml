@@ -1,13 +1,14 @@
-name: Cardano Ecosystem Tests
+name: Cardano Ecosystem CI
 
 on:
   push:
     branches:
       - main
   pull_request:
+  schedule:
+    - cron: '0 2 * * *'   # 2am UTC daily
   workflow_dispatch:
 
-# Cancel in-progress runs for the same workflow and branch
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -252,6 +253,12 @@ jobs:
         with:
           deno-version: v2.x
 
+      - name: Cache Deno dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/deno
+          key: deno-${{ matrix.example }}-${{ hashFiles(format('{0}/offchain/lucid-evolution/deno.json', matrix.example)) }}
+
       - name: Setup Node.js (for Yaci DevKit)
         uses: actions/setup-node@v4
         with:
@@ -294,8 +301,8 @@ jobs:
           path: ${{ matrix.example }}/offchain/lucid-evolution/test-output.log
           retention-days: 30
 
-  report:
-    name: Generate Ecosystem Report
+  report-and-dashboard:
+    name: Report & Dashboard
     needs: [compile-aiken, test-ccl-java, test-mesh, test-lucid]
     if: always()
     runs-on: ubuntu-latest
@@ -303,66 +310,173 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Install jq
+        run: sudo apt-get install -y jq
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts/
 
-      - name: Generate report
+      - name: Reconstruct status files from artifacts
         run: |
           mkdir -p .local-test-results
 
-          # Process Aiken compilation results
-          echo "# 🔍 Cardano Ecosystem Test Report" > report.md
+          for d in artifacts/plutus-*/; do
+            [ -d "$d" ] || continue
+            example=$(basename "$d" | sed 's/^plutus-//')
+            if [ -f "$d/plutus.json" ]; then
+              echo "success" > ".local-test-results/aiken-${example}-status.txt"
+            else
+              echo "failed" > ".local-test-results/aiken-${example}-status.txt"
+            fi
+          done
+
+          for d in artifacts/logs-ccl-*/; do
+            [ -d "$d" ] || continue
+            example=$(basename "$d" | sed 's/^logs-ccl-//')
+            if [ -f "$d/test-output.log" ]; then
+              if grep -qiE "AssertionError|BUILD FAILED|Exception in thread" "$d/test-output.log" 2>/dev/null; then
+                echo "failed" > ".local-test-results/ccl-${example}-status.txt"
+              else
+                echo "success" > ".local-test-results/ccl-${example}-status.txt"
+              fi
+            else
+              echo "failed" > ".local-test-results/ccl-${example}-status.txt"
+            fi
+          done
+
+          for d in artifacts/logs-mesh-*/; do
+            [ -d "$d" ] || continue
+            example=$(basename "$d" | sed 's/^logs-mesh-//')
+            if [ -f "$d/test-output.log" ]; then
+              if grep -qE "Uncaught|AssertionError|TypeError:|ReferenceError:|SyntaxError:|Error:" "$d/test-output.log" 2>/dev/null; then
+                echo "failed" > ".local-test-results/mesh-${example}-status.txt"
+              else
+                echo "success" > ".local-test-results/mesh-${example}-status.txt"
+              fi
+            else
+              echo "failed" > ".local-test-results/mesh-${example}-status.txt"
+            fi
+          done
+
+          for d in artifacts/logs-lucid-*/; do
+            [ -d "$d" ] || continue
+            example=$(basename "$d" | sed 's/^logs-lucid-//')
+            if [ -f "$d/test-output.log" ]; then
+              if grep -qE "Uncaught|AssertionError|TypeError:|ReferenceError:|SyntaxError:|Error:" "$d/test-output.log" 2>/dev/null; then
+                echo "failed" > ".local-test-results/lucid-${example}-status.txt"
+              else
+                echo "success" > ".local-test-results/lucid-${example}-status.txt"
+              fi
+            else
+              echo "failed" > ".local-test-results/lucid-${example}-status.txt"
+            fi
+          done
+
+      - name: Generate markdown report
+        run: |
+          echo "# Cardano Ecosystem Test Report" > report.md
           echo "" >> report.md
           echo "**Generated**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> report.md
-          echo "**Workflow Run**: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> report.md
+          REPO="${{ github.repository }}"
+          RUN_ID="${{ github.run_id }}"
+          echo "**Workflow Run**: https://github.com/${REPO}/actions/runs/${RUN_ID}" >> report.md
           echo "" >> report.md
-
           echo "## Summary" >> report.md
           echo "" >> report.md
-
-          # Count artifacts
           AIKEN_COUNT=$(find artifacts -name "plutus-*" -type d 2>/dev/null | wc -l)
           CCL_COUNT=$(find artifacts -name "logs-ccl-*" -type d 2>/dev/null | wc -l)
           MESH_COUNT=$(find artifacts -name "logs-mesh-*" -type d 2>/dev/null | wc -l)
           LUCID_COUNT=$(find artifacts -name "logs-lucid-*" -type d 2>/dev/null | wc -l)
-
           echo "- **Aiken Examples Compiled**: $AIKEN_COUNT" >> report.md
           echo "- **CCL Java Tests**: $CCL_COUNT" >> report.md
           echo "- **Mesh.js Tests**: $MESH_COUNT" >> report.md
           echo "- **Lucid Evolution Tests**: $LUCID_COUNT" >> report.md
           echo "" >> report.md
-
-          echo "## Artifacts" >> report.md
-          echo "" >> report.md
           echo "All test logs and build artifacts are available in the workflow artifacts." >> report.md
-          echo "" >> report.md
 
-          cat report.md
+      - name: Run version check
+        run: bash scripts/check-library-versions.sh
 
-      - name: Upload report as artifact
+      - name: Generate dashboard
+        run: bash scripts/generate-dashboard.sh
+
+      - name: Add report and version status to job summary
+        if: always()
+        run: |
+          cat report.md >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f .local-test-results/version-report.md ]; then
+            cat .local-test-results/version-report.md >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload reports artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ecosystem-report
-          path: report.md
+          name: reports
+          path: |
+            report.md
+            .local-test-results/version-report.json
+            .local-test-results/version-report.md
           retention-days: 30
 
-      - name: Add report to workflow summary
-        run: cat report.md >> $GITHUB_STEP_SUMMARY
-
-      - name: Comment on PR
+      - name: Post PR comment
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
             const report = fs.readFileSync('report.md', 'utf8');
-
+            const versionReport = fs.existsSync('.local-test-results/version-report.md')
+              ? '\n\n' + fs.readFileSync('.local-test-results/version-report.md', 'utf8')
+              : '';
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: report
+              body: report + versionReport
             });
+
+      - name: Commit dashboard.json
+        if: github.event_name == 'schedule' || github.event_name == 'push'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/dashboard.json
+          if git diff --cached --quiet; then
+            echo "No changes to dashboard.json"
+          else
+            git commit -m "chore: update dashboard.json [skip ci]"
+            git push origin HEAD:main
+          fi
+
+      - name: Apply version sync
+        if: (github.event_name == 'schedule' || github.event_name == 'push') && env.VERSIONS_OUTDATED == 'true'
+        run: bash scripts/sync-versions.sh
+
+      - name: Create version-bump PR
+        if: (github.event_name == 'schedule' || github.event_name == 'push') && env.VERSIONS_OUTDATED == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: automated/version-bump
+          delete-branch: true
+          title: "chore: update library versions to latest"
+          labels: ${{ env.VERSION_BUMP_LABEL }}
+          body: |
+            ## Automated Version Bump
+
+            The version check detected outdated libraries.
+            This PR updates all dependency files to the latest versions.
+
+            See the `reports` artifact from the workflow run for details.
+
+            ---
+            _Generated by the ecosystem CI workflow_
+          commit-message: "chore: bump library versions to latest"

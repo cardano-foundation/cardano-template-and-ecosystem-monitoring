@@ -23,8 +23,8 @@ import {
 import { applyParamsToScript } from "@meshsdk/core-cst";
 
 import { MeshTxInitiator, MeshTxInitiatorInput } from "../common.ts";
-import blueprintV1 from "./aiken-workspace-v1/plutus.json" with { type: "json" };
-import blueprintV2 from "./aiken-workspace-v2/plutus.json" with { type: "json" };
+import blueprintV1 from "../../onchain/aiken/plutus.json" with { type: "json" };
+import blueprintV2 from "../../onchain/aiken/plutus.json" with { type: "json" };
 
 export type InitiationDatum = ConStr0<[PubKeyAddress, Value]>;
 export const initiateEscrowDatum = (
