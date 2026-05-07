@@ -142,19 +142,15 @@ public class AnonymousData {
 
                 // Spend redeemer is the nonce ByteArray.
                 PlutusData spendRedeemer = BytesPlutusData.of(nonce);
-                // Burn the singleton (mint -1) — the spend redeemer is unused for the burn,
-                // but the same script's mint policy fires; burn redeemer can be the id again.
-                PlutusData burnRedeemer = BytesPlutusData.of(id);
 
-                Asset burn = Asset.builder()
-                                .name("0x" + idHex)
-                                .value(BigInteger.ONE.negate())
-                                .build();
-
+                // Note: we do NOT burn the token. The contract's mint handler enforces
+                // `token_minted(..., +1)` and would reject a -1 burn. The spend handler
+                // imposes no constraint on where the token goes, so we forward the
+                // entire UTxO value (token + lovelace) to the owner via change.
                 ScriptTx scriptTx = new ScriptTx()
                                 .collectFrom(List.of(target), spendRedeemer)
-                                .mintAsset(plutusScript, burn, burnRedeemer)
-                                .attachSpendingValidator(plutusScript);
+                                .attachSpendingValidator(plutusScript)
+                                .withChangeAddress(ownerAddress.getAddress());
 
                 return quickTxBuilder.compose(scriptTx)
                                 .validFrom(slot - 5)

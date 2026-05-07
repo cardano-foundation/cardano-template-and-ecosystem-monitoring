@@ -113,15 +113,15 @@ async function reveal(walletFile: string, nonceHex: string) {
   if (!utxo) throw new Error(`Committed UTxO with unit ${unit} not found`);
 
   const spendRedeemer = Data.to(nonceHex);
-  // The same script's mint policy fires for the burn; redeemer can be id again.
-  const burnRedeemer = Data.to(idHex);
 
+  // Note: we do NOT burn the token. The mint handler enforces
+  // `token_minted(..., +1)` and would reject a -1 burn. The spend handler
+  // imposes no constraint on where the token goes, so we send the full
+  // UTxO value (token + lovelace) back to the spender's wallet via change.
   const tx = await lucid
     .newTx()
     .collectFrom([utxo], spendRedeemer)
     .attach.SpendingValidator(validator)
-    .mintAssets({ [unit]: -1n }, burnRedeemer)
-    .attach.MintingPolicy(validator)
     .addSigner(address)
     .complete();
 

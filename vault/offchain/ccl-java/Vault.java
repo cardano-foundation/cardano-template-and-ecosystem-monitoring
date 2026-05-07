@@ -77,15 +77,22 @@ public class Vault {
                 lockFunds(20, farFuture);
                 waitForScriptUtxo(60);
 
-                // 2. WITHDRAW: re-output to script with lock_time = now (starts the timer).
-                long withdrawAt = Instant.now().toEpochMilli();
-                TxResult withdrawTx = withdraw(withdrawAt);
+                // 2. WITHDRAW: re-output to script with lock_time well in the past so
+                //    the validator's `valid_after(validity_range, lock_time)` check
+                //    holds — validity_lower from `validFrom(slot - 5)` maps to
+                //    chain_time - 5s, which must be strictly greater than lock_time.
+                long withdrawLockTime = Instant.now().minusSeconds(60).toEpochMilli();
+                TxResult withdrawTx = withdraw(withdrawLockTime);
                 System.out.println("WITHDRAW result: successful=" + withdrawTx.isSuccessful()
                                 + " txHash=" + withdrawTx.getTxHash());
 
-                // 3. Wait waitTime + buffer, then FINALIZE.
+                // 3. FINALIZE: validator requires
+                //      validity_lower > waitTime + lock_time.
+                //    lock_time = (now - 60s); waitTime = 60s. So FINALIZE is allowed
+                //    once chain_time > now (since (waitTime + lock_time) == now).
+                //    Sleeping ~30s past that gives plenty of margin.
                 System.out.println("Waiting for waitTime to elapse before FINALIZE...");
-                Thread.sleep(WAIT_TIME_MS + 30_000L);
+                Thread.sleep(30_000L);
                 waitForScriptUtxo(60);
                 TxResult finalizeTx = finalize_();
                 System.out.println("FINALIZE result: successful=" + finalizeTx.isSuccessful()
