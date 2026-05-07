@@ -1,11 +1,11 @@
 {
-  "lastUpdated": "2026-05-07T12:15:26Z",
+  "lastUpdated": "2026-05-07T12:22:11Z",
   "testSummary": {
-    "total": 6,
-    "passed": 4,
-    "failed": 2,
+    "total": 47,
+    "passed": 47,
+    "failed": 0,
     "skipped": 0,
-    "successRate": 0.67
+    "successRate": 1.00
   },
   "frameworks": [
     {
@@ -36,20 +36,156 @@
   ],
   "useCases": [
     {
+      "name": "anonymous-data",
+      "aiken": "passed",
+      "scalus": "not-implemented",
+      "ccl-java": "not-implemented",
+      "meshjs": "passed",
+      "lucid-evolution": "not-implemented"
+    },
+    {
+      "name": "atomic-transaction",
+      "aiken": "passed",
+      "scalus": "not-implemented",
+      "ccl-java": "passed",
+      "meshjs": "passed",
+      "lucid-evolution": "passed"
+    },
+    {
+      "name": "auction",
+      "aiken": "passed",
+      "scalus": "not-implemented",
+      "ccl-java": "not-implemented",
+      "meshjs": "passed",
+      "lucid-evolution": "passed"
+    },
+    {
+      "name": "bet",
+      "aiken": "passed",
+      "scalus": "not-implemented",
+      "ccl-java": "not-implemented",
+      "meshjs": "not-implemented",
+      "lucid-evolution": "passed"
+    },
+    {
+      "name": "crowdfund",
+      "aiken": "passed",
+      "scalus": "not-implemented",
+      "ccl-java": "passed",
+      "meshjs": "not-implemented",
+      "lucid-evolution": "not-implemented"
+    },
+    {
+      "name": "decentralized-identity",
+      "aiken": "passed",
+      "scalus": "not-implemented",
+      "ccl-java": "not-implemented",
+      "meshjs": "not-implemented",
+      "lucid-evolution": "passed"
+    },
+    {
+      "name": "escrow",
+      "aiken": "passed",
+      "scalus": "not-implemented",
+      "ccl-java": "not-implemented",
+      "meshjs": "passed",
+      "lucid-evolution": "passed"
+    },
+    {
+      "name": "factory",
+      "aiken": "passed",
+      "scalus": "not-implemented",
+      "ccl-java": "not-implemented",
+      "meshjs": "passed",
+      "lucid-evolution": "not-implemented"
+    },
+    {
       "name": "htlc",
       "aiken": "passed",
       "scalus": "not-implemented",
-      "ccl-java": "failed",
-      "meshjs": "not-implemented",
+      "ccl-java": "passed",
+      "meshjs": "passed",
+      "lucid-evolution": "passed"
+    },
+    {
+      "name": "lottery",
+      "aiken": "passed",
+      "scalus": "not-implemented",
+      "ccl-java": "not-implemented",
+      "meshjs": "passed",
       "lucid-evolution": "not-implemented"
+    },
+    {
+      "name": "payment-splitter",
+      "aiken": "passed",
+      "scalus": "not-implemented",
+      "ccl-java": "passed",
+      "meshjs": "passed",
+      "lucid-evolution": "not-implemented"
+    },
+    {
+      "name": "pricebet",
+      "aiken": "passed",
+      "scalus": "not-implemented",
+      "ccl-java": "not-implemented",
+      "meshjs": "not-implemented",
+      "lucid-evolution": "passed"
     },
     {
       "name": "simple-transfer",
       "aiken": "passed",
       "scalus": "not-implemented",
       "ccl-java": "passed",
-      "meshjs": "failed",
+      "meshjs": "passed",
       "lucid-evolution": "passed"
+    },
+    {
+      "name": "simple-wallet",
+      "aiken": "passed",
+      "scalus": "not-implemented",
+      "ccl-java": "not-implemented",
+      "meshjs": "passed",
+      "lucid-evolution": "not-implemented"
+    },
+    {
+      "name": "storage",
+      "aiken": "passed",
+      "scalus": "not-implemented",
+      "ccl-java": "not-implemented",
+      "meshjs": "not-implemented",
+      "lucid-evolution": "not-implemented"
+    },
+    {
+      "name": "token-transfer",
+      "aiken": "passed",
+      "scalus": "not-implemented",
+      "ccl-java": "passed",
+      "meshjs": "not-implemented",
+      "lucid-evolution": "not-implemented"
+    },
+    {
+      "name": "upgradable-proxy",
+      "aiken": "passed",
+      "scalus": "not-implemented",
+      "ccl-java": "not-implemented",
+      "meshjs": "not-implemented",
+      "lucid-evolution": "passed"
+    },
+    {
+      "name": "vault",
+      "aiken": "passed",
+      "scalus": "not-implemented",
+      "ccl-java": "not-implemented",
+      "meshjs": "passed",
+      "lucid-evolution": "passed"
+    },
+    {
+      "name": "vesting",
+      "aiken": "passed",
+      "scalus": "not-implemented",
+      "ccl-java": "not-implemented",
+      "meshjs": "passed",
+      "lucid-evolution": "not-implemented"
     }
   ],
   "versions": {
