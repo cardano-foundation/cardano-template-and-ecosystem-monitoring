@@ -1,8 +1,8 @@
 {
-  "lastUpdated": "2026-05-07T08:44:32Z",
+  "lastUpdated": "2026-05-07T09:00:11Z",
   "testSummary": {
-    "total": 13,
-    "passed": 13,
+    "total": 46,
+    "passed": 46,
     "failed": 0,
     "skipped": 0,
     "successRate": 1.00
@@ -12,70 +12,98 @@
       "name": "anonymous-data",
       "aiken": "passed",
       "cclJava": "not-implemented",
-      "meshjs": "not-implemented",
+      "meshjs": "passed",
       "lucidEvolution": "not-implemented"
     },
     {
       "name": "atomic-transaction",
       "aiken": "passed",
-      "cclJava": "not-implemented",
-      "meshjs": "not-implemented",
-      "lucidEvolution": "not-implemented"
+      "cclJava": "passed",
+      "meshjs": "passed",
+      "lucidEvolution": "passed"
     },
     {
       "name": "auction",
       "aiken": "passed",
       "cclJava": "not-implemented",
-      "meshjs": "not-implemented",
-      "lucidEvolution": "not-implemented"
+      "meshjs": "passed",
+      "lucidEvolution": "passed"
     },
     {
       "name": "bet",
       "aiken": "passed",
       "cclJava": "not-implemented",
       "meshjs": "not-implemented",
-      "lucidEvolution": "not-implemented"
+      "lucidEvolution": "passed"
     },
     {
       "name": "crowdfund",
       "aiken": "passed",
-      "cclJava": "not-implemented",
+      "cclJava": "passed",
       "meshjs": "not-implemented",
       "lucidEvolution": "not-implemented"
+    },
+    {
+      "name": "decentralized-identity",
+      "aiken": "passed",
+      "cclJava": "not-implemented",
+      "meshjs": "not-implemented",
+      "lucidEvolution": "passed"
+    },
+    {
+      "name": "escrow",
+      "aiken": "passed",
+      "cclJava": "not-implemented",
+      "meshjs": "passed",
+      "lucidEvolution": "passed"
     },
     {
       "name": "factory",
       "aiken": "passed",
       "cclJava": "not-implemented",
-      "meshjs": "not-implemented",
+      "meshjs": "passed",
       "lucidEvolution": "not-implemented"
     },
     {
       "name": "htlc",
       "aiken": "passed",
-      "cclJava": "not-implemented",
-      "meshjs": "not-implemented",
-      "lucidEvolution": "not-implemented"
+      "cclJava": "passed",
+      "meshjs": "passed",
+      "lucidEvolution": "passed"
     },
     {
       "name": "lottery",
       "aiken": "passed",
       "cclJava": "not-implemented",
-      "meshjs": "not-implemented",
+      "meshjs": "passed",
       "lucidEvolution": "not-implemented"
     },
     {
       "name": "payment-splitter",
       "aiken": "passed",
+      "cclJava": "passed",
+      "meshjs": "passed",
+      "lucidEvolution": "not-implemented"
+    },
+    {
+      "name": "pricebet",
+      "aiken": "passed",
       "cclJava": "not-implemented",
       "meshjs": "not-implemented",
-      "lucidEvolution": "not-implemented"
+      "lucidEvolution": "passed"
+    },
+    {
+      "name": "simple-transfer",
+      "aiken": "passed",
+      "cclJava": "passed",
+      "meshjs": "passed",
+      "lucidEvolution": "passed"
     },
     {
       "name": "simple-wallet",
       "aiken": "passed",
       "cclJava": "not-implemented",
-      "meshjs": "not-implemented",
+      "meshjs": "passed",
       "lucidEvolution": "not-implemented"
     },
     {
@@ -86,14 +114,28 @@
       "lucidEvolution": "not-implemented"
     },
     {
-      "name": "upgradable-proxy",
+      "name": "token-transfer",
       "aiken": "passed",
-      "cclJava": "not-implemented",
+      "cclJava": "passed",
       "meshjs": "not-implemented",
       "lucidEvolution": "not-implemented"
     },
     {
+      "name": "upgradable-proxy",
+      "aiken": "passed",
+      "cclJava": "not-implemented",
+      "meshjs": "not-implemented",
+      "lucidEvolution": "passed"
+    },
+    {
       "name": "vault",
+      "aiken": "passed",
+      "cclJava": "not-implemented",
+      "meshjs": "passed",
+      "lucidEvolution": "passed"
+    },
+    {
+      "name": "vesting",
       "aiken": "passed",
       "cclJava": "not-implemented",
       "meshjs": "not-implemented",
