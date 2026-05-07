@@ -2,7 +2,6 @@
 ///
 // @formatter:off
 //JAVA 24+
-//COMPILE_OPTIONS --enable-preview -source 24
 //RUNTIME_OPTIONS --enable-preview
 
 //DEPS com.bloxbean.cardano:cardano-client-lib:0.8.0-pre4
@@ -12,8 +11,7 @@
 
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.time.LocalDateTime;
-import java.time.ZoneOffset;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -69,26 +67,58 @@ public class Htlc {
         // might have a different address for the receiver.
         static Address receiverAddress = payee1.getBaseAddress();
         static QuickTxBuilder quickTxBuilder = new QuickTxBuilder(backendService);
+
+        // Expiration must be set *before* getParametrisedPlutusScript runs, since
+        // the script address depends on it. The buffer must be larger than the
+        // wall-clock time spent in lockFunds + waitForScriptUtxo + GUESS prep,
+        // because the script-context validity range reflects actual chain time,
+        // not the time when expiration was computed. In a healthy yaci-devkit,
+        // lockFunds confirms in seconds; if completeAndWait() blocks for minutes,
+        // restart yaci-devkit — its indexer has fallen behind the chain head.
+        static long expirationMs = Instant.now().plusSeconds(30).toEpochMilli();
+
         static PlutusScript plutusScript = getParametrisedPlutusScript();
         static Address scriptAddress = AddressProvider.getEntAddress(plutusScript, network);
 
+        static final long startMs = System.currentTimeMillis();
+
         public static void main(String[] args) throws ApiException, InterruptedException {
+
                 // Happy path 1: GUESS with correct secret (before expiration)
                 lockFunds(20);
                 waitForScriptUtxo(60);
                 TxResult guessTx = unlockScript(Optional.of(secret), 5);
-                System.out.println("GUESS unlocked successfully. TxHash: %s".formatted(guessTx.getTxHash()));
+                printResult("GUESS", guessTx);
 
                 // Happy path 2: WITHDRAW by owner (after expiration)
                 lockFunds(10);
                 waitForScriptUtxo(60);
-                System.out.println("Waiting for 70 seconds for expiration before owner withdrawal...");
-                Thread.sleep(70000);
+                waitUntilExpired();
                 TxResult withdrawTx = unlockScript(Optional.empty(), 5);
-                System.out.println("WITHDRAW unlocked successfully. TxHash: %s".formatted(withdrawTx.getTxHash()));
+                printResult("WITHDRAW", withdrawTx);
 
                 if (!guessTx.isSuccessful() || !withdrawTx.isSuccessful())
                         throw new AssertionError("HTLC CCL test failed");
+        }
+
+        private static void printResult(String label, TxResult r) {
+                System.out.println(label + " result: successful=" + r.isSuccessful()
+                                + " txHash=" + r.getTxHash()
+                                + " response=" + r.getResponse());
+        }
+
+        // Sleep until wall clock has passed expiration with a small margin.
+        // If lockFunds was slow, expiration may already be in the past — no wait needed.
+        private static void waitUntilExpired() throws InterruptedException {
+                long target = expirationMs + 30_000L;
+                long now = System.currentTimeMillis();
+                if (now >= target) {
+                        System.out.println("Expiration already passed — proceeding to WITHDRAW.");
+                        return;
+                }
+                long waitMs = target - now;
+                System.out.println("Waiting " + (waitMs / 1000) + "s for expiration to pass before WITHDRAW...");
+                Thread.sleep(waitMs);
         }
 
         // Poll until at least one UTXO appears at the script address (yaci-store indexer
@@ -115,15 +145,15 @@ public class Htlc {
                 List<Utxo> allScriptUtxos = utxoSupplier.getAll(scriptAddress.getAddress());
                 long slot = backendService.getBlockService().getLatestBlock().getValue().getSlot();
                 System.out.println("Current slot: " + slot);
+                // Use ConstrPlutusData.of(alternative, fields...) factory, which
+                // explicitly produces Constr-tagged CBOR (tag 121 for alt=0, tag 122
+                // for alt=1, etc.). The builder pattern was producing bytes-only output
+                // in CCL 0.8.0-pre4 — the script-context dump showed redeemer as just
+                // <bytes>, not Constr 0 [<bytes>], so the validator couldn't pattern-
+                // match `redeemer: Htlc { GUESS { answer } | WITHDRAW }`.
                 ConstrPlutusData redeemer = secretGuess
-                                .map(s -> ConstrPlutusData.builder()
-                                                .alternative(0)  // GUESS { answer }
-                                                .data(ListPlutusData.of(BytesPlutusData.of(s.getBytes())))
-                                                .build())
-                                .orElseGet(() -> ConstrPlutusData.builder()
-                                                .alternative(1)  // WITHDRAW
-                                                .data(ListPlutusData.of())
-                                                .build());
+                                .map(s -> ConstrPlutusData.of(0L, BytesPlutusData.of(s.getBytes())))  // GUESS { answer }
+                                .orElseGet(() -> ConstrPlutusData.of(1L));                            // WITHDRAW
 
                 ScriptTx scriptTx = new ScriptTx()
                                 .collectFrom(allScriptUtxos,
@@ -132,9 +162,12 @@ public class Htlc {
                                                 adaAmount))
                                 .attachSpendingValidator(plutusScript)
                                 .withChangeAddress(ownerAddress.getAddress());
+                // Narrow validity range to give more headroom: validity_upper = slot+5,
+                // not slot+10. With expiration buffer 30s and lockFunds confirmation
+                // ~10s, this gives valid_before ~15s of margin instead of ~10s.
                 return quickTxBuilder.compose(scriptTx)
-                                .validFrom(slot - 10)
-                                .validTo(slot + 10) // Set a validity range
+                                .validFrom(slot - 5)
+                                .validTo(slot + 5)
                                 .feePayer(ownerAddress.getAddress())
                                 .withSigner(SignerProviders.signerFrom(payee1))
                                 .withRequiredSigners(ownerAddress)
@@ -148,15 +181,18 @@ public class Htlc {
          */
         private static void lockFunds(int adaMount) {
                 System.out.println("Script Address: " + scriptAddress.getAddress());
-                // Locking 10 Ada to the contract address
                 Tx tx = new Tx().payToContract(scriptAddress.getAddress(), Amount.ada(adaMount), PlutusData.unit())
                                 .withChangeAddress(ownerAddress.getAddress())
                                 .from(ownerAddress.getAddress());
+                // complete() submits the tx without waiting for many confirmations.
+                // completeAndWait() can block for ~10 min on yaci-devkit waiting for
+                // "finality"; we only need the UTXO to be spendable, which is what
+                // waitForScriptUtxo() detects (first appearance in the indexer).
                 TxResult txResult = quickTxBuilder.compose(tx)
                                 .feePayer(ownerAddress.getAddress())
                                 .withSigner(SignerProviders.signerFrom(payee1))
-                                .completeAndWait();
-                System.out.println("Funds locked. TxHash: %s".formatted(txResult.getTxHash()));
+                                .complete();
+                System.out.println("Funds lock submitted. TxHash: %s".formatted(txResult.getTxHash()));
         }
 
         /**
@@ -171,19 +207,12 @@ public class Htlc {
                 String htlcCompiledCode = blueprint.getValidators().getFirst().getCompiledCode();
 
                 byte[] hashedAnswer = Sha256Hash.hash(secret.getBytes());
-                long expiration;
-                try {
-                        long blockTime = backendService.getBlockService().getLatestBlock().getValue().getTime();
-                        expiration = (blockTime + 60) * 1000L;
-                } catch (ApiException e) {
-                        expiration = LocalDateTime.now().plusMinutes(1).toEpochSecond(ZoneOffset.UTC) * 1000;
-                }
-                System.out.println("Expiration time (epoch ms): " + expiration);
+                System.out.println("Expiration time (epoch ms): " + expirationMs);
 
                 String compiledCode = AikenScriptUtil.applyParamToScript(
                                 ListPlutusData.of(
                                                 BytesPlutusData.of(hashedAnswer),
-                                                BigIntPlutusData.of(expiration),
+                                                BigIntPlutusData.of(expirationMs),
                                                 BytesPlutusData.of(ownerAddress.getPaymentCredentialHash().get())),
                                 htlcCompiledCode);
 
