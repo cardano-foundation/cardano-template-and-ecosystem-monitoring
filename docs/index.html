@@ -204,6 +204,25 @@
       font-size: 0.88rem;
     }
 
+    /* Outdated banner */
+    #outdated-banner {
+      background: var(--amber-bg);
+      border: 1px solid var(--amber-border);
+      border-radius: 8px;
+      padding: 12px 20px;
+      margin-bottom: 32px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.9rem;
+      color: var(--yellow);
+    }
+
+    #outdated-banner .banner-libs {
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      font-size: 0.82rem;
+    }
+
     /* Loading / Error */
     #loading, #error {
       display: flex;
@@ -297,6 +316,12 @@
 </div>
 
 <main id="dashboard" class="hidden">
+
+  <!-- Outdated libraries banner -->
+  <div id="outdated-banner" class="hidden">
+    <span>⚠️</span>
+    <span id="outdated-banner-text"></span>
+  </div>
 
   <!-- Test Summary -->
   <section>
@@ -469,6 +494,16 @@
     const latest   = (data.versions && data.versions.latest)   || {};
     const outdated = new Set((data.versions && data.versions.outdated) || []);
 
+    // Outdated banner
+    const banner = document.getElementById('outdated-banner');
+    const bannerText = document.getElementById('outdated-banner-text');
+    if (outdated.size > 0) {
+      const names = Array.from(outdated).join(', ');
+      bannerText.innerHTML = outdated.size + ' librar' + (outdated.size === 1 ? 'y is' : 'ies are') +
+        ' outdated: <span class="banner-libs">' + names + '</span>';
+      banner.classList.remove('hidden');
+    }
+
     const libs = Object.keys(current);
     if (libs.length === 0) {
       const emptyRow = tr({ className: 'empty-row' });
@@ -512,7 +547,13 @@
   function showError(err) {
     document.getElementById('loading').classList.add('hidden');
     const errMsg = document.getElementById('error-message');
-    errMsg.textContent = 'Could not load dashboard data. Run the script below to generate dashboard.json.';
+    if (window.location.protocol === 'file:') {
+      errMsg.textContent = 'Browsers block fetch() on file:// URLs. Serve this directory with a local HTTP server:';
+      var cmd = document.querySelector('#error .error-box .cmd');
+      if (cmd) { cmd.textContent = 'python3 -m http.server 8000  # then open http://localhost:8000'; }
+    } else {
+      errMsg.textContent = 'Could not load dashboard data. Run the script below to generate dashboard.json.';
+    }
     document.getElementById('error').classList.remove('hidden');
     if (typeof console !== 'undefined') {
       console.error('Dashboard fetch error:', err);

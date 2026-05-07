@@ -131,7 +131,7 @@ bump_type() {
 # ── Fetch all upstream versions ─────────────────────────────────────────────────
 echo -e "${BLUE}Fetching upstream versions...${NC}"
 
-LATEST_AIKEN_COMPILER=$(fetch_github_latest "txpipe/aiken")
+LATEST_AIKEN_COMPILER=$(fetch_github_latest "aiken-lang/aiken")
 LATEST_STDLIB=$(fetch_github_latest "aiken-lang/stdlib")
 LATEST_VODKA=$(fetch_github_latest "sidan-lab/vodka")
 LATEST_MESH_CORE=$(fetch_npm_latest "@meshsdk/core")
