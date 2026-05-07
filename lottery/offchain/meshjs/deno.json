@@ -1,6 +1,7 @@
 {
     "nodeModulesDir": "auto",
     "imports": {
+        "libsodium-wrappers-sumo": "npm:libsodium-wrappers-sumo@0.7.15",
         "@meshsdk/core": "npm:@meshsdk/core@1.9.0-beta.93",
         "@meshsdk/core-csl": "npm:@meshsdk/core-csl@1.9.0-beta.93",
         "@meshsdk/common": "npm:@meshsdk/common@1.9.0-beta.93",

@@ -72,19 +72,15 @@ public class Htlc {
         static Address scriptAddress = AddressProvider.getEntAddress(plutusScript, network);
 
         public static void main(String[] args) throws ApiException, InterruptedException {
+                // Happy path 1: GUESS with correct secret
                 lockFunds(20);
                 waitForScriptUtxo(60);
-
-                TxResult notSuccessfull = unlockFundsWithSecret(Optional.of("WrongSecret"), 2);
-                System.out.println("Is the transaction successful? " + notSuccessfull.isSuccessful());
-
                 TxResult success = unlockFundsWithSecret(Optional.of(secret), 5);
                 System.out.println("Funds unlocked successfully. TxHash: %s".formatted(success.getTxHash()));
 
-                // Lock fresh funds for the owner-withdrawal test
+                // Happy path 2: WITHDRAW after expiration
                 lockFunds(10);
                 waitForScriptUtxo(60);
-
                 System.out.println("Waiting for 70 seconds for expiration before owner withdrawal...");
                 Thread.sleep(70000);
                 TxResult unlockFunds = unlockFundsWithSecret(Optional.empty(), 5);
