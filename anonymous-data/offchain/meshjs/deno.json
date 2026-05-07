@@ -1,8 +1,8 @@
 {
     "imports": {
-        "@meshsdk/core": "npm:@meshsdk/core@1.9.0-beta.90",
-        "@meshsdk/core-csl": "npm:@meshsdk/core-csl@1.9.0-beta.90",
+        "@meshsdk/core": "npm:@meshsdk/core@1.9.0-beta.93",
+        "@meshsdk/core-csl": "npm:@meshsdk/core-csl@1.9.0-beta.93",
         "@cardano-sdk/crypto": "npm:@cardano-sdk/crypto@0.2.2",
-        "@meshsdk/common": "npm:@meshsdk/common@1.9.0-beta.90",
+        "@meshsdk/common": "npm:@meshsdk/common@1.9.0-beta.93",
     }
 }

@@ -72,27 +72,41 @@ public class Htlc {
         static Address scriptAddress = AddressProvider.getEntAddress(plutusScript, network);
 
         public static void main(String[] args) throws ApiException, InterruptedException {
-                // Locking 10 Ada to the contract address
                 lockFunds(20);
+                waitForScriptUtxo(60);
 
-                TxResult notSuccessfull = unlockFundsWithSecret(Optional.of("WrongSecret"), 2); // Attempt to unlock
-                                                                                                // with a
-                // wrong secret guess
+                TxResult notSuccessfull = unlockFundsWithSecret(Optional.of("WrongSecret"), 2);
                 System.out.println("Is the transaction successful? " + notSuccessfull.isSuccessful());
+
                 TxResult success = unlockFundsWithSecret(Optional.of(secret), 5);
                 System.out.println("Funds unlocked successfully. TxHash: %s".formatted(success.getTxHash()));
-                // Lock fresh funds for the owner-withdrawal test (previous unlock cleared the script)
+
+                // Lock fresh funds for the owner-withdrawal test
                 lockFunds(10);
-                // Unlock as the owner without providing the secret
+                waitForScriptUtxo(60);
+
                 System.out.println("Waiting for 70 seconds for expiration before owner withdrawal...");
-                Thread.sleep(70000); // Wait for 70 seconds before unlocking
+                Thread.sleep(70000);
                 TxResult unlockFunds = unlockFundsWithSecret(Optional.empty(), 5);
                 System.out.println("Funds unlocked successfully without secret. TxHash: %s"
                                 .formatted(unlockFunds.getTxHash()));
 
-                // Verify transactions succeeded
                 if (!success.isSuccessful() || !unlockFunds.isSuccessful())
                         throw new AssertionError("HTLC CCL test failed");
+        }
+
+        // Poll until at least one UTXO appears at the script address (yaci-store indexer
+        // can lag a few seconds behind chain confirmation).
+        private static void waitForScriptUtxo(int timeoutSec) throws InterruptedException {
+                for (int i = 0; i < timeoutSec; i++) {
+                        List<Utxo> utxos = utxoSupplier.getAll(scriptAddress.getAddress());
+                        if (!utxos.isEmpty()) {
+                                System.out.println("Script UTXO indexed after " + i + "s");
+                                return;
+                        }
+                        Thread.sleep(1000);
+                }
+                System.out.println("Timed out waiting for script UTXO after " + timeoutSec + "s");
         }
 
         /**

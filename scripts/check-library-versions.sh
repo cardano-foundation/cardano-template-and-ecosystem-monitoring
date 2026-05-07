@@ -84,17 +84,25 @@ fetch_npm_latest() {
 }
 
 # ── Maven Central helper ────────────────────────────────────────────────────────
+# Reads maven-metadata.xml directly — the Solr search API's `latestVersion` field
+# does not sort versions correctly and frequently misses pre-releases.
 # Prints the latest version string, or "unknown" on failure.
 fetch_maven_latest() {
+  local group_path="$1"   # e.g. com/bloxbean/cardano
+  local artifact="$2"     # e.g. cardano-client-lib
   local response
   response=$(curl -s --max-time 10 \
-    "https://search.maven.org/solrsearch/select?q=g:com.bloxbean.cardano+AND+a:cardano-client-lib&rows=1&wt=json" \
+    "https://repo1.maven.org/maven2/${group_path}/${artifact}/maven-metadata.xml" \
     2>/dev/null) || true
 
+  # Prefer the <latest> tag, fall back to the last <version> in the list
   local ver
-  ver=$(printf '%s' "$response" | jq -r '.response.docs[0].latestVersion // empty' 2>/dev/null) || true
+  ver=$(printf '%s' "$response" | grep -oE '<latest>[^<]+</latest>' | head -1 | sed 's|<latest>||;s|</latest>||' | tr -d '[:space:]')
+  if [ -z "$ver" ]; then
+    ver=$(printf '%s' "$response" | grep -oE '<version>[^<]+</version>' | tail -1 | sed 's|<version>||;s|</version>||' | tr -d '[:space:]')
+  fi
 
-  if [ -z "$ver" ] || [ "$ver" = "null" ]; then
+  if [ -z "$ver" ]; then
     echo "unknown"
   else
     echo "$ver"
@@ -138,7 +146,7 @@ LATEST_MESH_CORE=$(fetch_npm_latest "@meshsdk/core")
 LATEST_MESH_CORE_CSL=$(fetch_npm_latest "@meshsdk/core-csl")
 LATEST_MESH_COMMON=$(fetch_npm_latest "@meshsdk/common")
 LATEST_LUCID=$(fetch_npm_latest "@evolution-sdk/lucid")
-LATEST_CCL=$(fetch_maven_latest)
+LATEST_CCL=$(fetch_maven_latest "com/bloxbean/cardano" "cardano-client-lib")
 
 echo ""
 

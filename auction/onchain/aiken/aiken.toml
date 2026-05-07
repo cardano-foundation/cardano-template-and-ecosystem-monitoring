@@ -17,7 +17,7 @@ source = "github"
 
 [[dependencies]]
 name = "sidan-lab/vodka"
-version = "0.1.15"
+version = "0.1.22"
 source = "github"
 
 [config]

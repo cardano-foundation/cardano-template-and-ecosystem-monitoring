@@ -1,7 +1,7 @@
 {
     "imports": {
-        "@meshsdk/common": "npm:@meshsdk/common@^1.9.0-beta.94",
-        "@meshsdk/core": "npm:@meshsdk/core@^1.9.0-beta.94",
+        "@meshsdk/common": "npm:@meshsdk/common@1.9.0-beta.93",
+        "@meshsdk/core": "npm:@meshsdk/core@1.9.0-beta.93",
         "@meshsdk/core-cst": "npm:@meshsdk/core-cst@^1.9.0-beta.94"
     },
     "nodeModulesDir": "auto"
