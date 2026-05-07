@@ -788,13 +788,12 @@
     </div>
     <div class="table-wrapper">
       <table>
-        <thead>
+        <!-- Header columns are populated dynamically from data.frameworks
+             so adding an entry to frameworks.json adds a column automatically. -->
+        <thead id="matrix-head">
           <tr>
             <th>Use Case</th>
-            <th class="th-center">Aiken</th>
-            <th class="th-center">CCL Java</th>
-            <th class="th-center">Mesh.js</th>
-            <th class="th-center">Lucid Evolution</th>
+            <!-- framework columns inserted here at render() -->
             <th class="th-center">Health</th>
           </tr>
         </thead>
@@ -869,11 +868,14 @@
 
   // ── Use-case health calc ─────────────────────────────────
   // Health = passed / total frameworks. Not-implemented entries count as misses.
-  const FRAMEWORKS = ['aiken', 'cclJava', 'meshjs', 'lucidEvolution'];
+  // FRAMEWORK_LIST is populated at render() from dashboard.json's `frameworks`
+  // field — array of { id, label, kind }. Adding a framework to frameworks.json
+  // automatically extends the matrix here.
+  let FRAMEWORK_LIST = [];
   function useCaseHealth(uc) {
     let implemented = 0, passed = 0, missing = 0;
-    FRAMEWORKS.forEach(f => {
-      const v = uc[f];
+    FRAMEWORK_LIST.forEach(f => {
+      const v = uc[f.id];
       if (!v || v === 'not-implemented') {
         missing++;
       } else {
@@ -881,8 +883,8 @@
         if (v === 'passed') passed++;
       }
     });
-    const total = FRAMEWORKS.length;
-    return { total, implemented, passed, missing, rate: passed / total };
+    const total = FRAMEWORK_LIST.length;
+    return { total, implemented, passed, missing, rate: total ? passed / total : 0 };
   }
 
   function classifyUseCase(uc) {
@@ -939,7 +941,8 @@
 
     if (filtered.length === 0) {
       const emptyRow = tr({ className: 'empty-row' });
-      const emptyCell = td({ colspan: '6' });
+      // 1 (Use Case) + N (frameworks) + 1 (Health)
+      const emptyCell = td({ colspan: String(2 + FRAMEWORK_LIST.length) });
       emptyCell.textContent = allUseCases.length === 0
         ? 'No use-case data available yet.'
         : 'No use cases match the current filter.';
@@ -966,15 +969,10 @@
       bar.appendChild(fill);
       healthCell.appendChild(bar);
 
-      const row = tr({},
-        nameCell,
-        statusTd(uc.aiken,          'Aiken'),
-        statusTd(uc.cclJava,        'CCL Java'),
-        statusTd(uc.meshjs,         'Mesh.js'),
-        statusTd(uc.lucidEvolution, 'Lucid Evolution'),
-        healthCell,
-      );
-      matrixBody.appendChild(row);
+      const cells = [nameCell];
+      FRAMEWORK_LIST.forEach(f => cells.push(statusTd(uc[f.id], f.label)));
+      cells.push(healthCell);
+      matrixBody.appendChild(tr({}, ...cells));
     });
   }
 
@@ -1009,12 +1007,29 @@
 
     const s = data.testSummary || {};
 
+    // Pick up the framework registry from dashboard.json. Driven by frameworks.json
+    // → dashboard.json so adding a framework adds a column with no HTML change.
+    FRAMEWORK_LIST = Array.isArray(data.frameworks) ? data.frameworks : [];
+
+    // Render the matrix header from the framework list (between "Use Case" and "Health").
+    const headRow = document.querySelector('#matrix-head tr');
+    if (headRow) {
+      // Remove any previously-injected framework header cells (everything between
+      // "Use Case" at index 0 and the trailing "Health" cell).
+      while (headRow.children.length > 2) headRow.removeChild(headRow.children[1]);
+      const healthTh = headRow.lastElementChild;
+      FRAMEWORK_LIST.forEach(f => {
+        const th = el('th', { className: 'th-center', textContent: f.label });
+        headRow.insertBefore(th, healthTh);
+      });
+    }
+
     // Count not-implemented across all use cases × frameworks
     const useCases = data.useCases || [];
     let notImpl = 0;
     useCases.forEach(uc => {
-      FRAMEWORKS.forEach(f => {
-        if (!uc[f] || uc[f] === 'not-implemented') notImpl++;
+      FRAMEWORK_LIST.forEach(f => {
+        if (!uc[f.id] || uc[f.id] === 'not-implemented') notImpl++;
       });
     });
 

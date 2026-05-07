@@ -15,6 +15,7 @@ NC='\033[0m' # No Color
 # ── Paths ───────────────────────────────────────────────────────────────────────
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 VERSIONS_FILE="$REPO_ROOT/versions.json"
+FRAMEWORKS_FILE="$REPO_ROOT/frameworks.json"
 RESULTS_DIR="$REPO_ROOT/.local-test-results"
 VERSION_REPORT="$RESULTS_DIR/version-report.json"
 OUTPUT_DIR="$REPO_ROOT/docs"
@@ -31,6 +32,16 @@ if [ ! -f "$VERSIONS_FILE" ]; then
   exit 0
 fi
 
+if [ ! -f "$FRAMEWORKS_FILE" ]; then
+  echo -e "${RED}ERROR: $FRAMEWORKS_FILE not found.${NC}" >&2
+  exit 0
+fi
+
+# Compact JSON array of {id, label, kind, statusPrefix} per framework.
+FRAMEWORKS_META=$(jq -c '[.frameworks[] | {id, label, kind, statusPrefix}]' "$FRAMEWORKS_FILE")
+# Space-separated lists, in registry order, for the prefix-stripping loop.
+ALL_PREFIXES=$(jq -r '.frameworks[].statusPrefix' "$FRAMEWORKS_FILE")
+
 echo -e "${BLUE}Generating dashboard JSON...${NC}"
 echo ""
 
@@ -45,12 +56,14 @@ if [ -d "$RESULTS_DIR" ]; then
   ALL_EXAMPLES=$(find "$RESULTS_DIR" -maxdepth 1 -name "*-status.txt" -type f 2>/dev/null \
     | while IFS= read -r f; do
         base=$(basename "$f")
-        # Strip known prefixes and the trailing -status.txt
-        name="${base#aiken-}"
-        name="${name#ccl-}"
-        name="${name#mesh-}"
-        name="${name#lucid-}"
-        name="${name%-status.txt}"
+        name="${base%-status.txt}"
+        # Strip whichever framework prefix is present (from frameworks.json).
+        for prefix in $ALL_PREFIXES; do
+          if [[ "$name" == "${prefix}-"* ]]; then
+            name="${name#${prefix}-}"
+            break
+          fi
+        done
         printf '%s\n' "$name"
       done \
     | sort -u)
@@ -116,35 +129,31 @@ if [ -n "$ALL_EXAMPLES" ]; then
   while IFS= read -r example; do
     [ -n "$example" ] || continue
 
-    # Determine per-framework status
-    get_status() {
-      local prefix="$1"
-      local sf="$RESULTS_DIR/${prefix}-${example}-status.txt"
+    # Build an object keyed by framework.id with status values for this example.
+    # Iterates over FRAMEWORKS_META so adding a framework to frameworks.json
+    # automatically adds a column without touching this script.
+    statuses_json='{}'
+    log_line="  ${example}:"
+    while IFS= read -r framework; do
+      id=$(printf '%s' "$framework"     | jq -r '.id')
+      prefix=$(printf '%s' "$framework" | jq -r '.statusPrefix')
+      sf="$RESULTS_DIR/${prefix}-${example}-status.txt"
       if [ -f "$sf" ]; then
-        local raw
         raw=$(tr -d '[:space:]' < "$sf")
-        map_status "$raw"
+        status=$(map_status "$raw")
       else
-        printf 'not-implemented'
+        status='not-implemented'
       fi
-    }
+      log_line="${log_line} ${id}=${status}"
+      statuses_json=$(printf '%s' "$statuses_json" \
+        | jq --arg k "$id" --arg v "$status" '. + {($k): $v}')
+    done < <(printf '%s' "$FRAMEWORKS_META" | jq -c '.[]')
 
-    aiken_status=$(get_status "aiken")
-    ccl_status=$(get_status "ccl")
-    mesh_status=$(get_status "mesh")
-    lucid_status=$(get_status "lucid")
+    echo -e "$log_line"
 
-    echo -e "  ${example}: aiken=${aiken_status} ccl=${ccl_status} mesh=${mesh_status} lucid=${lucid_status}"
-
-    # Append JSON object to array using jq
     USE_CASES_JSON=$(printf '%s' "$USE_CASES_JSON" \
-      | jq \
-          --arg name "$example" \
-          --arg aiken "$aiken_status" \
-          --arg cclJava "$ccl_status" \
-          --arg meshjs "$mesh_status" \
-          --arg lucidEvolution "$lucid_status" \
-          '. + [{name: $name, aiken: $aiken, cclJava: $cclJava, meshjs: $meshjs, lucidEvolution: $lucidEvolution}]')
+      | jq --arg name "$example" --argjson statuses "$statuses_json" \
+          '. + [({name: $name} + $statuses)]')
   done <<< "$ALL_EXAMPLES"
 fi
 
@@ -192,6 +201,9 @@ echo -e "${BLUE}Writing $OUTPUT_FILE...${NC}"
 
 LAST_UPDATED=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
 
+# Public-facing framework metadata (no statusPrefix — that's an internal detail).
+FRAMEWORKS_PUBLIC=$(printf '%s' "$FRAMEWORKS_META" | jq '[.[] | {id, label, kind}]')
+
 jq -n \
   --arg      lastUpdated      "$LAST_UPDATED" \
   --argjson  total            "$TOTAL" \
@@ -199,6 +211,7 @@ jq -n \
   --argjson  failed           "$FAILED" \
   --argjson  skipped          "$SKIPPED" \
   --argjson  successRate      "$SUCCESS_RATE" \
+  --argjson  frameworks       "$FRAMEWORKS_PUBLIC" \
   --argjson  useCases         "$USE_CASES_JSON" \
   --argjson  currentVersions  "$CURRENT_JSON" \
   --argjson  latestVersions   "$LATEST_JSON" \
@@ -212,6 +225,7 @@ jq -n \
       skipped:     $skipped,
       successRate: $successRate
     },
+    frameworks: $frameworks,
     useCases: $useCases,
     versions: {
       current: $currentVersions,

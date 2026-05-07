@@ -244,6 +244,39 @@ jobs:
             ${{ matrix.example }}/offchain/meshjs/test-status.txt
           retention-days: 30
 
+  # ─────────────────────────────────────────────────────────────────────────
+  # ADDING A NEW FRAMEWORK
+  #
+  # The discovery script, dashboard generator, and dashboard HTML all read
+  # `frameworks.json` and add a new framework automatically. The CI workflow
+  # is the only place that still needs a copy-paste — each toolchain has its
+  # own setup steps.
+  #
+  #   1. Add an entry to `frameworks.json` at the repo root:
+  #        { "id": "<id>", "label": "<Display Name>",
+  #          "kind": "onchain"|"offchain",
+  #          "discoveryPath": "onchain/<id>/<manifest>"  (or offchain/...),
+  #          "statusPrefix": "<short-prefix>" }
+  #      Discovery + dashboard pick it up immediately.
+  #
+  #   2. Copy one of the test-* jobs above (or compile-aiken for an on-chain
+  #      compile job) as a template, then change:
+  #        - The job name → `test-<id>` or `compile-<id>`
+  #        - `matrix.example: ${{ fromJson(needs.discover.outputs.<prefix>-examples) }}`
+  #        - The `if:` guard → `needs.discover.outputs.<prefix>-examples != '[]'`
+  #        - Toolchain setup (replace e.g. `setup-java`/`setup-deno` with what you need)
+  #        - `working-directory` and the run command
+  #        - The artifact name → `logs-<prefix>-${{ matrix.example }}`
+  #        - The path globs to your test-output.log + test-status.txt
+  #
+  #   3. (Optional) If your framework introduces new pinned libraries, add
+  #      them to `versions.json` and a section in `scripts/sync-versions.sh`
+  #      and `scripts/check-library-versions.sh`.
+  #
+  # The reconstruct-status step in `report-and-dashboard` is already generic
+  # (it scans every `logs-*` artifact), so no changes are needed there.
+  # ─────────────────────────────────────────────────────────────────────────
+
   test-lucid:
     name: Test Lucid Evolution - ${{ matrix.example }}
     needs: [discover, compile-aiken]

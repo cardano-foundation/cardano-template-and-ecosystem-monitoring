@@ -7,6 +7,34 @@ Please note we have a [code of conduct](https://github.com/cardano-foundation/ca
 
 ## Development
 
+### Adding a new framework
+
+The pipeline (discovery, dashboard, version checks) is driven by a single registry at `frameworks.json`. To add a new on-chain language or off-chain SDK:
+
+1. **Add an entry to `frameworks.json`**:
+   ```json
+   {
+     "id": "<unique-id>",
+     "label": "<Display Name>",
+     "kind": "onchain",
+     "discoveryPath": "onchain/<dir>/<manifest-file>",
+     "statusPrefix": "<short-prefix>"
+   }
+   ```
+   The discovery script will start scanning for `*/onchain/<dir>/<manifest-file>` and the dashboard will add a column automatically. `statusPrefix` is what shows up in `.local-test-results/<prefix>-<example>-status.txt` and in the GitHub Actions artifact name (`logs-<prefix>-...`); keep it short and stable.
+
+2. **Add a CI job to `.github/workflows/ecosystem-test.yml`**: copy one of the existing `test-*` jobs (or `compile-aiken` for a compile-only on-chain job) and adapt the toolchain setup, run command, working directory, and artifact name. There's a comment block above `test-lucid` with the full checklist.
+
+3. **(Optional) Add library version pins**: if your framework uses pinned upstream libraries you want tracked, add them to `versions.json` and a corresponding section in `scripts/sync-versions.sh` and `scripts/check-library-versions.sh`. (You can skip this if you only want the framework to appear in the matrix and have CI run its tests.)
+
+To verify your registry entry is wired up correctly, run locally:
+
+```bash
+bash scripts/local-test-discovery.sh   # confirm discovery finds your examples
+bash scripts/generate-dashboard.sh     # confirm dashboard.json gets a new column
+cd docs && python3 -m http.server 8000 # then open http://localhost:8000
+```
+
 ## Issues and pull requests
 
 ### Bug reports
