@@ -227,8 +227,7 @@ if (import.meta.main) {
     console.log(
       'Commands: mintAndLock [walletIndex], collect [walletIndex], burn [walletIndex] [amount], prepare <count>, test [walletIndex]',
     );
-    Deno.exit(1);
-  }
+  } else {
 
   const cmd = args[0];
 
@@ -246,4 +245,5 @@ if (import.meta.main) {
   } else {
     console.log('Unknown command');
   }
+  } // end else (args.length > 0)
 }

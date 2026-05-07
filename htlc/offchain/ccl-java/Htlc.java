@@ -165,10 +165,14 @@ public class Htlc {
                                 .getCompiledCode();
 
                 byte[] hashedAnswer = Sha256Hash.hash(secret.getBytes()); // Hash the secret answer
-                long expiration = LocalDateTime.now().plusMinutes(1).toEpochSecond(ZoneOffset.UTC) * 1000; // Set
-                                                                                                           // expiration
-                                                                                                           // time to
-                System.out.println("Expiration time (epoch seconds): " + expiration);
+                long expiration;
+                try {
+                        long blockTime = backendService.getBlockService().getLatestBlock().getValue().getTime();
+                        expiration = (blockTime + 60) * 1000L;
+                } catch (ApiException e) {
+                        expiration = LocalDateTime.now().plusMinutes(1).toEpochSecond(ZoneOffset.UTC) * 1000;
+                }
+                System.out.println("Expiration time (epoch ms): " + expiration);
                 // Apply parameters to the validator compiled code to get the compiled code
                 String compiledCode = AikenScriptUtil.applyParamToScript(
                                 ListPlutusData.of(

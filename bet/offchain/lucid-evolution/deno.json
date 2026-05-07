@@ -1,5 +1,7 @@
 {
+    "nodeModulesDir": "auto",
     "imports": {
+        "libsodium-wrappers-sumo": "npm:libsodium-wrappers-sumo@0.7.15",
         "@evolution-sdk/lucid": "npm:@evolution-sdk/lucid@2.0.1"
     }
 }
