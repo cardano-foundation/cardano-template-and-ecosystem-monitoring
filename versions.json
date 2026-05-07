@@ -1,10 +1,10 @@
 {
   "aiken-compiler": "v1.1.21",
-  "aiken-lang/stdlib": "v3.0.0",
-  "sidan-lab/vodka": "0.1.22",
-  "@meshsdk/core": "1.9.0-beta.93",
-  "@meshsdk/core-csl": "1.9.0-beta.93",
-  "@meshsdk/common": "1.9.0-beta.93",
+  "aiken-lang/stdlib": "v3.1.0",
+  "sidan-lab/vodka": "0.1.23",
+  "@meshsdk/core": "1.9.0-beta.102",
+  "@meshsdk/core-csl": "1.9.0-beta.102",
+  "@meshsdk/common": "1.9.0-beta.102",
   "@evolution-sdk/lucid": "2.0.1",
-  "cardano-client-lib": "0.7.0-beta2"
+  "cardano-client-lib": "0.8.0-pre4"
 }

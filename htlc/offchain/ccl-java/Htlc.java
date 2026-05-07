@@ -5,8 +5,8 @@
 //COMPILE_OPTIONS --enable-preview -source 24
 //RUNTIME_OPTIONS --enable-preview
 
-//DEPS com.bloxbean.cardano:cardano-client-lib:0.7.0-beta2
-//DEPS com.bloxbean.cardano:cardano-client-backend-blockfrost:0.7.0-beta2
+//DEPS com.bloxbean.cardano:cardano-client-lib:0.8.0-pre4
+//DEPS com.bloxbean.cardano:cardano-client-backend-blockfrost:0.8.0-pre4
 //DEPS com.bloxbean.cardano:aiken-java-binding:0.1.0
 // @formatter:on
 

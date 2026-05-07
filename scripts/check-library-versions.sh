@@ -84,8 +84,11 @@ fetch_npm_latest() {
 }
 
 # ── Maven Central helper ────────────────────────────────────────────────────────
-# Reads maven-metadata.xml directly — the Solr search API's `latestVersion` field
-# does not sort versions correctly and frequently misses pre-releases.
+# Reads maven-metadata.xml directly. The Solr `latestVersion` and the XML
+# `<latest>` tag both reflect publish ORDER, not version height — that fails
+# when naming changes mid-train (e.g. 0.8.0-pre4 published before 0.8.0-preview1).
+# Strategy: enumerate all <version> entries, parse each into
+# (major, minor, patch, stable_flag, trailing_number), and pick the max.
 # Prints the latest version string, or "unknown" on failure.
 fetch_maven_latest() {
   local group_path="$1"   # e.g. com/bloxbean/cardano
@@ -95,17 +98,45 @@ fetch_maven_latest() {
     "https://repo1.maven.org/maven2/${group_path}/${artifact}/maven-metadata.xml" \
     2>/dev/null) || true
 
-  # Prefer the <latest> tag, fall back to the last <version> in the list
-  local ver
-  ver=$(printf '%s' "$response" | grep -oE '<latest>[^<]+</latest>' | head -1 | sed 's|<latest>||;s|</latest>||' | tr -d '[:space:]')
-  if [ -z "$ver" ]; then
-    ver=$(printf '%s' "$response" | grep -oE '<version>[^<]+</version>' | tail -1 | sed 's|<version>||;s|</version>||' | tr -d '[:space:]')
+  local versions
+  versions=$(printf '%s' "$response" | grep -oE '<version>[^<]+</version>' | sed 's|<version>||;s|</version>||;s|[[:space:]]||g')
+
+  if [ -z "$versions" ]; then
+    echo "unknown"
+    return
   fi
 
-  if [ -z "$ver" ]; then
+  # For each version, emit: <M> <m> <p> <stable_flag> <trailing_num> <original>
+  # Then sort numerically descending on each key and take the top row.
+  local top
+  top=$(printf '%s\n' "$versions" | while IFS= read -r v; do
+    [ -z "$v" ] && continue
+    local clean=${v#v}
+    local base suffix
+    if [[ "$clean" == *-* ]]; then
+      base="${clean%%-*}"
+      suffix="${clean#*-}"
+    else
+      base="$clean"
+      suffix=""
+    fi
+    local maj min pat
+    maj=$(printf '%s' "$base" | cut -d. -f1 | grep -oE '^[0-9]+' | head -1)
+    min=$(printf '%s' "$base" | cut -d. -f2 | grep -oE '^[0-9]+' | head -1)
+    pat=$(printf '%s' "$base" | cut -d. -f3 | grep -oE '^[0-9]+' | head -1)
+    local stable trail
+    if [ -z "$suffix" ]; then stable=1; trail=0
+    else
+      stable=0
+      trail=$(printf '%s' "$suffix" | grep -oE '[0-9]+$' | head -1)
+    fi
+    printf '%d %d %d %d %d %s\n' "${maj:-0}" "${min:-0}" "${pat:-0}" "${stable:-0}" "${trail:-0}" "$v"
+  done | sort -k1,1nr -k2,2nr -k3,3nr -k4,4nr -k5,5nr | head -1)
+
+  if [ -z "$top" ]; then
     echo "unknown"
   else
-    echo "$ver"
+    printf '%s' "$top" | awk '{print $6}'
   fi
 }
 
