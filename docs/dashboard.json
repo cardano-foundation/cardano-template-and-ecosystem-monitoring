@@ -1,5 +1,5 @@
 {
-  "lastUpdated": "2026-05-07T07:29:30Z",
+  "lastUpdated": "2026-05-07T07:42:24Z",
   "testSummary": {
     "total": 0,
     "passed": 0,
@@ -20,7 +20,7 @@
       "cardano-client-lib": "0.7.0-beta2"
     },
     "latest": {
-      "aiken-compiler": "unknown",
+      "aiken-compiler": "v1.1.21",
       "aiken-lang/stdlib": "v3.1.0",
       "sidan-lab/vodka": "0.1.23",
       "@meshsdk/core": "1.9.0-beta.102",

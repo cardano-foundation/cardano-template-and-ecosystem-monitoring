@@ -313,6 +313,7 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
+          ref: ${{ github.head_ref || github.ref }}
 
       - name: Install jq
         run: sudo apt-get install -y jq
@@ -444,24 +445,34 @@ jobs:
             });
 
       - name: Commit dashboard.json
-        if: github.event_name == 'schedule' || github.event_name == 'push'
+        if: github.event_name == 'schedule' || github.event_name == 'pull_request'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          BRANCH="${{ github.head_ref || github.ref_name }}"
           git add docs/dashboard.json
           if git diff --cached --quiet; then
             echo "No changes to dashboard.json"
           else
             git commit -m "chore: update dashboard.json [skip ci]"
-            git push origin HEAD:main
+            git push origin "HEAD:${BRANCH}"
           fi
 
+      - name: Update versions.json from upstream
+        if: github.event_name == 'schedule' && env.VERSIONS_OUTDATED == 'true'
+        run: |
+          jq '.libraries | to_entries | map({key: .key, value: .value.latest}) | from_entries' \
+            .local-test-results/version-report.json > versions.json.new
+          mv versions.json.new versions.json
+          echo "Updated versions.json:"
+          cat versions.json
+
       - name: Apply version sync
-        if: (github.event_name == 'schedule' || github.event_name == 'push') && env.VERSIONS_OUTDATED == 'true'
+        if: github.event_name == 'schedule' && env.VERSIONS_OUTDATED == 'true'
         run: bash scripts/sync-versions.sh
 
       - name: Create version-bump PR
-        if: (github.event_name == 'schedule' || github.event_name == 'push') && env.VERSIONS_OUTDATED == 'true'
+        if: github.event_name == 'schedule' && env.VERSIONS_OUTDATED == 'true'
         uses: peter-evans/create-pull-request@v7
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
