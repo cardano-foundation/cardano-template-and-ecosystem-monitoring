@@ -15,7 +15,7 @@ import {
   serializePlutusScript,
   stringToHex
 } from '@meshsdk/core';
-import { blake2b } from '@cardano-sdk/crypto';
+import blake2b from 'blake2b';
 import blueprint from '../../onchain/aiken/plutus.json' with { type: 'json' };
 
 // --------------------------------------------------
