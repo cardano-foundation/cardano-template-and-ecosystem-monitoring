@@ -65,3 +65,50 @@ needs_yaci: true             # true | false. When true, the offchain test job
   - **Onchain CI generalization is also pilot-stage**: discovery handles any `kind: onchain` descriptor generically, but the CI workflow has a single `compile-aiken` job hard-coded to install Aiken and emit `plutus.json`. Adding a new onchain language (Scalus, plu-ts, OpShin, …) as a CI matrix child therefore requires one PR adding `frameworks/<name>.yml` PLUS one PR adding a sibling `compile-<name>` job in `.github/workflows/ecosystem-test.yml`. The `compile-aiken` job's `if:` gate makes this honest: if `aiken` is no longer registered, the job is skipped.
 - **Adding a new offchain framework**: one PR adding one file under `frameworks/` (and per-use-case, one `manifest_key:` entry under `<use-case>/example.yml`). Zero workflow YAML edits, zero discovery-script edits required.
 - **Adding a new onchain language**: see the limitation above — needs both the descriptor AND a sibling `compile-<framework>` job.
+
+## Primitive scenario JSON (`conformance/primitives/<id>/scenarios/<era>/*.json`)
+
+Each scenario asserts one (input, expected output) pair for a Tier 1 conformance primitive. Scenarios are tagged by Cardano protocol era; new eras are sibling folders, never diffs.
+
+### Required fields
+
+```json
+{
+  "id":          "encoding/datum-cbor-roundtrip/conway/simple-int",
+  "primitive":   "encoding/datum-cbor-roundtrip",
+  "era":         "conway",
+  "description": "human-readable text — also used as the scenario's documentation in the dashboard",
+  "input":       { /* primitive-specific input */ },
+  "expected":    { /* primitive-specific expected output */ }
+}
+```
+
+- `id` — globally unique scenario identifier. Convention: `<primitive>/<era>/<short-name>`. Used as the cell id in `matrix.json`.
+- `primitive` — the primitive id (matches the directory path under `conformance/primitives/`). Adapters dispatch on this value.
+- `era` — Cardano protocol era. Must match the parent folder name; matches `versions.yml`'s `protocol_version` for the run that produced this scenario.
+- `description` — plain-English explanation of what's tested and why. Read by humans; rendered on the dashboard's per-scenario tooltip.
+- `input` — primitive-specific input shape. Documented per-primitive in the primitive's `README.md`.
+- `expected` — primitive-specific expected output shape. The adapter's impl returns a value; equality against `expected` determines pass/fail.
+
+### Layout
+
+```
+conformance/primitives/<category>/<name>/
+├── README.md                       teaching unit for this primitive
+└── scenarios/<era>/<short-name>.json
+```
+
+Categories today: `encoding/`, `tx-building/` (P2W2), `plutus-eval/` (P2W2). `governance/` is reserved.
+
+### Adapters
+
+Every registered offchain SDK provides an adapter under `conformance/adapters/<framework>/`. The adapter:
+
+1. Reads the scenario JSON.
+2. Dispatches on `scenario.primitive` to a per-primitive impl.
+3. Calls the SDK's API to produce an observed value.
+4. Compares observed to expected via deep equality.
+5. Writes a `result.json` with `{tier: "primitive", id, primitive, framework, era, status, duration_ms, observed, expected, error_summary?}`.
+6. Exits 0 on pass or skipped, 1 on fail.
+
+If an adapter has no impl for a primitive, the scenario is reported as `skipped` (not `fail`); coverage growth across SDKs is measurable.

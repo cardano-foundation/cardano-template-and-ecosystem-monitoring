@@ -1,0 +1,13 @@
+{
+  "id": "encoding/address-bech32-roundtrip/conway/stake-address",
+  "primitive": "encoding/address-bech32-roundtrip",
+  "era": "conway",
+  "description": "Encode a Cardano testnet stake-key reward address. Header byte 0xe0 (network 0 / type 0xe = stake key) followed by a 28-byte stake-key hash. HRP is `stake_test`. Catches SDKs that confuse the payment-vs-stake header bits or use the wrong HRP.",
+  "input": {
+    "address_bytes_hex": "e0000102030405060708090a0b0c0d0e0f101112131415161718191a1b",
+    "network": "testnet"
+  },
+  "expected": {
+    "bech32": "stake_test1uqqqzqsrqszsvpcgpy9qkrqdpc83qygjzv2p29shrqv35xcfrxem8"
+  }
+}

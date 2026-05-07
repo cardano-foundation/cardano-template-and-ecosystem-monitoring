@@ -1,0 +1,13 @@
+{
+  "id": "encoding/address-bech32-roundtrip/conway/payment-address",
+  "primitive": "encoding/address-bech32-roundtrip",
+  "era": "conway",
+  "description": "Encode a Cardano testnet payment-only (enterprise) address. The address bytes are a single header byte (0x60 = network 0 / type 0x6 = enterprise) followed by a 28-byte payment-key hash. The bech32 encoding uses the HRP `addr_test` and the standard bech32 polymod (BIP-0173). Catches SDKs that misuse bech32m, drop the HRP, or mishandle the 8→5-bit conversion.",
+  "input": {
+    "address_bytes_hex": "60000102030405060708090a0b0c0d0e0f101112131415161718191a1b",
+    "network": "testnet"
+  },
+  "expected": {
+    "bech32": "addr_test1vqqqzqsrqszsvpcgpy9qkrqdpc83qygjzv2p29shrqv35xcftcpvd"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "id": "encoding/datum-cbor-roundtrip/conway/constr-with-bytes",
+  "primitive": "encoding/datum-cbor-roundtrip",
+  "era": "conway",
+  "description": "The common datum shape: a Constr(0) holding a bytestring, an integer, and a list. Exercises the canonical Cardano encoding rules for plutus_data Constr (alt 0..6 → CBOR tag 121..127 + indefinite-length list of fields) and the indefinite-length encoding for nested lists.",
+  "input": {
+    "plutus_data": {
+      "constructor": 0,
+      "fields": [
+        { "bytes": "deadbeef" },
+        { "int": 42 },
+        { "list": [{ "int": 1 }, { "int": 2 }] }
+      ]
+    }
+  },
+  "expected": {
+    "cbor_hex": "d8799f44deadbeef182a9f0102ffff",
+    "blake2b_256": "3fc932e62762d06c52c998d7de5b58525c4dde7e609079afb69abf6bc615db0a"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "id": "encoding/plutus-data-canonical-order/conway/map-needs-sorting",
+  "primitive": "encoding/plutus-data-canonical-order",
+  "era": "conway",
+  "description": "A plutus_data Map whose keys are presented in REVERSE canonical order in the input. The SDK must canonicalise (sort by encoded-key bytes) before emitting CBOR, otherwise the resulting datum hash will not match the canonical form and downstream contracts comparing hashes will reject it. Expected CBOR is identical to map-already-sorted (because canonical form is unique).",
+  "input": {
+    "plutus_data": {
+      "map": [
+        { "k": { "bytes": "02" }, "v": { "int": 20 } },
+        { "k": { "bytes": "01" }, "v": { "int": 10 } }
+      ]
+    }
+  },
+  "expected": {
+    "cbor_hex": "bf41010a410214ff",
+    "blake2b_256": "ae313d8e1d208b2aef5a9e16e3d208543336a4704e1b6961aeb5e15d034e1016"
+  }
+}
