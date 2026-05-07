@@ -1,6 +1,6 @@
-# Price Bet (Lucid Evolution)
+# Price Bet (Evolution SDK)
 
-This project demonstrates a decentralized price prediction betting system using Aiken on-chain validators and the Lucid Evolution off-chain library with Charli3 oracles.
+This project demonstrates a decentralized price prediction betting system using Aiken on-chain validators and the Evolution SDK off-chain library with Charli3 oracles.
 
 ## Prerequisites
 

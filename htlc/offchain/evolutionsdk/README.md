@@ -1,6 +1,6 @@
-# HTLC Off-chain (Lucid Evolution)
+# HTLC Off-chain (Evolution SDK)
 
-This folder contains the off-chain implementation of the Hash Time Locked Contract (HTLC) using the Lucid Evolution SDK.
+This folder contains the off-chain implementation of the Hash Time Locked Contract (HTLC) using the Evolution SDK SDK.
 
 ## Prerequisites
 

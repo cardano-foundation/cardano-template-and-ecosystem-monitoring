@@ -1,6 +1,6 @@
-# Escrow Contract Off-chain Code (Lucid Evolution)
+# Escrow Contract Off-chain Code (Evolution SDK)
 
-This directory contains the off-chain code for interacting with the Escrow smart contract on the Cardano Preprod testnet. It uses [Lucid Evolution](https://github.com/Anastasia-Labs/lucid-evolution) and [Deno](https://deno.land/).
+This directory contains the off-chain code for interacting with the Escrow smart contract on the Cardano Preprod testnet. It uses [Evolution SDK](https://github.com/Anastasia-Labs/lucid-evolution) and [Deno](https://deno.land/).
 
 ## Prerequisites
 
@@ -19,7 +19,7 @@ This directory contains the off-chain code for interacting with the Escrow smart
 1.  **Install Deno**: If not already installed.
 2.  **Navigate to directory**:
     ```bash
-    cd escrow/offchain/lucid-evolution
+    cd escrow/offchain/evolutionsdk
     ```
 
 ## Wallet Management

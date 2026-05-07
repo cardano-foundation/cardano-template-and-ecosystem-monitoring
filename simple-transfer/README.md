@@ -20,16 +20,16 @@ aiken build
 
 ## 📄 Off-chain
 
-### Lucid Evolution (Deno)
+### Evolution SDK (Deno)
 
-This offchain implementation uses [Lucid Evolution](https://github.com/Evolution-SDK/lucid-evolution).
+This offchain implementation uses [Evolution SDK](https://github.com/Evolution-SDK/lucid-evolution).
 
 #### Prerequisites
 - [Deno](https://deno.land/)
 
 #### Usage
 ```zsh
-cd offchain/lucid-evolution
+cd offchain/evolutionsdk
 deno task prepare 2
 deno task lock 5000000 <ADDRESS_OF_WALLET_1> 0
 deno task claim 1

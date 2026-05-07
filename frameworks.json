@@ -8,13 +8,6 @@
       "statusPrefix": "aiken"
     },
     {
-      "id": "scalus",
-      "label": "Scalus",
-      "kind": "onchain",
-      "discoveryPath": "onchain/scalus/build.sbt",
-      "statusPrefix": "scalus"
-    },
-    {
       "id": "ccl-java",
       "label": "CCL Java",
       "kind": "offchain",
@@ -29,11 +22,11 @@
       "statusPrefix": "mesh"
     },
     {
-      "id": "lucid-evolution",
-      "label": "Lucid Evolution",
+      "id": "evolutionsdk",
+      "label": "Evolution SDK",
       "kind": "offchain",
-      "discoveryPath": "offchain/lucid-evolution/deno.json",
-      "statusPrefix": "lucid"
+      "discoveryPath": "offchain/evolutionsdk/deno.json",
+      "statusPrefix": "evosdk"
     }
   ]
 }

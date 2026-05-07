@@ -1,6 +1,6 @@
-# Vault Contract Offchain (Lucid Evolution)
+# Vault Contract Offchain (Evolution SDK)
 
-This directory contains the offchain code for interacting with the Vault Aiken contract using Lucid Evolution (Deno).
+This directory contains the offchain code for interacting with the Vault Aiken contract using Evolution SDK (Deno).
 
 ## Prerequisites
 

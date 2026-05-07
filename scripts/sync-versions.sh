@@ -177,12 +177,12 @@ done < <(find "$REPO_ROOT" -path "*/offchain/meshjs/deno.json" -print0 | sort -z
 
 echo ""
 
-# ── 3. Lucid Evolution deno.json files ────────────────────────────────────────
-echo "=== Updating Lucid Evolution deno.json files ==="
+# ── 3. Evolution SDK deno.json files ──────────────────────────────────────────
+echo "=== Updating Evolution SDK deno.json files ==="
 
 while IFS= read -r -d '' deno_file; do
   update_npm_dep "$deno_file" "@evolution-sdk/lucid" "$LUCID_VERSION"
-done < <(find "$REPO_ROOT" -path "*/offchain/lucid-evolution/deno.json" -print0 | sort -z)
+done < <(find "$REPO_ROOT" -path "*/offchain/evolutionsdk/deno.json" -print0 | sort -z)
 
 echo ""
 

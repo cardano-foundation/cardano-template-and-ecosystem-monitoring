@@ -1,4 +1,4 @@
-# Atomic Transaction (Offchain - Lucid Evolution)
+# Atomic Transaction (Offchain - Evolution SDK)
 
 This project interacts with the Atomic Transaction Aiken smart contract, specifically the minting policy part which requires a password to mint or burn tokens.
 

@@ -1,6 +1,6 @@
-## 💠 Deno + Lucid Evolution (Off‑chain auction)
+## 💠 Deno + Evolution SDK (Off‑chain auction)
 
-This repo includes Auction Deno + Lucid Evolution off‑chain examples. Quick setup and run steps for the Lucid Evolution implementations:
+This repo includes Auction Deno + Evolution SDK off‑chain examples. Quick setup and run steps for the Evolution SDK implementations:
 
 Prerequisites
 
@@ -20,9 +20,9 @@ Prepare wallets, fund, run
   - Use Deno allow-all shorthand `-A` (examples use `deno run -A ...`). More restrictive flags: --allow-net --allow-read --allow-write --allow-env.
   - The scripts write seed files (wallet\_\*.txt or wallet.txt). Keep them private.
 
-Auction (Lucid Evolution)
+Auction (Evolution SDK)
 
-- Commands (run from auction/offchain/lucid-evolution):
+- Commands (run from auction/offchain/evolutionsdk):
   - Prepare 3 wallets: deno run -A auction.ts prepare 3
   - Fund wallet_0 with tADA (Preprod)
   - Initialize auction with starting bid 3 ADA: deno run -A auction.ts init 3000000

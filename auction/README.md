@@ -143,7 +143,7 @@ Choose your preferred Cardano smart contract language and framework:
 
 Select appropriate off-chain tools based on your tech stack:
 
-- **JavaScript/TypeScript**: Lucid Evolution, Mesh.js, or CardanoJS
+- **JavaScript/TypeScript**: Evolution SDK, Mesh.js, or CardanoJS
 - **Java**: Cardano Client Library (CCL)
 - **Python**: PyCardano or similar libraries
 - **Haskell**: Plutus Application Framework

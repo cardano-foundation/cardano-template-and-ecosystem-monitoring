@@ -1,6 +1,6 @@
-# Decentralized Identity (Lucid Evolution)
+# Decentralized Identity (Evolution SDK)
 
-This off-chain workflow drives the DID state machine defined in `onchain/aiken`. It creates an identity UTxO, adds and removes delegates, and transfers ownership using Lucid Evolution on Preprod.
+This off-chain workflow drives the DID state machine defined in `onchain/aiken`. It creates an identity UTxO, adds and removes delegates, and transfers ownership using Evolution SDK on Preprod.
 
 ## Prerequisites
 
@@ -16,7 +16,7 @@ aiken build
 ```
 
 ```sh
-cd ../../offchain/lucid-evolution
+cd ../../offchain/evolutionsdk
 # Fix missing libsodium-sumo.mjs file (workaround for Deno npm compatibility)
 ./fix-libsodium.sh
 deno run -A did.ts prepare

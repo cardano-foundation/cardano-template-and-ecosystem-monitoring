@@ -57,9 +57,9 @@ CCL_FAILED=0
 MESH_TOTAL=0
 MESH_PASSED=0
 MESH_FAILED=0
-LUCID_TOTAL=0
-LUCID_PASSED=0
-LUCID_FAILED=0
+EVOSDK_TOTAL=0
+EVOSDK_PASSED=0
+EVOSDK_FAILED=0
 
 # Test CCL Java examples
 echo -e "${BLUE}Testing CCL Java Examples${NC}"
@@ -242,13 +242,13 @@ else
   done < <(find . -maxdepth 4 -path "*/offchain/meshjs/deno.json" -type f | sort)
 fi
 
-# Test Lucid Evolution examples
+# Test Evolution SDK examples
 echo ""
-echo -e "${BLUE}Testing Lucid Evolution Examples${NC}"
+echo -e "${BLUE}Testing Evolution SDK Examples${NC}"
 echo "----------------------------------------"
 
 if ! command -v deno &> /dev/null; then
-  echo -e "${RED}❌ Deno is not installed. Skipping Lucid Evolution tests.${NC}"
+  echo -e "${RED}❌ Deno is not installed. Skipping Evolution SDK tests.${NC}"
 else
   while IFS= read -r deno_json; do
     if [[ ! -f "$deno_json" ]]; then
@@ -258,17 +258,17 @@ else
     DIR=$(dirname "$deno_json")
     EXAMPLE=$(echo "$DIR" | cut -d'/' -f2)
 
-    LUCID_TOTAL=$((LUCID_TOTAL + 1))
+    EVOSDK_TOTAL=$((EVOSDK_TOTAL + 1))
 
-    echo -e "${YELLOW}📦 [$LUCID_TOTAL] Testing: $EXAMPLE${NC}"
+    echo -e "${YELLOW}📦 [$EVOSDK_TOTAL] Testing: $EXAMPLE${NC}"
     echo "   Path: $DIR"
 
     # Find TypeScript file
     TS_FILE=$(find "$DIR" -maxdepth 1 -name "*.ts" -type f | head -1)
     if [[ -z "$TS_FILE" ]]; then
       echo -e "   ${RED}❌ No TypeScript file found${NC}"
-      LUCID_FAILED=$((LUCID_FAILED + 1))
-      echo "skipped" > "$RESULTS_DIR/lucid-$EXAMPLE-status.txt"
+      EVOSDK_FAILED=$((EVOSDK_FAILED + 1))
+      echo "skipped" > "$RESULTS_DIR/evosdk-$EXAMPLE-status.txt"
       echo ""
       continue
     fi
@@ -294,7 +294,7 @@ else
 
     # Run with tee to show output in real-time AND save to log
     # Use --foreground with timeout to make Ctrl+C work properly
-    if timeout --foreground 300 deno run --allow-all "$TS_FILENAME" 2>&1 | tee "$REPO_ROOT/$RESULTS_DIR/lucid-$EXAMPLE.log"; then
+    if timeout --foreground 300 deno run --allow-all "$TS_FILENAME" 2>&1 | tee "$REPO_ROOT/$RESULTS_DIR/evosdk-$EXAMPLE.log"; then
       EXIT_CODE=0
     else
       EXIT_CODE=$?
@@ -306,24 +306,24 @@ else
 
     # Check for success
     if [[ $EXIT_CODE -eq 0 ]]; then
-      LUCID_PASSED=$((LUCID_PASSED + 1))
+      EVOSDK_PASSED=$((EVOSDK_PASSED + 1))
       echo -e "   ${GREEN}✅ PASSED${NC}"
-      echo "success" > "$RESULTS_DIR/lucid-$EXAMPLE-status.txt"
+      echo "success" > "$RESULTS_DIR/evosdk-$EXAMPLE-status.txt"
     elif [[ $EXIT_CODE -eq 124 ]]; then
-      LUCID_FAILED=$((LUCID_FAILED + 1))
+      EVOSDK_FAILED=$((EVOSDK_FAILED + 1))
       echo -e "   ${RED}❌ TIMEOUT (>300s)${NC}"
-      echo "timeout" > "$RESULTS_DIR/lucid-$EXAMPLE-status.txt"
+      echo "timeout" > "$RESULTS_DIR/evosdk-$EXAMPLE-status.txt"
     else
-      LUCID_FAILED=$((LUCID_FAILED + 1))
+      EVOSDK_FAILED=$((EVOSDK_FAILED + 1))
       echo -e "   ${RED}❌ FAILED (exit code: $EXIT_CODE)${NC}"
       echo "   Last 10 lines of output:"
-      tail -10 "$RESULTS_DIR/lucid-$EXAMPLE.log" | sed 's/^/   | /'
-      echo "failed" > "$RESULTS_DIR/lucid-$EXAMPLE-status.txt"
+      tail -10 "$RESULTS_DIR/evosdk-$EXAMPLE.log" | sed 's/^/   | /'
+      echo "failed" > "$RESULTS_DIR/evosdk-$EXAMPLE-status.txt"
     fi
 
     echo ""
 
-  done < <(find . -maxdepth 4 -path "*/offchain/lucid-evolution/deno.json" -type f | sort)
+  done < <(find . -maxdepth 4 -path "*/offchain/evolutionsdk/deno.json" -type f | sort)
 fi
 
 # Print summary
@@ -347,15 +347,15 @@ if [[ $MESH_TOTAL -gt 0 ]]; then
   echo ""
 fi
 
-if [[ $LUCID_TOTAL -gt 0 ]]; then
-  echo "Lucid Evolution:"
-  echo "  Total:   $LUCID_TOTAL"
-  echo -e "  ${GREEN}Passed:  $LUCID_PASSED ✅${NC}"
-  echo -e "  ${RED}Failed:  $LUCID_FAILED ❌${NC}"
+if [[ $EVOSDK_TOTAL -gt 0 ]]; then
+  echo "Evolution SDK:"
+  echo "  Total:   $EVOSDK_TOTAL"
+  echo -e "  ${GREEN}Passed:  $EVOSDK_PASSED ✅${NC}"
+  echo -e "  ${RED}Failed:  $EVOSDK_FAILED ❌${NC}"
   echo ""
 fi
 
-TOTAL_FAILED=$((CCL_FAILED + MESH_FAILED + LUCID_FAILED))
+TOTAL_FAILED=$((CCL_FAILED + MESH_FAILED + EVOSDK_FAILED))
 
 if [[ $TOTAL_FAILED -gt 0 ]]; then
   echo -e "${RED}Some tests failed. Check logs in $RESULTS_DIR/${NC}"

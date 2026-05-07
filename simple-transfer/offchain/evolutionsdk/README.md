@@ -1,4 +1,4 @@
-# Simple Transfer (Lucid Evolution)
+# Simple Transfer (Evolution SDK)
 
 This project demonstrates a simple transfer contract where funds are locked for a specific receiver using a parameterized Aiken validator.
 

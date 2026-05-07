@@ -22,7 +22,7 @@ jobs:
       aiken-examples: ${{ steps.discovery.outputs.aiken-examples }}
       ccl-examples: ${{ steps.discovery.outputs.ccl-examples }}
       mesh-examples: ${{ steps.discovery.outputs.mesh-examples }}
-      lucid-examples: ${{ steps.discovery.outputs.lucid-examples }}
+      evosdk-examples: ${{ steps.discovery.outputs.evosdk-examples }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -277,16 +277,16 @@ jobs:
   # (it scans every `logs-*` artifact), so no changes are needed there.
   # ─────────────────────────────────────────────────────────────────────────
 
-  test-lucid:
-    name: Test Lucid Evolution - ${{ matrix.example }}
+  test-evolutionsdk:
+    name: Test Evolution SDK - ${{ matrix.example }}
     needs: [discover, compile-aiken]
-    if: needs.discover.outputs.lucid-examples != '[]'
+    if: needs.discover.outputs.evosdk-examples != '[]'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        example: ${{ fromJson(needs.discover.outputs.lucid-examples) }}
+        example: ${{ fromJson(needs.discover.outputs.evosdk-examples) }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -300,7 +300,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/deno
-          key: deno-${{ matrix.example }}-${{ hashFiles(format('{0}/offchain/lucid-evolution/deno.json', matrix.example)) }}
+          key: deno-${{ matrix.example }}-${{ hashFiles(format('{0}/offchain/evolutionsdk/deno.json', matrix.example)) }}
 
       - name: Setup Node.js (for Yaci DevKit)
         uses: actions/setup-node@v4
@@ -329,8 +329,8 @@ jobs:
           name: plutus-${{ matrix.example }}
           path: ${{ matrix.example }}/onchain/aiken/
 
-      - name: Run Lucid Evolution test
-        working-directory: ${{ matrix.example }}/offchain/lucid-evolution
+      - name: Run Evolution SDK test
+        working-directory: ${{ matrix.example }}/offchain/evolutionsdk
         run: |
           TS_FILE=$(ls *.ts | head -1)
           echo "Running: deno run --allow-all $TS_FILE"
@@ -345,15 +345,15 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: logs-lucid-${{ matrix.example }}
+          name: logs-evosdk-${{ matrix.example }}
           path: |
-            ${{ matrix.example }}/offchain/lucid-evolution/test-output.log
-            ${{ matrix.example }}/offchain/lucid-evolution/test-status.txt
+            ${{ matrix.example }}/offchain/evolutionsdk/test-output.log
+            ${{ matrix.example }}/offchain/evolutionsdk/test-status.txt
           retention-days: 30
 
   report-and-dashboard:
     name: Report & Dashboard
-    needs: [compile-aiken, test-ccl-java, test-mesh, test-lucid]
+    needs: [compile-aiken, test-ccl-java, test-mesh, test-evolutionsdk]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -408,9 +408,9 @@ jobs:
             done
           }
 
-          resolve_status ccl   "AssertionError|BUILD FAILED|Exception in thread"
-          resolve_status mesh  "Uncaught|AssertionError|TypeError:|ReferenceError:|SyntaxError:|^error:"
-          resolve_status lucid "Uncaught|AssertionError|TypeError:|ReferenceError:|SyntaxError:|^error:"
+          resolve_status ccl    "AssertionError|BUILD FAILED|Exception in thread"
+          resolve_status mesh   "Uncaught|AssertionError|TypeError:|ReferenceError:|SyntaxError:|^error:"
+          resolve_status evosdk "Uncaught|AssertionError|TypeError:|ReferenceError:|SyntaxError:|^error:"
 
       - name: Generate markdown report
         run: |
@@ -426,11 +426,11 @@ jobs:
           AIKEN_COUNT=$(find artifacts -name "plutus-*" -type d 2>/dev/null | wc -l)
           CCL_COUNT=$(find artifacts -name "logs-ccl-*" -type d 2>/dev/null | wc -l)
           MESH_COUNT=$(find artifacts -name "logs-mesh-*" -type d 2>/dev/null | wc -l)
-          LUCID_COUNT=$(find artifacts -name "logs-lucid-*" -type d 2>/dev/null | wc -l)
+          EVOSDK_COUNT=$(find artifacts -name "logs-evosdk-*" -type d 2>/dev/null | wc -l)
           echo "- **Aiken Examples Compiled**: $AIKEN_COUNT" >> report.md
           echo "- **CCL Java Tests**: $CCL_COUNT" >> report.md
           echo "- **Mesh.js Tests**: $MESH_COUNT" >> report.md
-          echo "- **Lucid Evolution Tests**: $LUCID_COUNT" >> report.md
+          echo "- **Evolution SDK Tests**: $EVOSDK_COUNT" >> report.md
           echo "" >> report.md
           echo "All test logs and build artifacts are available in the workflow artifacts." >> report.md
 

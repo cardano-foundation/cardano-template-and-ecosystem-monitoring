@@ -48,7 +48,7 @@ yaci-devkit up --enable-yaci-store
 # Then run tests
 ./scripts/local-test-offchain.sh
 ```
-Runs all CCL Java, Mesh.js, and Lucid Evolution tests against Yaci DevKit.
+Runs all CCL Java, Mesh.js, and Evolution SDK tests against Yaci DevKit.
 
 #### 4. Generate Report Only
 ```bash
