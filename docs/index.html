@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cardano Ecosystem Dashboard</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:          #0d1117;
+      --bg-card:     #161b22;
+      --bg-card-alt: #1c2128;
+      --border:      #30363d;
+      --text:        #e6edf3;
+      --text-muted:  #8b949e;
+      --accent:      #0033AD;
+      --accent-light:#1a56db;
+      --green:       #3fb950;
+      --red:         #f85149;
+      --yellow:      #d29922;
+      --amber-bg:    #2d2009;
+      --amber-border:#6e4c00;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-size: 14px;
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+
+    /* Header */
+    header {
+      background: var(--bg-card);
+      border-bottom: 1px solid var(--border);
+      padding: 24px 32px;
+    }
+
+    header h1 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    header h1 .logo {
+      display: inline-block;
+      width: 28px;
+      height: 28px;
+      background: var(--accent);
+      border-radius: 6px;
+      flex-shrink: 0;
+    }
+
+    header p {
+      color: var(--text-muted);
+      margin-top: 4px;
+      font-size: 0.85rem;
+    }
+
+    /* Layout */
+    main {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 32px 24px 64px;
+    }
+
+    section {
+      margin-bottom: 40px;
+    }
+
+    section h2 {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 16px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    /* Summary cards */
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 16px;
+    }
+
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px 22px;
+    }
+
+    .card .label {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 8px;
+    }
+
+    .card .value {
+      font-size: 2rem;
+      font-weight: 700;
+      line-height: 1;
+    }
+
+    .value.green  { color: var(--green); }
+    .value.red    { color: var(--red);   }
+    .value.yellow { color: var(--yellow);}
+    .value.muted  { color: var(--text-muted); }
+
+    /* Tables */
+    .table-wrapper {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    thead {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: var(--bg-card);
+    }
+
+    thead th {
+      padding: 12px 16px;
+      text-align: left;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+
+    .th-center { text-align: center; }
+
+    tbody tr {
+      background: var(--bg);
+      transition: background 0.1s;
+    }
+
+    tbody tr:nth-child(even) {
+      background: var(--bg-card-alt);
+    }
+
+    tbody tr:hover {
+      background: #21262d;
+    }
+
+    tbody tr.outdated {
+      background: var(--amber-bg);
+      border-left: 3px solid var(--amber-border);
+    }
+
+    tbody tr.outdated:nth-child(even) {
+      background: #331f00;
+    }
+
+    tbody td {
+      padding: 11px 16px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: middle;
+    }
+
+    tbody tr:last-child td {
+      border-bottom: none;
+    }
+
+    .td-center { text-align: center; font-size: 1.15rem; }
+
+    .version-pill {
+      display: inline-block;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 1px 8px;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      font-size: 0.82rem;
+      color: var(--text);
+    }
+
+    .status-ok   { color: var(--green); font-size: 0.85rem; }
+    .status-warn { color: var(--yellow); font-size: 0.85rem; }
+
+    .lib-name {
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      font-size: 0.88rem;
+    }
+
+    /* Loading / Error */
+    #loading, #error {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 60vh;
+      text-align: center;
+    }
+
+    #error .error-box {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 40px 48px;
+      max-width: 560px;
+    }
+
+    #error .error-box .error-icon {
+      font-size: 2.4rem;
+    }
+
+    #error .error-box p {
+      margin-top: 12px;
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      line-height: 1.7;
+    }
+
+    #error .error-box .cmd {
+      display: inline-block;
+      margin-top: 8px;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 2px 8px;
+      font-size: 0.82rem;
+      color: var(--text);
+    }
+
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent-light);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 16px;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .empty-row td {
+      text-align: center;
+      color: var(--text-muted);
+      padding: 32px;
+    }
+
+    .hidden { display: none !important; }
+
+    @media (max-width: 600px) {
+      header { padding: 16px; }
+      main   { padding: 20px 12px 48px; }
+      .card .value { font-size: 1.6rem; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>
+    <span class="logo" aria-hidden="true"></span>
+    Cardano Ecosystem Dashboard
+  </h1>
+  <p id="last-updated">Loading…</p>
+</header>
+
+<div id="loading">
+  <div>
+    <div class="spinner"></div>
+    <p style="color:var(--text-muted)">Fetching dashboard data…</p>
+  </div>
+</div>
+
+<div id="error" class="hidden">
+  <div class="error-box">
+    <div class="error-icon">⚠️</div>
+    <p id="error-message">Could not load dashboard data.</p>
+    <span class="cmd">scripts/generate-dashboard.sh</span>
+  </div>
+</div>
+
+<main id="dashboard" class="hidden">
+
+  <!-- Test Summary -->
+  <section>
+    <h2>Test Summary</h2>
+    <div class="cards">
+      <div class="card">
+        <div class="label">Total Tests</div>
+        <div class="value" id="stat-total">—</div>
+      </div>
+      <div class="card">
+        <div class="label">Passed</div>
+        <div class="value green" id="stat-passed">—</div>
+      </div>
+      <div class="card">
+        <div class="label">Failed</div>
+        <div class="value muted" id="stat-failed">—</div>
+      </div>
+      <div class="card">
+        <div class="label">Success Rate</div>
+        <div class="value" id="stat-rate">—</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Ecosystem Readiness Matrix -->
+  <section>
+    <h2>Ecosystem Readiness Matrix</h2>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>Use Case</th>
+            <th class="th-center">Aiken</th>
+            <th class="th-center">CCL Java</th>
+            <th class="th-center">Mesh.js</th>
+            <th class="th-center">Lucid Evolution</th>
+          </tr>
+        </thead>
+        <tbody id="matrix-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Library Versions -->
+  <section>
+    <h2>Library Versions</h2>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>Library</th>
+            <th>Pinned</th>
+            <th>Latest</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="versions-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+</main>
+
+<script>
+  // ── Status display map (emoji only — no raw HTML) ────────
+  const STATUS_DISPLAY = {
+    'passed':          { icon: '✅', label: 'passed' },
+    'failed':          { icon: '❌', label: 'failed' },
+    'skipped':         { icon: '⏭️', label: 'skipped' },
+    'not-implemented': { icon: '—', label: 'not implemented' },
+  };
+
+  // ── DOM helpers ──────────────────────────────────────────
+  function el(tag, attrs, ...children) {
+    const node = document.createElement(tag);
+    if (attrs) {
+      Object.entries(attrs).forEach(([k, v]) => {
+        if (k === 'className')   node.className = v;
+        else if (k === 'textContent') node.textContent = v;
+        else if (k === 'title')  node.title = v;
+        else node.setAttribute(k, v);
+      });
+    }
+    children.forEach(child => {
+      if (child == null) return;
+      node.appendChild(typeof child === 'string'
+        ? document.createTextNode(child)
+        : child);
+    });
+    return node;
+  }
+
+  function td(attrs, ...children) { return el('td', attrs, ...children); }
+  function tr(attrs, ...children) { return el('tr', attrs, ...children); }
+
+  // ── Build a status cell ──────────────────────────────────
+  function statusTd(value) {
+    const entry = STATUS_DISPLAY[value] ?? STATUS_DISPLAY['not-implemented'];
+    const cell = td({ className: 'td-center' });
+    const span = el('span', { title: entry.label });
+    span.textContent = entry.icon;
+    cell.appendChild(span);
+    return cell;
+  }
+
+  // ── Success-rate colour class ────────────────────────────
+  function rateClass(rate) {
+    if (rate >= 0.9) return 'green';
+    if (rate >= 0.6) return 'yellow';
+    return 'red';
+  }
+
+  // ── Render dashboard ─────────────────────────────────────
+  function render(data) {
+    // Header timestamp
+    const ts = data.lastUpdated
+      ? new Date(data.lastUpdated).toLocaleString()
+      : 'unknown';
+    document.getElementById('last-updated').textContent = 'Last updated: ' + ts;
+
+    // Summary cards
+    const s = data.testSummary || {};
+    document.getElementById('stat-total').textContent  = s.total  != null ? s.total  : 0;
+    document.getElementById('stat-passed').textContent = s.passed != null ? s.passed : 0;
+
+    const failedEl = document.getElementById('stat-failed');
+    const failedN  = s.failed != null ? s.failed : 0;
+    failedEl.textContent = failedN;
+    failedEl.className   = 'value ' + (failedN > 0 ? 'red' : 'muted');
+
+    const rateEl = document.getElementById('stat-rate');
+    const rate   = s.successRate != null ? s.successRate : 0;
+    rateEl.textContent = (rate * 100).toFixed(1) + '%';
+    rateEl.className   = 'value ' + rateClass(rate);
+
+    // Ecosystem matrix
+    const matrixBody = document.getElementById('matrix-body');
+    matrixBody.textContent = ''; // clear
+    const useCases = (data.useCases || []).slice().sort((a, b) =>
+      String(a.name).localeCompare(String(b.name))
+    );
+
+    if (useCases.length === 0) {
+      const emptyRow = tr({ className: 'empty-row' });
+      const emptyCell = td({ colspan: '5' });
+      emptyCell.textContent = 'No use-case data available yet.';
+      emptyRow.appendChild(emptyCell);
+      matrixBody.appendChild(emptyRow);
+    } else {
+      useCases.forEach(uc => {
+        const nameCell = td({});
+        const strong = el('strong', { textContent: String(uc.name) });
+        nameCell.appendChild(strong);
+
+        const row = tr({},
+          nameCell,
+          statusTd(uc.aiken),
+          statusTd(uc.cclJava),
+          statusTd(uc.meshjs),
+          statusTd(uc.lucidEvolution)
+        );
+        matrixBody.appendChild(row);
+      });
+    }
+
+    // Versions table
+    const versionsBody = document.getElementById('versions-body');
+    versionsBody.textContent = ''; // clear
+    const current  = (data.versions && data.versions.current)  || {};
+    const latest   = (data.versions && data.versions.latest)   || {};
+    const outdated = new Set((data.versions && data.versions.outdated) || []);
+
+    const libs = Object.keys(current);
+    if (libs.length === 0) {
+      const emptyRow = tr({ className: 'empty-row' });
+      const emptyCell = td({ colspan: '4' });
+      emptyCell.textContent = 'No version data available.';
+      emptyRow.appendChild(emptyCell);
+      versionsBody.appendChild(emptyRow);
+    } else {
+      libs.forEach(lib => {
+        const isOutdated = outdated.has(lib);
+
+        const libCell = td({});
+        libCell.appendChild(el('span', { className: 'lib-name', textContent: lib }));
+
+        const pinnedCell = td({});
+        pinnedCell.appendChild(el('span', { className: 'version-pill', textContent: String(current[lib] || '—') }));
+
+        const latestCell = td({});
+        latestCell.appendChild(el('span', { className: 'version-pill', textContent: String(latest[lib]  || '—') }));
+
+        const statusCell = td({});
+        const statusSpan = el('span', {
+          className: isOutdated ? 'status-warn' : 'status-ok',
+          textContent: isOutdated ? '⚠️ Update available' : '✅ Up to date',
+        });
+        statusCell.appendChild(statusSpan);
+
+        const row = tr({ className: isOutdated ? 'outdated' : '' },
+          libCell, pinnedCell, latestCell, statusCell
+        );
+        versionsBody.appendChild(row);
+      });
+    }
+
+    // Show dashboard, hide loading
+    document.getElementById('loading').classList.add('hidden');
+    document.getElementById('dashboard').classList.remove('hidden');
+  }
+
+  // ── Error state ──────────────────────────────────────────
+  function showError(err) {
+    document.getElementById('loading').classList.add('hidden');
+    const errMsg = document.getElementById('error-message');
+    errMsg.textContent = 'Could not load dashboard data. Run the script below to generate dashboard.json.';
+    document.getElementById('error').classList.remove('hidden');
+    if (typeof console !== 'undefined') {
+      console.error('Dashboard fetch error:', err);
+    }
+  }
+
+  // ── Fetch dashboard.json ─────────────────────────────────
+  fetch('./dashboard.json')
+    .then(function(res) {
+      if (!res.ok) { throw new Error('HTTP ' + res.status); }
+      return res.json();
+    })
+    .then(render)
+    .catch(showError);
+</script>
+</body>
+</html>
