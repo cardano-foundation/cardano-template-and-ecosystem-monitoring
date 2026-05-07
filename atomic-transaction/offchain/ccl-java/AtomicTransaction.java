@@ -92,11 +92,21 @@ public class AtomicTransaction {
                                                                 .build(),
                                                 account.baseAddress())
                                 .attachSpendingValidator(plutusScript);
-                TxResult txWrongPassword = quickTxBuilder.compose(scriptTxWrongPassword)
-                                .withSigner(SignerProviders.signerFrom(account))
-                                .feePayer(account.baseAddress())
-                                .completeAndWait();
-                System.out.println("Transaction with wrong password failed as expected: " + txWrongPassword.isSuccessful());
+
+                // CCL 0.8 throws TxBuildException on phase-2 script failure during cost
+                // evaluation. We expect the wrong password to fail validation, so a thrown
+                // exception here IS the success case for this negative test.
+                boolean wrongPasswordRejected = false;
+                try {
+                        TxResult txWrongPassword = quickTxBuilder.compose(scriptTxWrongPassword)
+                                        .withSigner(SignerProviders.signerFrom(account))
+                                        .feePayer(account.baseAddress())
+                                        .completeAndWait();
+                        wrongPasswordRejected = !txWrongPassword.isSuccessful();
+                } catch (Exception e) {
+                        wrongPasswordRejected = true;
+                }
+                System.out.println("Transaction with wrong password failed as expected: " + wrongPasswordRejected);
 
                 // // Now try to unlock the script UTXO and mint a demo token with the correct password
                 // Since both verifications will pass, the transaction will be successful
@@ -117,7 +127,7 @@ public class AtomicTransaction {
                                 .completeAndWait();
                 System.out.println("Transaction with correct password success: " + txCorrectPassword.isSuccessful());
 
-                if (txWrongPassword.isSuccessful())
+                if (!wrongPasswordRejected)
                         throw new AssertionError("AtomicTransaction CCL test failed: wrong password tx should have failed");
                 if (!txCorrectPassword.isSuccessful())
                         throw new AssertionError("AtomicTransaction CCL test failed: correct password tx failed");

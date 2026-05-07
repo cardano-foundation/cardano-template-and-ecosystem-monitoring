@@ -10,7 +10,8 @@
 //DEPS com.bloxbean.cardano:aiken-java-binding:0.1.0
 // @formatter:on
 
-import java.io.File;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -72,22 +73,21 @@ public class Htlc {
         static Address scriptAddress = AddressProvider.getEntAddress(plutusScript, network);
 
         public static void main(String[] args) throws ApiException, InterruptedException {
-                // Happy path 1: GUESS with correct secret
+                // Happy path 1: GUESS with correct secret (before expiration)
                 lockFunds(20);
                 waitForScriptUtxo(60);
-                TxResult success = unlockFundsWithSecret(Optional.of(secret), 5);
-                System.out.println("Funds unlocked successfully. TxHash: %s".formatted(success.getTxHash()));
+                TxResult guessTx = unlockScript(Optional.of(secret), 5);
+                System.out.println("GUESS unlocked successfully. TxHash: %s".formatted(guessTx.getTxHash()));
 
-                // Happy path 2: WITHDRAW after expiration
+                // Happy path 2: WITHDRAW by owner (after expiration)
                 lockFunds(10);
                 waitForScriptUtxo(60);
                 System.out.println("Waiting for 70 seconds for expiration before owner withdrawal...");
                 Thread.sleep(70000);
-                TxResult unlockFunds = unlockFundsWithSecret(Optional.empty(), 5);
-                System.out.println("Funds unlocked successfully without secret. TxHash: %s"
-                                .formatted(unlockFunds.getTxHash()));
+                TxResult withdrawTx = unlockScript(Optional.empty(), 5);
+                System.out.println("WITHDRAW unlocked successfully. TxHash: %s".formatted(withdrawTx.getTxHash()));
 
-                if (!success.isSuccessful() || !unlockFunds.isSuccessful())
+                if (!guessTx.isSuccessful() || !withdrawTx.isSuccessful())
                         throw new AssertionError("HTLC CCL test failed");
         }
 
@@ -106,28 +106,24 @@ public class Htlc {
         }
 
         /**
-         * Unlocks the funds from the HTLC contract using the provided secret guess.
-         *
-         * @param secretGuess The secret guess to unlock the funds. If empty, it will
-         *                    unlock as the owner without providing the secret.
-         * @param adaAmount   The amount of Ada to unlock.
-         * @return The transaction result.
-         * @throws ApiException If there is an error during the transaction.
+         * Unlock script funds. If a secret is provided, takes the GUESS path
+         * (Constr 0 [answer]); otherwise takes the WITHDRAW path (Constr 1 []).
          */
-        private static TxResult unlockFundsWithSecret(Optional<String> secretGuess, int adaAmount) throws ApiException {
+        private static TxResult unlockScript(Optional<String> secretGuess, int adaAmount) throws ApiException {
 
                 // Getting all utxos from the script address
                 List<Utxo> allScriptUtxos = utxoSupplier.getAll(scriptAddress.getAddress());
                 long slot = backendService.getBlockService().getLatestBlock().getValue().getSlot();
                 System.out.println("Current slot: " + slot);
-                ConstrPlutusData redeemer = secretGuess.map(secret -> ConstrPlutusData.builder()
-                                .alternative(0)
-                                .data(ListPlutusData.of(BytesPlutusData.of(secret.getBytes())))
-                                .build()).orElse(
-                                                ConstrPlutusData.builder()
-                                                                .alternative(1)
-                                                                .data(ListPlutusData.of())
-                                                                .build());
+                ConstrPlutusData redeemer = secretGuess
+                                .map(s -> ConstrPlutusData.builder()
+                                                .alternative(0)  // GUESS { answer }
+                                                .data(ListPlutusData.of(BytesPlutusData.of(s.getBytes())))
+                                                .build())
+                                .orElseGet(() -> ConstrPlutusData.builder()
+                                                .alternative(1)  // WITHDRAW
+                                                .data(ListPlutusData.of())
+                                                .build());
 
                 ScriptTx scriptTx = new ScriptTx()
                                 .collectFrom(allScriptUtxos,
@@ -169,12 +165,12 @@ public class Htlc {
          * @return The Plutus script with the parameters applied.
          */
         private static PlutusScript getParametrisedPlutusScript() {
-                PlutusContractBlueprint plutusContractBlueprint = PlutusBlueprintLoader
-                                .loadBlueprint(new File("../../onchain/aiken/plutus.json"));
-                String simpleTransferCompiledCode = plutusContractBlueprint.getValidators().getFirst()
-                                .getCompiledCode();
+                Path plutusJson = Paths.get(System.getProperty("user.dir"),
+                                "..", "..", "onchain", "aiken", "plutus.json");
+                PlutusContractBlueprint blueprint = PlutusBlueprintLoader.loadBlueprint(plutusJson.toFile());
+                String htlcCompiledCode = blueprint.getValidators().getFirst().getCompiledCode();
 
-                byte[] hashedAnswer = Sha256Hash.hash(secret.getBytes()); // Hash the secret answer
+                byte[] hashedAnswer = Sha256Hash.hash(secret.getBytes());
                 long expiration;
                 try {
                         long blockTime = backendService.getBlockService().getLatestBlock().getValue().getTime();
@@ -183,16 +179,14 @@ public class Htlc {
                         expiration = LocalDateTime.now().plusMinutes(1).toEpochSecond(ZoneOffset.UTC) * 1000;
                 }
                 System.out.println("Expiration time (epoch ms): " + expiration);
-                // Apply parameters to the validator compiled code to get the compiled code
+
                 String compiledCode = AikenScriptUtil.applyParamToScript(
                                 ListPlutusData.of(
                                                 BytesPlutusData.of(hashedAnswer),
                                                 BigIntPlutusData.of(expiration),
                                                 BytesPlutusData.of(ownerAddress.getPaymentCredentialHash().get())),
-                                simpleTransferCompiledCode);
+                                htlcCompiledCode);
 
-                PlutusScript plutusScript = PlutusBlueprintUtil.getPlutusScriptFromCompiledCode(compiledCode,
-                                PlutusVersion.v3);
-                return plutusScript;
+                return PlutusBlueprintUtil.getPlutusScriptFromCompiledCode(compiledCode, PlutusVersion.v3);
         }
 }

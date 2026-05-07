@@ -151,19 +151,23 @@ jobs:
       - name: Run CCL Java test
         working-directory: ${{ matrix.example }}/offchain/ccl-java
         run: |
-          set -o pipefail
           JAVA_FILE=$(ls *.java | head -1)
           echo "Running: jbang $JAVA_FILE"
-          timeout 300 jbang "$JAVA_FILE" | tee test-output.log
-
-      # Exit code indicates success/failure - all CCL Java examples throw AssertionError on failure
+          set +e
+          timeout 300 jbang "$JAVA_FILE" 2>&1 | tee test-output.log
+          EXIT=${PIPESTATUS[0]}
+          set -e
+          if [ "$EXIT" -eq 0 ]; then echo "success" > test-status.txt; else echo "failed" > test-status.txt; fi
+          exit "$EXIT"
 
       - name: Upload test logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: logs-ccl-${{ matrix.example }}
-          path: ${{ matrix.example }}/offchain/ccl-java/test-output.log
+          path: |
+            ${{ matrix.example }}/offchain/ccl-java/test-output.log
+            ${{ matrix.example }}/offchain/ccl-java/test-status.txt
           retention-days: 30
 
   test-mesh:
@@ -221,17 +225,23 @@ jobs:
       - name: Run Mesh.js test
         working-directory: ${{ matrix.example }}/offchain/meshjs
         run: |
-          set -o pipefail
           TS_FILE=$(ls *.ts | head -1)
           echo "Running: deno run --allow-all $TS_FILE"
-          timeout 300 deno run --allow-all "$TS_FILE" | tee test-output.log
+          set +e
+          timeout 300 deno run --allow-all "$TS_FILE" 2>&1 | tee test-output.log
+          EXIT=${PIPESTATUS[0]}
+          set -e
+          if [ "$EXIT" -eq 0 ]; then echo "success" > test-status.txt; else echo "failed" > test-status.txt; fi
+          exit "$EXIT"
 
       - name: Upload test logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: logs-mesh-${{ matrix.example }}
-          path: ${{ matrix.example }}/offchain/meshjs/test-output.log
+          path: |
+            ${{ matrix.example }}/offchain/meshjs/test-output.log
+            ${{ matrix.example }}/offchain/meshjs/test-status.txt
           retention-days: 30
 
   test-lucid:
@@ -289,16 +299,23 @@ jobs:
       - name: Run Lucid Evolution test
         working-directory: ${{ matrix.example }}/offchain/lucid-evolution
         run: |
-          set -o pipefail
           TS_FILE=$(ls *.ts | head -1)
-          timeout 300 deno run --allow-all "$TS_FILE" | tee test-output.log
+          echo "Running: deno run --allow-all $TS_FILE"
+          set +e
+          timeout 300 deno run --allow-all "$TS_FILE" 2>&1 | tee test-output.log
+          EXIT=${PIPESTATUS[0]}
+          set -e
+          if [ "$EXIT" -eq 0 ]; then echo "success" > test-status.txt; else echo "failed" > test-status.txt; fi
+          exit "$EXIT"
 
       - name: Upload test logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: logs-lucid-${{ matrix.example }}
-          path: ${{ matrix.example }}/offchain/lucid-evolution/test-output.log
+          path: |
+            ${{ matrix.example }}/offchain/lucid-evolution/test-output.log
+            ${{ matrix.example }}/offchain/lucid-evolution/test-status.txt
           retention-days: 30
 
   report-and-dashboard:
@@ -337,47 +354,30 @@ jobs:
             fi
           done
 
-          for d in artifacts/logs-ccl-*/; do
-            [ -d "$d" ] || continue
-            example=$(basename "$d" | sed 's/^logs-ccl-//')
-            if [ -f "$d/test-output.log" ]; then
-              if grep -qiE "AssertionError|BUILD FAILED|Exception in thread" "$d/test-output.log" 2>/dev/null; then
-                echo "failed" > ".local-test-results/ccl-${example}-status.txt"
+          # Helper: prefer test-status.txt (written by the test step from actual exit code).
+          # Fall back to grepping the log if status file is missing (e.g., step failed
+          # before writing it, or older artifacts from before this convention).
+          resolve_status() {
+            local prefix="$1" log_pattern="$2"
+            for d in artifacts/logs-${prefix}-*/; do
+              [ -d "$d" ] || continue
+              local example=$(basename "$d" | sed "s/^logs-${prefix}-//")
+              local out=".local-test-results/${prefix}-${example}-status.txt"
+              if [ -f "$d/test-status.txt" ]; then
+                cp "$d/test-status.txt" "$out"
+              elif [ -f "$d/test-output.log" ] && grep -qE "$log_pattern" "$d/test-output.log" 2>/dev/null; then
+                echo "failed" > "$out"
+              elif [ -f "$d/test-output.log" ]; then
+                echo "success" > "$out"
               else
-                echo "success" > ".local-test-results/ccl-${example}-status.txt"
+                echo "failed" > "$out"
               fi
-            else
-              echo "failed" > ".local-test-results/ccl-${example}-status.txt"
-            fi
-          done
+            done
+          }
 
-          for d in artifacts/logs-mesh-*/; do
-            [ -d "$d" ] || continue
-            example=$(basename "$d" | sed 's/^logs-mesh-//')
-            if [ -f "$d/test-output.log" ]; then
-              if grep -qE "Uncaught|AssertionError|TypeError:|ReferenceError:|SyntaxError:|Error:" "$d/test-output.log" 2>/dev/null; then
-                echo "failed" > ".local-test-results/mesh-${example}-status.txt"
-              else
-                echo "success" > ".local-test-results/mesh-${example}-status.txt"
-              fi
-            else
-              echo "failed" > ".local-test-results/mesh-${example}-status.txt"
-            fi
-          done
-
-          for d in artifacts/logs-lucid-*/; do
-            [ -d "$d" ] || continue
-            example=$(basename "$d" | sed 's/^logs-lucid-//')
-            if [ -f "$d/test-output.log" ]; then
-              if grep -qE "Uncaught|AssertionError|TypeError:|ReferenceError:|SyntaxError:|Error:" "$d/test-output.log" 2>/dev/null; then
-                echo "failed" > ".local-test-results/lucid-${example}-status.txt"
-              else
-                echo "success" > ".local-test-results/lucid-${example}-status.txt"
-              fi
-            else
-              echo "failed" > ".local-test-results/lucid-${example}-status.txt"
-            fi
-          done
+          resolve_status ccl   "AssertionError|BUILD FAILED|Exception in thread"
+          resolve_status mesh  "Uncaught|AssertionError|TypeError:|ReferenceError:|SyntaxError:|^error:"
+          resolve_status lucid "Uncaught|AssertionError|TypeError:|ReferenceError:|SyntaxError:|^error:"
 
       - name: Generate markdown report
         run: |
