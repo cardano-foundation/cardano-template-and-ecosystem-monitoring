@@ -3,23 +3,23 @@
 
 [[requirements]]
 name = "aiken-lang/stdlib"
-version = "v2.2.0"
+version = "v3.0.0"
 source = "github"
 
 [[requirements]]
 name = "sidan-lab/vodka"
-version = "0.1.1-beta"
+version = "0.1.22"
 source = "github"
 
 [[packages]]
 name = "aiken-lang/stdlib"
-version = "v2.2.0"
+version = "v3.0.0"
 requirements = []
 source = "github"
 
 [[packages]]
 name = "sidan-lab/vodka"
-version = "0.1.1-beta"
+version = "0.1.22"
 requirements = []
 source = "github"
 

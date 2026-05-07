@@ -10,7 +10,7 @@ use cardano/transaction.{
 use mocktail/virgin_address.{mock_pub_key_address}
 use mocktail/virgin_key_hash.{mock_policy_id, mock_pub_key_hash}
 use mocktail/virgin_output_reference.{mock_utxo_ref}
-use vodka_extra_signatories.{key_signed}
+use cocktail/vodka_extra_signatories.{key_signed}
 
 validator token_transfer(
   receiver: VerificationKeyHash,

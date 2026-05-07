@@ -1,18 +1,18 @@
-use aiken/hash.{Blake2b_224, Hash}
+use aiken/collection/list
+use aiken/crypto.{ScriptHash, VerificationKeyHash}
 use aiken/interval
-use aiken/list
 use aiken/option
-use aiken/transaction.{
-  InlineDatum, Input, Output, OutputReference, Transaction, find_input
+use cardano/address.{Script, from_verification_key}
+use cardano/assets
+use cardano/transaction.{
+  InlineDatum, Input, Output, OutputReference, Transaction, find_input,
 }
-use aiken/transaction/credential.{VerificationKey, Script, from_verification_key}
-use aiken/transaction/value
 use oracle_datum.{OracleDatum}
 
 pub type PriceBetDatum {
-  owner: Hash<Blake2b_224, VerificationKey>,
-  player: Option<Hash<Blake2b_224, VerificationKey>>,
-  oracle_vkh: Hash<Blake2b_224, Script>,
+  owner: VerificationKeyHash,
+  player: Option<VerificationKeyHash>,
+  oracle_vkh: ScriptHash,
   target_rate: Int,
   deadline: Int,
   bet_amount: Int,
@@ -70,7 +70,7 @@ pub fn validate_bet(
         (updated_datum.deadline == datum.deadline)?,
         (updated_datum.bet_amount == datum.bet_amount)?,
         // Value must double (owner deposit + player deposit)
-        (value.lovelace_of(continuing_output.value) >= 2 * datum.bet_amount)?,
+        (assets.lovelace_of(continuing_output.value) >= 2 * datum.bet_amount)?,
         // Must happen before deadline
         when validity_range.upper_bound.bound_type is {
           interval.Finite(tx_upper) -> (tx_upper <= datum.deadline)?
@@ -93,7 +93,7 @@ pub fn validate_bet(
           fn(input) {
             let addr = input.output.address
             when addr.payment_credential is {
-              credential.ScriptCredential(vh) -> vh == datum.oracle_vkh
+              Script(vh) -> vh == datum.oracle_vkh
               _ -> False
             }
           },
@@ -113,7 +113,7 @@ pub fn validate_bet(
       // 6. Must also ensure payout goes to the player
       let payout_to_player = list.any(outputs, fn(out) {
         out.address == from_verification_key(player) &&
-        value.lovelace_of(out.value) >= value.lovelace_of(total_pot)
+        assets.lovelace_of(out.value) >= assets.lovelace_of(total_pot)
       })
 
       // 7. Check if price data is still valid for the current tx
@@ -151,7 +151,7 @@ pub fn validate_bet(
 
       let payout_to_owner = list.any(outputs, fn(out) {
         out.address == from_verification_key(datum.owner) &&
-        value.lovelace_of(out.value) >= value.lovelace_of(total_pot)
+        assets.lovelace_of(out.value) >= assets.lovelace_of(total_pot)
       })
 
       and {
