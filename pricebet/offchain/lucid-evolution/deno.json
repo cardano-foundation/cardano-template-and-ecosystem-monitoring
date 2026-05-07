@@ -9,8 +9,9 @@
     "prepare": "deno run -A --unstable-detect-cjs price-bet.ts prepare"
   },
   "imports": {
-     "libsodium-wrappers-sumo": "npm:libsodium-wrappers-sumo@0.7.15",
+    "libsodium-wrappers-sumo": "npm:libsodium-wrappers-sumo@0.7.15",
     "@evolution-sdk/lucid": "npm:@evolution-sdk/lucid@2.0.1",
     "@std/assert": "jsr:@std/assert@1"
-  }
+  },
+  "nodeModulesDir": "auto"
 }

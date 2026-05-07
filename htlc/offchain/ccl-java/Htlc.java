@@ -141,8 +141,6 @@ public class Htlc {
          * @param adaMount The amount of Ada to lock.
          */
         private static void lockFunds(int adaMount) {
-                PlutusScript plutusScript = getParametrisedPlutusScript();
-                Address scriptAddress = AddressProvider.getEntAddress(plutusScript, network);
                 System.out.println("Script Address: " + scriptAddress.getAddress());
                 // Locking 10 Ada to the contract address
                 Tx tx = new Tx().payToContract(scriptAddress.getAddress(), Amount.ada(adaMount), PlutusData.unit())

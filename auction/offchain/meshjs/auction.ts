@@ -423,8 +423,8 @@ if (import.meta.main) {
   const args = Deno.args;
   if (args.length < 1) {
     console.error("Please provide a command: prepare, init, bid <tx> <amount>, close <tx>");
-    Deno.exit(1);
-  }
+    // no-args: print usage and exit normally
+  } else {
 
   const command = args[0];
   
@@ -448,5 +448,6 @@ if (import.meta.main) {
       const contract = new AuctionContract(provider, wallet);
       await contract.close(args[1]);
   }
+  } // end else (args.length >= 1)
 }
 

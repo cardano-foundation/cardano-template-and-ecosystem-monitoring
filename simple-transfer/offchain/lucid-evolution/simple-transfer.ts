@@ -154,8 +154,7 @@ if (import.meta.main) {
       console.log("  balance [walletIndex]");
       console.log("  transfer <amount_lovelace> <to_address> [walletIndex]");
       console.log("  prepare <count>");
-      Deno.exit(1);
-  }
+  } else {
 
   const cmd = args[0];
 
@@ -181,4 +180,5 @@ if (import.meta.main) {
   } else {
       console.log("Unknown command");
   }
+  } // end else (args.length > 0)
 }

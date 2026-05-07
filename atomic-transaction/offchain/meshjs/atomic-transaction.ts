@@ -267,7 +267,7 @@ async function main() {
 
   if (command !== 'run' || args.length !== 1) {
     printUsage();
-    Deno.exit(1);
+    return;
   }
 
   await atomicTransaction(args[0]);
