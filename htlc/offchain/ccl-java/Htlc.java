@@ -29,7 +29,6 @@ import com.bloxbean.cardano.client.backend.api.DefaultUtxoSupplier;
 import com.bloxbean.cardano.client.backend.blockfrost.service.BFBackendService;
 import com.bloxbean.cardano.client.common.model.Network;
 import com.bloxbean.cardano.client.common.model.Networks;
-import com.bloxbean.cardano.client.crypto.Blake2bUtil;
 import com.bloxbean.cardano.client.crypto.bip39.Sha256Hash;
 import com.bloxbean.cardano.client.function.helper.SignerProviders;
 import com.bloxbean.cardano.client.plutus.blueprint.PlutusBlueprintLoader;
@@ -40,6 +39,7 @@ import com.bloxbean.cardano.client.plutus.spec.BigIntPlutusData;
 import com.bloxbean.cardano.client.plutus.spec.BytesPlutusData;
 import com.bloxbean.cardano.client.plutus.spec.ConstrPlutusData;
 import com.bloxbean.cardano.client.plutus.spec.ListPlutusData;
+import com.bloxbean.cardano.client.plutus.spec.PlutusData;
 import com.bloxbean.cardano.client.plutus.spec.PlutusScript;
 import com.bloxbean.cardano.client.quicktx.QuickTxBuilder;
 import com.bloxbean.cardano.client.quicktx.ScriptTx;
@@ -81,8 +81,10 @@ public class Htlc {
                 System.out.println("Is the transaction successful? " + notSuccessfull.isSuccessful());
                 TxResult success = unlockFundsWithSecret(Optional.of(secret), 5);
                 System.out.println("Funds unlocked successfully. TxHash: %s".formatted(success.getTxHash()));
+                // Lock fresh funds for the owner-withdrawal test (previous unlock cleared the script)
+                lockFunds(10);
                 // Unlock as the owner without providing the secret
-                System.out.println("Waiting for 60 seconds before unlocking without secret...");
+                System.out.println("Waiting for 70 seconds for expiration before owner withdrawal...");
                 Thread.sleep(70000); // Wait for 70 seconds before unlocking
                 TxResult unlockFunds = unlockFundsWithSecret(Optional.empty(), 5);
                 System.out.println("Funds unlocked successfully without secret. TxHash: %s"
@@ -123,7 +125,7 @@ public class Htlc {
                                 .payToAddress(receiverAddress.getAddress(), Amount.ada(
                                                 adaAmount))
                                 .attachSpendingValidator(plutusScript)
-                                .withChangeAddress(scriptAddress.getAddress());
+                                .withChangeAddress(ownerAddress.getAddress());
                 return quickTxBuilder.compose(scriptTx)
                                 .validFrom(slot - 10)
                                 .validTo(slot + 10) // Set a validity range
@@ -143,7 +145,7 @@ public class Htlc {
                 Address scriptAddress = AddressProvider.getEntAddress(plutusScript, network);
                 System.out.println("Script Address: " + scriptAddress.getAddress());
                 // Locking 10 Ada to the contract address
-                Tx tx = new Tx().payToAddress(scriptAddress.getAddress(), Amount.ada(adaMount))
+                Tx tx = new Tx().payToContract(scriptAddress.getAddress(), Amount.ada(adaMount), PlutusData.unit())
                                 .withChangeAddress(ownerAddress.getAddress())
                                 .from(ownerAddress.getAddress());
                 TxResult txResult = quickTxBuilder.compose(tx)

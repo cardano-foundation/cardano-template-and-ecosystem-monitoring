@@ -46,7 +46,7 @@ public class AtomicTransaction {
 
         // Backend service to connect to Cardano node. Here we are using Blockfrost as
         // an example.
-        static BackendService backendService = new BFBackendService("http://localhost:8081/api/v1/", "Dummy Key");
+        static BackendService backendService = new BFBackendService("http://localhost:8080/api/v1/", "Dummy Key");
         static UtxoSupplier utxoSupplier = new DefaultUtxoSupplier(backendService.getUtxoService());
 
         // Dummy mnemonic for the example. Replace with a valid mnemonic.
@@ -116,6 +116,11 @@ public class AtomicTransaction {
                                 .feePayer(account.baseAddress())
                                 .completeAndWait();
                 System.out.println("Transaction with correct password success: " + txCorrectPassword.isSuccessful());
+
+                if (txWrongPassword.isSuccessful())
+                        throw new AssertionError("AtomicTransaction CCL test failed: wrong password tx should have failed");
+                if (!txCorrectPassword.isSuccessful())
+                        throw new AssertionError("AtomicTransaction CCL test failed: correct password tx failed");
         }
 
         private static PlutusScript getPlutusScript() {
