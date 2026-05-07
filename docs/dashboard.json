@@ -1,11 +1,11 @@
 {
-  "lastUpdated": "2026-05-07T09:45:35Z",
+  "lastUpdated": "2026-05-07T10:41:12Z",
   "testSummary": {
     "total": 47,
-    "passed": 47,
-    "failed": 0,
+    "passed": 46,
+    "failed": 1,
     "skipped": 0,
-    "successRate": 1.00
+    "successRate": 0.98
   },
   "useCases": [
     {
@@ -67,7 +67,7 @@
     {
       "name": "htlc",
       "aiken": "passed",
-      "cclJava": "passed",
+      "cclJava": "failed",
       "meshjs": "passed",
       "lucidEvolution": "passed"
     },
