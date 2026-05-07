@@ -114,7 +114,7 @@ Consider Cardano oracle solutions:
 
 ### Off-chain Development
 Select appropriate off-chain tools for price monitoring:
-- **JavaScript/TypeScript**: Lucid Evolution, Mesh.js for oracle interaction
+- **JavaScript/TypeScript**: Evolution SDK, Mesh.js for oracle interaction
 - **Java**: Cardano Client Library (CCL) with oracle SDK integration
 - **Python**: PyCardano with price feed monitoring capabilities
 - **Haskell**: Plutus Application Framework with oracle support

@@ -1,0 +1,14 @@
+{
+  "tasks": {
+    "auction:init": "deno run -A auction.ts init 3000000",
+    "auction:bid": "deno run -A auction.ts bid <TX_ID> 6000000",
+    "auction:close": "deno run -A auction.ts close <TX_ID>",
+    "auction:prepare": "deno run -A auction.ts prepare 3"
+  },
+  "imports": {
+    "libsodium-wrappers-sumo": "npm:libsodium-wrappers-sumo@0.7.15",
+    "@evolution-sdk/lucid": "npm:@evolution-sdk/lucid@2.0.1",
+    "@std/assert": "jsr:@std/assert@1"
+  },
+  "nodeModulesDir": "auto"
+}

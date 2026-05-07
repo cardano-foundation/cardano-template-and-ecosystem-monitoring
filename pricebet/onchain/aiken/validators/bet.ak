@@ -1,4 +1,4 @@
-use aiken/transaction.{OutputReference, Transaction}
+use cardano/transaction.{OutputReference, Transaction}
 use price_bet.{PriceBetDatum, PriceBetRedeemer, validate_bet}
 
 validator bet {

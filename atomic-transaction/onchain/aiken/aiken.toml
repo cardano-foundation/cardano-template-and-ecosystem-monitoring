@@ -1,6 +1,6 @@
 name = "cardano-foundation/cardano-template-and-ecosystem-monitoring"
 version = "0.0.0"
-compiler = "v1.1.17"
+compiler = "v1.1.21"
 plutus = "v3"
 license = "Apache-2.0"
 description = "Aiken contracts for project 'cardano-foundation/cardano-template-and-ecosystem-monitoring'"
@@ -12,7 +12,7 @@ platform = "github"
 
 [[dependencies]]
 name = "aiken-lang/stdlib"
-version = "v3.0.0"
+version = "v3.1.0"
 source = "github"
 
 [config]

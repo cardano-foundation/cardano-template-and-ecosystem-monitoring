@@ -6,8 +6,8 @@ use cardano/transaction.{
   InlineDatum, Input, Output, OutputReference, Transaction, find_input,
   placeholder,
 }
-use vodka_extra_signatories.{key_signed}
-use vodka_validity_range.{valid_before}
+use cocktail/vodka_extra_signatories.{key_signed}
+use cocktail/vodka_validity_range.{valid_before}
 use mocktail/virgin_key_hash.{mock_policy_id, mock_pub_key_hash}
 use mocktail/virgin_output_reference.{mock_utxo_ref}
 use mocktail/virgin_validity_range.{mock_interval}

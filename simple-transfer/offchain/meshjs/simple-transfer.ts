@@ -227,7 +227,7 @@ async function main() {
 
     if (!command) {
         printUsage();
-        Deno.exit(1);
+        return;
     }
 
     if (command === "deposit") {

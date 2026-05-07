@@ -1,7 +1,7 @@
 
 use aiken/crypto.{VerificationKeyHash}
 use cardano/transaction.{Transaction, OutputReference}
-use vodka_extra_signatories.{key_signed}
+use cocktail/vodka_extra_signatories.{key_signed}
 
 // Parameterized validator for simple transfer
 // This validator checks if the transaction is signed by the receiver's verification key hash

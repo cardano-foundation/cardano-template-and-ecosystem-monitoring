@@ -22,9 +22,8 @@ import {
 } from "@meshsdk/core";
 import { applyParamsToScript } from "@meshsdk/core-cst";
 
-import { MeshTxInitiator, MeshTxInitiatorInput } from "../common";
-import blueprintV1 from "./aiken-workspace-v1/plutus.json";
-import blueprintV2 from "./aiken-workspace-v2/plutus.json";
+import { MeshTxInitiator, MeshTxInitiatorInput } from "../common.ts";
+import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
 export type InitiationDatum = ConStr0<[PubKeyAddress, Value]>;
 export const initiateEscrowDatum = (
@@ -73,12 +72,7 @@ export class MeshEscrowContract extends MeshTxInitiator {
   }
 
   getScriptCbor = () => {
-    switch (this.version) {
-      case 2:
-        return applyParamsToScript(blueprintV2.validators[0]!.compiledCode, []);
-      default:
-        return applyParamsToScript(blueprintV1.validators[0]!.compiledCode, []);
-    }
+    return applyParamsToScript(blueprint.validators[0]!.compiledCode, []);
   };
 
   initiateEscrow = async (escrowAmount: Asset[]): Promise<string> => {

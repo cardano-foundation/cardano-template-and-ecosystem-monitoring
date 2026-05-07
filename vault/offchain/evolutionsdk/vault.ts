@@ -1,0 +1,281 @@
+import { 
+  Lucid, 
+  Koios, 
+  validatorToAddress,
+  applyParamsToScript,
+  Data,
+  fromText,
+  toUnit,
+  Constr,
+  getAddressDetails,
+  generateSeedPhrase,
+  LucidEvolution,
+  Validator
+} from "@evolution-sdk/lucid";
+import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
+
+const PREPROD_SYSTEM_START = 1655683200000; // Mon Jun 20 2022 (Preprod)
+const SLOT_LENGTH = 1000;
+
+function getSlotFromTime(timeVal: number): number {
+    return Math.floor((timeVal - PREPROD_SYSTEM_START) / SLOT_LENGTH);
+}
+
+function getTimeFromSlot(slot: number): number {
+    return (slot * SLOT_LENGTH) + PREPROD_SYSTEM_START;
+}
+
+async function getNetworkTime(): Promise<number> {
+    try {
+        const resp = await fetch("https://preprod.koios.rest/api/v1/tip");
+        const data = await resp.json();
+        const slot = Number(data[0].abs_slot);
+        return getTimeFromSlot(slot);
+    } catch (e) {
+        console.warn("Failed to fetch network time, using system time", e);
+        return Date.now();
+    }
+}
+
+const WAIT_TIME = 60000n; // 60 seconds
+
+// Helper to select wallet from file
+function selectWallet(lucid: LucidEvolution, index: string | number) {
+    const fileName = `wallet_${index}.txt`;
+    try {
+        const mnemonic = Deno.readTextFileSync(fileName).trim();
+        lucid.selectWallet.fromSeed(mnemonic);
+    } catch {
+        console.error(`Error reading ${fileName}. Run 'prepare' first.`);
+        // no-args: print usage and exit normally
+    }
+}
+
+async function prepare(amount: number) {
+    for (let i = 0; i < amount; i++) {
+        const fileName = `wallet_${i}.txt`;
+        try {
+            await Deno.stat(fileName);
+            console.log(`${fileName} already exists, skipping.`);
+        } catch {
+            const mnemonic = generateSeedPhrase();
+            await Deno.writeTextFile(fileName, mnemonic);
+            const lucid = await Lucid(new Koios("https://preprod.koios.rest/api/v1"), "Preprod");
+            lucid.selectWallet.fromSeed(mnemonic);
+            console.log(`Generated ${fileName}. Address: ${await lucid.wallet().address()}`);
+        }
+    }
+}
+
+async function setup(walletIndex: string | number = 0) {
+     const lucid = await Lucid(new Koios("https://preprod.koios.rest/api/v1"), "Preprod");
+     selectWallet(lucid, walletIndex);
+     
+     const address = await lucid.wallet().address();
+     const { paymentCredential } = getAddressDetails(address);
+     
+     const compiledCode = blueprint.validators[0].compiledCode;
+     
+     const script = applyParamsToScript(compiledCode, [
+        paymentCredential?.hash!,
+        WAIT_TIME
+     ]);
+     
+     // const script = compiledCode;
+
+     const validator: Validator = {
+        type: "PlutusV3",
+        script: script
+     };
+     
+     const scriptAddress = validatorToAddress("Preprod", validator);
+     
+     return { lucid, validator, scriptAddress, address };
+}
+
+async function init() {
+    const { scriptAddress } = await setup();
+    console.log(`Vault Script Address: ${scriptAddress}`);
+}
+
+async function lock(amount: string, infinite: boolean = true) {
+    const { lucid, validator, scriptAddress, address } = await setup();
+    
+    let lockTime;
+    if (infinite) {
+        lockTime = BigInt(Date.now() + 3153600000000);
+    } else {
+        lockTime = BigInt(Date.now() - 100000); // Past
+    }
+    
+    // Datum is the WithdrawDatum struct: { lock_time: Int }
+    const datum = Data.to(new Constr(0, [lockTime]));
+    
+    const tx = await lucid.newTx()
+        .pay.ToContract(
+            scriptAddress,
+            { kind: "inline", value: datum },
+            { lovelace: BigInt(amount) }
+        )
+        .complete();
+        
+    const signedTx = await tx.sign.withWallet().complete();
+    const txHash = await signedTx.submit();
+    console.log(`Locked ${amount} lovelace. Tx: ${txHash}`);
+}
+
+async function withdraw(txHash: string) {
+    const { lucid, validator, scriptAddress, address } = await setup();
+    
+    const utxos = await lucid.utxosAt(scriptAddress);
+    const utxo = utxos.find(u => u.txHash === txHash);
+    if (!utxo) throw new Error("UTxO not found");
+    
+    // Use consistent time from network
+    const now = await getNetworkTime();
+
+    // New datum: lockTime = Now - 5000 (buffer for slot rounding)
+    const newDatum = Data.to(new Constr(0, [BigInt(now - 5000)]));
+    const redeemer = Data.to(new Constr(0, [])); // Withdraw
+    
+    // We need to set invalidBefore (validFrom) to ensure transaction handling is correct
+    // But mainly we just need to consume and output back
+    
+    const tx = await lucid.newTx()
+        .collectFrom([utxo], redeemer)
+        .attach.SpendingValidator(validator)
+        .pay.ToContract(
+            scriptAddress, 
+            { kind: "inline", value: newDatum }, 
+            utxo.assets // Return same assets
+        )
+        .addSigner(address)
+        .validFrom(now)
+        .validTo(now + 120000)
+        .complete();
+        
+    const signedTx = await tx.sign.withWallet().complete();
+    const subHash = await signedTx.submit();
+    console.log(`Withdraw requested (Unlocking). Tx: ${subHash}`);
+}
+
+async function finalize(txHash: string) {
+    const { lucid, validator, scriptAddress, address } = await setup();
+    
+    const utxos = await lucid.utxosAt(scriptAddress);
+    const utxo = utxos.find(u => u.txHash === txHash);
+    if (!utxo) throw new Error("UTxO not found");
+    
+    if (!utxo.datum) throw new Error("No datum on UTxO");
+    const d = Data.from(utxo.datum) as Constr<any>;
+    const lockTime = d.fields[0] as bigint; 
+    
+    const validAfter = Number(lockTime + WAIT_TIME);
+    
+    while (true) {
+        const now = await getNetworkTime();
+        if (now >= validAfter) break;
+        
+        const diff = validAfter - now;
+        console.log(`Too early. Waiting ${(diff / 1000).toFixed(1)}s until ${new Date(validAfter).toISOString()}...`);
+        // Wait diff + 5s buffer, then check again
+        await new Promise(resolve => setTimeout(resolve, diff + 5000));
+    }
+
+    console.log("Time reached. Finalizing...");
+    
+    // Refresh utxos/context? No, UTxO is same.
+    // validFrom must be >= validAfter
+    
+    const redeemer = Data.to(new Constr(1, [])); // Finalize
+    
+    const tx = await lucid.newTx()
+        .collectFrom([utxo], redeemer)
+        .attach.SpendingValidator(validator)
+        .addSigner(address)
+        // Ensure transaction is valid from the moment we can finalize
+        // Adding a small buffer to validAfter to ensure we strictly satisfy > condition if needed
+        .validFrom(validAfter + 1000) 
+        // Extend validTo significantly to account for submission delays
+        .validTo(validAfter + 300000) // + 5 mins
+        .complete();
+        
+    const signedTx = await tx.sign.withWallet().complete();
+    const subHash = await signedTx.submit();
+    console.log(`Finalized (Claimed). Tx: ${subHash}`);
+}
+
+async function cancel(txHash: string) {
+    // Note: Replicating MeshJS logic which sends funds BACK to script
+    // This seems to be a "Reset" or "Re-lock" action in this specific contract design
+    
+    const { lucid, validator, scriptAddress, address } = await setup();
+    
+    const utxos = await lucid.utxosAt(scriptAddress);
+    const utxo = utxos.find(u => u.txHash === txHash);
+    if (!utxo) throw new Error("UTxO not found");
+    
+    const redeemer = Data.to(new Constr(2, [])); // Cancel
+    
+    // In MeshJS cancel, it outputs back to script WITHOUT datum?
+    // If we assume standard Lucid behavior:
+    // If you pay to contract without datum, it's just paying to the address.
+    // If the validator demands inline datum, it might fail later or be unspendable.
+    // However, if the intent is to abort, usually we return to owner. 
+    // BUT the MeshJS code specifically did `.txOut(scriptAddress, amount)`.
+    // Let's assume we return to script with SAME datum for safety if "cancel" means "reset".
+    // Or if "cancel" means "abort unlock", we should reset datum to Infinite?
+    // The MeshJS code `// No datum (reset)` comment implies NO DATUM.
+    // Let's try sending WITHOUT datum.
+    
+    const tx = await lucid.newTx()
+        .collectFrom([utxo], redeemer)
+        .attach.SpendingValidator(validator)
+        .pay.ToAddress(
+            scriptAddress,
+            utxo.assets
+        )
+        .addSigner(address)
+        .complete();
+        
+    const signedTx = await tx.sign.withWallet().complete();
+    const subHash = await signedTx.submit();
+    console.log(`Cancelled. Tx: ${subHash}`);
+}
+
+const isPositiveNumber = (s: string) => Number.isInteger(Number(s)) && Number(s) > 0;
+
+if (import.meta.main) {
+  const args = Deno.args;
+  if (args.length === 0) {
+      console.log("Commands: init, lock <amt>, lock-withdrawable <amt>, withdraw <tx>, finalize <tx>, cancel <tx>, prepare <count>");
+      // no-args: print usage and exit normally
+  }
+  
+  const cmd = args[0];
+  
+  if (cmd === 'init') {
+      await init();
+  } else if (cmd === 'lock') {
+      if (args[1] && isPositiveNumber(args[1])) await lock(args[1], true);
+      else console.log("Provide amount");
+  } else if (cmd === 'lock-withdrawable') {
+      if (args[1] && isPositiveNumber(args[1])) await lock(args[1], false);
+      else console.log("Provide amount");
+  } else if (cmd === 'withdraw') {
+      if (args[1]) await withdraw(args[1]);
+      else console.log("Provide txHash");
+  } else if (cmd === 'finalize') {
+      if (args[1]) await finalize(args[1]);
+      else console.log("Provide txHash");
+  } else if (cmd === 'cancel') {
+      if (args[1]) await cancel(args[1]);
+      else console.log("Provide txHash");
+  } else if (cmd === 'prepare') {
+      if (args[1]) await prepare(parseInt(args[1]));
+      else console.log("Provide count");
+  } else {
+      console.log("Unknown command");
+  }
+}
+

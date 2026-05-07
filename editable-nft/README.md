@@ -118,7 +118,7 @@ Choose your preferred Cardano smart contract language and framework:
 
 ### Off-chain Development
 Select appropriate off-chain tools based on your tech stack:
-- **JavaScript/TypeScript**: Lucid Evolution for NFT interactions, Mesh.js for metadata management
+- **JavaScript/TypeScript**: Evolution SDK for NFT interactions, Mesh.js for metadata management
 - **Java**: Cardano Client Library (CCL) with NFT support
 - **Python**: PyCardano with metadata handling capabilities
 - **Haskell**: Plutus Application Framework with native token support

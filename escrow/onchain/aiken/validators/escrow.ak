@@ -1,11 +1,11 @@
 use cardano/address.{Address}
 use cardano/assets.{AssetName, PolicyId, from_asset_list, merge}
 use cardano/transaction.{InlineDatum, OutputReference, Transaction, find_input}
-use vodka_address.{address_pub_key}
-use vodka_extra_signatories.{all_key_signed, key_signed, one_of_keys_signed}
-use vodka_inputs.{inputs_at}
-use vodka_outputs.{outputs_at}
-use vodka_value.{get_all_value_to, value_geq}
+use cocktail/vodka_address.{address_pub_key}
+use cocktail/vodka_extra_signatories.{all_key_signed, key_signed, one_of_keys_signed}
+use cocktail/vodka_inputs.{inputs_at}
+use cocktail/vodka_outputs.{outputs_at}
+use cocktail/vodka_value.{get_all_value_to, value_geq}
 
 pub type MValue =
   Pairs<PolicyId, Pairs<AssetName, Int>>

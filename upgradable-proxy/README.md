@@ -27,7 +27,7 @@ This design ensures that logic can be upgraded by updating the script hash in th
 
 ### 🚀 Running the example (Preprod)
 
-This repository includes an off-chain script (`offchain/lucid-evolution/proxy.ts`) that demonstrates:
+This repository includes an off-chain script (`offchain/evolutionsdk/proxy.ts`) that demonstrates:
 
 - creating/funding a wallet for the demo
 - deploying/initializing the proxy instance (minting the “state token” and creating the proxy UTxO with an inline datum)
@@ -42,19 +42,19 @@ This runs on **Cardano Preprod** using **Koios** as the provider.
 - Some **tADA on Preprod** to fund the generated wallet (you’ll need enough for fees + collateral)
 - Repo built so the following exist and are correct:
   - `onchain/aiken/plutus.json` (your compiled Aiken blueprint)
-  - `offchain/lucid-evolution/types.ts` and `offchain/lucid-evolution/helper.ts` (used by `offchain/lucid-evolution/proxy.ts`)
+  - `offchain/evolutionsdk/types.ts` and `offchain/evolutionsdk/helper.ts` (used by `offchain/evolutionsdk/proxy.ts`)
 
 #### 1) Prepare a demo wallet
 
 Run:
 
-    deno run -A offchain/lucid-evolution/proxy.ts prepare
+    deno run -A offchain/evolutionsdk/proxy.ts prepare
 
 What this does:
 
 - Generates a new seed phrase (mnemonic)
 - Selects it as the active wallet
-- Writes the seed phrase to `offchain/lucid-evolution/wallet.txt`
+- Writes the seed phrase to `offchain/evolutionsdk/wallet.txt`
 - Prints the wallet address you must fund
 
 What you should expect to see:
@@ -64,8 +64,8 @@ What you should expect to see:
 
 Notes / gotchas:
 
-- The script writes secrets to disk (`offchain/lucid-evolution/wallet.txt`). Treat it like a private key.
-- If `offchain/lucid-evolution/wallet.txt` already exists, the script intends to prevent overwriting (but see “Troubleshooting” below).
+- The script writes secrets to disk (`offchain/evolutionsdk/wallet.txt`). Treat it like a private key.
+- If `offchain/evolutionsdk/wallet.txt` already exists, the script intends to prevent overwriting (but see “Troubleshooting” below).
 #### 2) Fund the wallet
 
 Send some **tADA (Preprod)** to the printed address.
@@ -104,12 +104,12 @@ What you should expect to see:
 - The UTxO reference used as parameter:
   - `The utxo reference for this parameterized script is: <txHash>#<index>`
 - An example mint command:
-  - `Example usage: deno run -A offchain/lucid-evolution/proxy.ts mint <tokenUnit>`
+  - `Example usage: deno run -A offchain/evolutionsdk/proxy.ts mint <tokenUnit>`
 
 **Important: token unit you will use next**  
 The script prints an example like:
 
-    deno run -A offchain/lucid-evolution/proxy.ts mint <tokenUnit>
+    deno run -A offchain/evolutionsdk/proxy.ts mint <tokenUnit>
 
 That `<tokenUnit>` is the **state token unit** (policy id + token name) that identifies the proxy state UTxO. Keep it.
 

@@ -199,7 +199,7 @@ Choose your preferred Cardano smart contract language and framework:
 
 ### Off-chain Development
 Select appropriate off-chain tools for vault management:
-- **JavaScript/TypeScript**: Lucid Evolution, Mesh.js for secure vault interactions
+- **JavaScript/TypeScript**: Evolution SDK, Mesh.js for secure vault interactions
 - **Java**: Cardano Client Library (CCL) for enterprise vault management systems
 - **Python**: PyCardano with comprehensive security and timing capabilities
 - **Haskell**: Plutus Application Framework for advanced vault logic

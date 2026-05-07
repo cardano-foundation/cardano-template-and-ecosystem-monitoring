@@ -2,11 +2,10 @@
 ///
 // @formatter:off
 //JAVA 24+
-//COMPILE_OPTIONS --enable-preview -source 24
 //RUNTIME_OPTIONS --enable-preview
 
-//DEPS com.bloxbean.cardano:cardano-client-lib:0.7.0-beta2
-//DEPS com.bloxbean.cardano:cardano-client-backend-blockfrost:0.7.0-beta2
+//DEPS com.bloxbean.cardano:cardano-client-lib:0.8.0-pre4
+//DEPS com.bloxbean.cardano:cardano-client-backend-blockfrost:0.8.0-pre4
 //DEPS com.bloxbean.cardano:aiken-java-binding:0.1.0
 // @formatter:on
 
@@ -27,7 +26,6 @@ import com.bloxbean.cardano.client.backend.blockfrost.service.BFBackendService;
 import com.bloxbean.cardano.client.common.model.Network;
 import com.bloxbean.cardano.client.common.model.Networks;
 import com.bloxbean.cardano.client.exception.CborSerializationException;
-import com.bloxbean.cardano.client.function.helper.ScriptUtxoFinders;
 import com.bloxbean.cardano.client.function.helper.SignerProviders;
 import com.bloxbean.cardano.client.plutus.blueprint.PlutusBlueprintLoader;
 import com.bloxbean.cardano.client.plutus.blueprint.PlutusBlueprintUtil;
@@ -40,14 +38,13 @@ import com.bloxbean.cardano.client.plutus.spec.PlutusScript;
 import com.bloxbean.cardano.client.plutus.spec.PlutusV3Script;
 import com.bloxbean.cardano.client.quicktx.QuickTxBuilder;
 import com.bloxbean.cardano.client.quicktx.ScriptTx;
+import com.bloxbean.cardano.client.quicktx.Tx;
 import com.bloxbean.cardano.client.quicktx.TxResult;
 import com.bloxbean.cardano.client.transaction.spec.Asset;
 import com.bloxbean.cardano.client.util.HexUtil;
 
 public class TokenTransfer {
         private static final String ASSET_NAME = "TestAsset";
-        // Backend service to connect to Cardano node. Here we are using Blockfrost as
-        // an example.
         static BackendService backendService = new BFBackendService("http://localhost:8080/api/v1/", "Dummy Key");
         static UtxoSupplier utxoSupplier = new DefaultUtxoSupplier(backendService.getUtxoService());
         // Dummy mnemonic for the example. Replace with a valid mnemonic.
@@ -70,64 +67,76 @@ public class TokenTransfer {
                 Address scriptAddress = AddressProvider.getEntAddress(plutusScript, network);
                 System.out.println("Script Address: " + scriptAddress.getAddress());
 
-                TxResult mintTokens = mintTokens(scriptAddress);
-                System.out.println("Minted Asset. TxHash: " + mintTokens.getTxHash());
+                // Step 1: Mint tokens to payee1's wallet (wallet outputs don't require a datum)
+                TxResult mintResult = mintTokens();
+                System.out.println("Minted Asset. TxHash: " + mintResult.getTxHash());
 
-                // Unlocking the tokens from the script address and sending them to the payee1
-                List<Utxo> mintUtxos = utxoSupplier.getAll(scriptAddress.getAddress());
-                Utxo mintUtxo = mintUtxos.get(0);
-                String unit = alwaysTrueScript.getPolicyId() + "" + HexUtil.encodeHexString(ASSET_NAME.getBytes());
-                ScriptTx tx = new ScriptTx()
-                                .collectFrom(mintUtxo, PlutusData.unit())
+                // Step 2: Lock the minted tokens to the script address with a datum
+                // Plutus V3 script outputs require an inline datum — use payToContract
+                String unit = alwaysTrueScript.getPolicyId() + HexUtil.encodeHexString(ASSET_NAME.getBytes());
+                List<Utxo> walletUtxos = utxoSupplier.getAll(payee1.baseAddress());
+                Utxo mintedUtxo = walletUtxos.stream()
+                                .filter(u -> u.getAmount().stream().anyMatch(a -> a.getUnit().equals(unit)))
+                                .findFirst()
+                                .orElseThrow(() -> new RuntimeException("Minted token not found in wallet"));
+                List<Amount> tokenAmounts = mintedUtxo.getAmount().stream()
+                                .filter(a -> a.getUnit().equals(unit))
+                                .toList();
+
+                Tx lockTx = new Tx()
+                                .payToContract(scriptAddress.getAddress(), tokenAmounts, PlutusData.unit())
+                                .withChangeAddress(payee1.baseAddress())
+                                .from(payee1.baseAddress());
+                TxResult lockResult = quickTxBuilder.compose(lockTx)
+                                .withSigner(SignerProviders.signerFrom(payee1))
+                                .feePayer(payee1.baseAddress())
+                                .completeAndWait();
+                System.out.println("Locked tokens to script. TxHash: " + lockResult.getTxHash());
+
+                // Step 3: Unlock the tokens from the script address and send to payee1
+                List<Utxo> scriptUtxos = utxoSupplier.getAll(scriptAddress.getAddress());
+                Utxo scriptUtxo = scriptUtxos.get(0);
+                ScriptTx unlockTx = new ScriptTx()
+                                .collectFrom(scriptUtxo, PlutusData.unit())
                                 .payToAddress(payee1.getBaseAddress().getAddress(),
-                                                mintUtxo.getAmount().stream().filter(a -> a.getUnit().equals(unit))
+                                                scriptUtxo.getAmount().stream()
+                                                                .filter(a -> a.getUnit().equals(unit))
                                                                 .toList())
                                 .attachSpendingValidator(plutusScript)
                                 .withChangeAddress(payee1.baseAddress());
-                TxResult completeAndWait = quickTxBuilder.compose(tx)
+                TxResult unlockResult = quickTxBuilder.compose(unlockTx)
                                 .withSigner(SignerProviders.signerFrom(payee1))
                                 .withRequiredSigners(payee1.getBaseAddress())
                                 .feePayer(payee1.baseAddress())
                                 .completeAndWait();
-                System.out.println("TxHash: " + completeAndWait.getTxHash());
+                System.out.println("TxHash: " + unlockResult.getTxHash());
                 System.out.println("Transferred Asset to " + payee1.getBaseAddress().getAddress());
 
-                // Verify transactions succeeded
-                if (!mintTokens.isSuccessful() || !completeAndWait.isSuccessful())
+                // Verify all transactions succeeded
+                if (!mintResult.isSuccessful() || !lockResult.isSuccessful() || !unlockResult.isSuccessful())
                         throw new AssertionError("TokenTransfer CCL test failed");
         }
 
         /**
-         * First we need to mint an asset using a Plutus script. We are using an
-         * always-succeeds Plutus script and sending them directly to our script.
-         *
-         * @param scriptAddress The address of the script where the asset will be
-         *                      minted.
-         * @return TxResult containing the transaction result.
+         * Mints 10 TestAsset tokens to payee1's wallet using the always-succeeds
+         * Plutus script as the minting policy.
          */
-        private static TxResult mintTokens(Address scriptAddress) {
+        private static TxResult mintTokens() {
                 ScriptTx mintTx = new ScriptTx()
                                 .mintAsset(alwaysTrueScript, new Asset(ASSET_NAME, BigInteger.valueOf(10)),
-                                                PlutusData.unit(), scriptAddress.getAddress())
-
+                                                PlutusData.unit(), payee1.baseAddress())
                                 .withChangeAddress(payee1.baseAddress());
-                TxResult mintTokens = quickTxBuilder.compose(mintTx)
+                return quickTxBuilder.compose(mintTx)
                                 .withSigner(SignerProviders.signerFrom(payee1))
                                 .withRequiredSigners(payee1.getBaseAddress())
                                 .mergeOutputs(true)
                                 .feePayer(payee1.baseAddress())
                                 .completeAndWait();
-                return mintTokens;
         }
 
         /**
          * Create a parametrized contract by applying parameters to the compiled code
-         * of the Plutus script. This is used to create a contract that can handle
-         * the transfer of assets.
-         *
-         * @return PlutusScript containing the compiled code of the parametrized
-         *         contract.
-         * @throws CborSerializationException
+         * of the Plutus script.
          */
         private static PlutusScript createParametrizedContract() throws CborSerializationException {
                 PlutusContractBlueprint plutusContractBlueprint = PlutusBlueprintLoader

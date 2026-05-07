@@ -2,17 +2,16 @@
 ///
 // @formatter:off
 //JAVA 24+
-//COMPILE_OPTIONS --enable-preview -source 24
 //RUNTIME_OPTIONS --enable-preview
 
-//DEPS com.bloxbean.cardano:cardano-client-lib:0.7.0-beta2
-//DEPS com.bloxbean.cardano:cardano-client-backend-blockfrost:0.7.0-beta2
+//DEPS com.bloxbean.cardano:cardano-client-lib:0.8.0-pre4
+//DEPS com.bloxbean.cardano:cardano-client-backend-blockfrost:0.8.0-pre4
 //DEPS com.bloxbean.cardano:aiken-java-binding:0.1.0
 // @formatter:on
 
-import java.io.File;
-import java.time.LocalDateTime;
-import java.time.ZoneOffset;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -29,7 +28,6 @@ import com.bloxbean.cardano.client.backend.api.DefaultUtxoSupplier;
 import com.bloxbean.cardano.client.backend.blockfrost.service.BFBackendService;
 import com.bloxbean.cardano.client.common.model.Network;
 import com.bloxbean.cardano.client.common.model.Networks;
-import com.bloxbean.cardano.client.crypto.Blake2bUtil;
 import com.bloxbean.cardano.client.crypto.bip39.Sha256Hash;
 import com.bloxbean.cardano.client.function.helper.SignerProviders;
 import com.bloxbean.cardano.client.plutus.blueprint.PlutusBlueprintLoader;
@@ -40,6 +38,7 @@ import com.bloxbean.cardano.client.plutus.spec.BigIntPlutusData;
 import com.bloxbean.cardano.client.plutus.spec.BytesPlutusData;
 import com.bloxbean.cardano.client.plutus.spec.ConstrPlutusData;
 import com.bloxbean.cardano.client.plutus.spec.ListPlutusData;
+import com.bloxbean.cardano.client.plutus.spec.PlutusData;
 import com.bloxbean.cardano.client.plutus.spec.PlutusScript;
 import com.bloxbean.cardano.client.quicktx.QuickTxBuilder;
 import com.bloxbean.cardano.client.quicktx.ScriptTx;
@@ -68,54 +67,93 @@ public class Htlc {
         // might have a different address for the receiver.
         static Address receiverAddress = payee1.getBaseAddress();
         static QuickTxBuilder quickTxBuilder = new QuickTxBuilder(backendService);
+
+        // Expiration must be set *before* getParametrisedPlutusScript runs, since
+        // the script address depends on it. The buffer must be larger than the
+        // wall-clock time spent in lockFunds + waitForScriptUtxo + GUESS prep,
+        // because the script-context validity range reflects actual chain time,
+        // not the time when expiration was computed. In a healthy yaci-devkit,
+        // lockFunds confirms in seconds; if completeAndWait() blocks for minutes,
+        // restart yaci-devkit — its indexer has fallen behind the chain head.
+        static long expirationMs = Instant.now().plusSeconds(30).toEpochMilli();
+
         static PlutusScript plutusScript = getParametrisedPlutusScript();
         static Address scriptAddress = AddressProvider.getEntAddress(plutusScript, network);
 
+        static final long startMs = System.currentTimeMillis();
+
         public static void main(String[] args) throws ApiException, InterruptedException {
-                // Locking 10 Ada to the contract address
+
+                // Happy path 1: GUESS with correct secret (before expiration)
                 lockFunds(20);
+                waitForScriptUtxo(60);
+                TxResult guessTx = unlockScript(Optional.of(secret), 5);
+                printResult("GUESS", guessTx);
 
-                TxResult notSuccessfull = unlockFundsWithSecret(Optional.of("WrongSecret"), 2); // Attempt to unlock
-                                                                                                // with a
-                // wrong secret guess
-                System.out.println("Is the transaction successful? " + notSuccessfull.isSuccessful());
-                TxResult success = unlockFundsWithSecret(Optional.of(secret), 5);
-                System.out.println("Funds unlocked successfully. TxHash: %s".formatted(success.getTxHash()));
-                // Unlock as the owner without providing the secret
-                System.out.println("Waiting for 60 seconds before unlocking without secret...");
-                Thread.sleep(70000); // Wait for 70 seconds before unlocking
-                TxResult unlockFunds = unlockFundsWithSecret(Optional.empty(), 5);
-                System.out.println("Funds unlocked successfully without secret. TxHash: %s"
-                                .formatted(unlockFunds.getTxHash()));
+                // Happy path 2: WITHDRAW by owner (after expiration)
+                lockFunds(10);
+                waitForScriptUtxo(60);
+                waitUntilExpired();
+                TxResult withdrawTx = unlockScript(Optional.empty(), 5);
+                printResult("WITHDRAW", withdrawTx);
 
-                // Verify transactions succeeded
-                if (!success.isSuccessful() || !unlockFunds.isSuccessful())
+                if (!guessTx.isSuccessful() || !withdrawTx.isSuccessful())
                         throw new AssertionError("HTLC CCL test failed");
         }
 
+        private static void printResult(String label, TxResult r) {
+                System.out.println(label + " result: successful=" + r.isSuccessful()
+                                + " txHash=" + r.getTxHash()
+                                + " response=" + r.getResponse());
+        }
+
+        // Sleep until wall clock has passed expiration with a small margin.
+        // If lockFunds was slow, expiration may already be in the past — no wait needed.
+        private static void waitUntilExpired() throws InterruptedException {
+                long target = expirationMs + 30_000L;
+                long now = System.currentTimeMillis();
+                if (now >= target) {
+                        System.out.println("Expiration already passed — proceeding to WITHDRAW.");
+                        return;
+                }
+                long waitMs = target - now;
+                System.out.println("Waiting " + (waitMs / 1000) + "s for expiration to pass before WITHDRAW...");
+                Thread.sleep(waitMs);
+        }
+
+        // Poll until at least one UTXO appears at the script address (yaci-store indexer
+        // can lag a few seconds behind chain confirmation).
+        private static void waitForScriptUtxo(int timeoutSec) throws InterruptedException {
+                for (int i = 0; i < timeoutSec; i++) {
+                        List<Utxo> utxos = utxoSupplier.getAll(scriptAddress.getAddress());
+                        if (!utxos.isEmpty()) {
+                                System.out.println("Script UTXO indexed after " + i + "s");
+                                return;
+                        }
+                        Thread.sleep(1000);
+                }
+                System.out.println("Timed out waiting for script UTXO after " + timeoutSec + "s");
+        }
+
         /**
-         * Unlocks the funds from the HTLC contract using the provided secret guess.
-         *
-         * @param secretGuess The secret guess to unlock the funds. If empty, it will
-         *                    unlock as the owner without providing the secret.
-         * @param adaAmount   The amount of Ada to unlock.
-         * @return The transaction result.
-         * @throws ApiException If there is an error during the transaction.
+         * Unlock script funds. If a secret is provided, takes the GUESS path
+         * (Constr 0 [answer]); otherwise takes the WITHDRAW path (Constr 1 []).
          */
-        private static TxResult unlockFundsWithSecret(Optional<String> secretGuess, int adaAmount) throws ApiException {
+        private static TxResult unlockScript(Optional<String> secretGuess, int adaAmount) throws ApiException {
 
                 // Getting all utxos from the script address
                 List<Utxo> allScriptUtxos = utxoSupplier.getAll(scriptAddress.getAddress());
                 long slot = backendService.getBlockService().getLatestBlock().getValue().getSlot();
                 System.out.println("Current slot: " + slot);
-                ConstrPlutusData redeemer = secretGuess.map(secret -> ConstrPlutusData.builder()
-                                .alternative(0)
-                                .data(ListPlutusData.of(BytesPlutusData.of(secret.getBytes())))
-                                .build()).orElse(
-                                                ConstrPlutusData.builder()
-                                                                .alternative(1)
-                                                                .data(ListPlutusData.of())
-                                                                .build());
+                // Use ConstrPlutusData.of(alternative, fields...) factory, which
+                // explicitly produces Constr-tagged CBOR (tag 121 for alt=0, tag 122
+                // for alt=1, etc.). The builder pattern was producing bytes-only output
+                // in CCL 0.8.0-pre4 — the script-context dump showed redeemer as just
+                // <bytes>, not Constr 0 [<bytes>], so the validator couldn't pattern-
+                // match `redeemer: Htlc { GUESS { answer } | WITHDRAW }`.
+                ConstrPlutusData redeemer = secretGuess
+                                .map(s -> ConstrPlutusData.of(0L, BytesPlutusData.of(s.getBytes())))  // GUESS { answer }
+                                .orElseGet(() -> ConstrPlutusData.of(1L));                            // WITHDRAW
 
                 ScriptTx scriptTx = new ScriptTx()
                                 .collectFrom(allScriptUtxos,
@@ -123,10 +161,13 @@ public class Htlc {
                                 .payToAddress(receiverAddress.getAddress(), Amount.ada(
                                                 adaAmount))
                                 .attachSpendingValidator(plutusScript)
-                                .withChangeAddress(scriptAddress.getAddress());
+                                .withChangeAddress(ownerAddress.getAddress());
+                // Narrow validity range to give more headroom: validity_upper = slot+5,
+                // not slot+10. With expiration buffer 30s and lockFunds confirmation
+                // ~10s, this gives valid_before ~15s of margin instead of ~10s.
                 return quickTxBuilder.compose(scriptTx)
-                                .validFrom(slot - 10)
-                                .validTo(slot + 10) // Set a validity range
+                                .validFrom(slot - 5)
+                                .validTo(slot + 5)
                                 .feePayer(ownerAddress.getAddress())
                                 .withSigner(SignerProviders.signerFrom(payee1))
                                 .withRequiredSigners(ownerAddress)
@@ -139,18 +180,19 @@ public class Htlc {
          * @param adaMount The amount of Ada to lock.
          */
         private static void lockFunds(int adaMount) {
-                PlutusScript plutusScript = getParametrisedPlutusScript();
-                Address scriptAddress = AddressProvider.getEntAddress(plutusScript, network);
                 System.out.println("Script Address: " + scriptAddress.getAddress());
-                // Locking 10 Ada to the contract address
-                Tx tx = new Tx().payToAddress(scriptAddress.getAddress(), Amount.ada(adaMount))
+                Tx tx = new Tx().payToContract(scriptAddress.getAddress(), Amount.ada(adaMount), PlutusData.unit())
                                 .withChangeAddress(ownerAddress.getAddress())
                                 .from(ownerAddress.getAddress());
+                // complete() submits the tx without waiting for many confirmations.
+                // completeAndWait() can block for ~10 min on yaci-devkit waiting for
+                // "finality"; we only need the UTXO to be spendable, which is what
+                // waitForScriptUtxo() detects (first appearance in the indexer).
                 TxResult txResult = quickTxBuilder.compose(tx)
                                 .feePayer(ownerAddress.getAddress())
                                 .withSigner(SignerProviders.signerFrom(payee1))
-                                .completeAndWait();
-                System.out.println("Funds locked. TxHash: %s".formatted(txResult.getTxHash()));
+                                .complete();
+                System.out.println("Funds lock submitted. TxHash: %s".formatted(txResult.getTxHash()));
         }
 
         /**
@@ -159,26 +201,21 @@ public class Htlc {
          * @return The Plutus script with the parameters applied.
          */
         private static PlutusScript getParametrisedPlutusScript() {
-                PlutusContractBlueprint plutusContractBlueprint = PlutusBlueprintLoader
-                                .loadBlueprint(new File("../../onchain/aiken/plutus.json"));
-                String simpleTransferCompiledCode = plutusContractBlueprint.getValidators().getFirst()
-                                .getCompiledCode();
+                Path plutusJson = Paths.get(System.getProperty("user.dir"),
+                                "..", "..", "onchain", "aiken", "plutus.json");
+                PlutusContractBlueprint blueprint = PlutusBlueprintLoader.loadBlueprint(plutusJson.toFile());
+                String htlcCompiledCode = blueprint.getValidators().getFirst().getCompiledCode();
 
-                byte[] hashedAnswer = Sha256Hash.hash(secret.getBytes()); // Hash the secret answer
-                long expiration = LocalDateTime.now().plusMinutes(1).toEpochSecond(ZoneOffset.UTC) * 1000; // Set
-                                                                                                           // expiration
-                                                                                                           // time to
-                System.out.println("Expiration time (epoch seconds): " + expiration);
-                // Apply parameters to the validator compiled code to get the compiled code
+                byte[] hashedAnswer = Sha256Hash.hash(secret.getBytes());
+                System.out.println("Expiration time (epoch ms): " + expirationMs);
+
                 String compiledCode = AikenScriptUtil.applyParamToScript(
                                 ListPlutusData.of(
                                                 BytesPlutusData.of(hashedAnswer),
-                                                BigIntPlutusData.of(expiration),
+                                                BigIntPlutusData.of(expirationMs),
                                                 BytesPlutusData.of(ownerAddress.getPaymentCredentialHash().get())),
-                                simpleTransferCompiledCode);
+                                htlcCompiledCode);
 
-                PlutusScript plutusScript = PlutusBlueprintUtil.getPlutusScriptFromCompiledCode(compiledCode,
-                                PlutusVersion.v3);
-                return plutusScript;
+                return PlutusBlueprintUtil.getPlutusScriptFromCompiledCode(compiledCode, PlutusVersion.v3);
         }
 }

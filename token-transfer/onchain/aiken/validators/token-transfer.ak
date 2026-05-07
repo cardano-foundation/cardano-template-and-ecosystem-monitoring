@@ -10,7 +10,7 @@ use cardano/transaction.{
 use mocktail/virgin_address.{mock_pub_key_address}
 use mocktail/virgin_key_hash.{mock_policy_id, mock_pub_key_hash}
 use mocktail/virgin_output_reference.{mock_utxo_ref}
-use vodka_extra_signatories.{key_signed}
+use cocktail/vodka_extra_signatories.{key_signed}
 
 validator token_transfer(
   receiver: VerificationKeyHash,
@@ -38,9 +38,21 @@ validator token_transfer(
           list.any(
             outputs,
             fn(output) {
-              output.address != spent_input.output.address && assets.without_lovelace(
-                output.value,
-              ) != from_asset(expected_policy, assetName, 0)
+              let non_lovelace = assets.without_lovelace(output.value)
+              let has_unexpected_policies =
+                list.any(
+                  assets.policies(non_lovelace),
+                  fn(p) { p != expected_policy },
+                )
+              let policy_tokens = assets.tokens(non_lovelace, expected_policy)
+              let has_unexpected_names =
+                list.any(
+                  dict.keys(policy_tokens),
+                  fn(name) { name != assetName },
+                )
+              output.address != spent_input.output.address && (
+                has_unexpected_policies || has_unexpected_names
+              )
             },
           )
         and {

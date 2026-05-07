@@ -1,0 +1,32 @@
+{
+  "frameworks": [
+    {
+      "id": "aiken",
+      "label": "Aiken",
+      "kind": "onchain",
+      "discoveryPath": "onchain/aiken/aiken.toml",
+      "statusPrefix": "aiken"
+    },
+    {
+      "id": "ccl-java",
+      "label": "CCL Java",
+      "kind": "offchain",
+      "discoveryPath": "offchain/ccl-java/*.java",
+      "statusPrefix": "ccl"
+    },
+    {
+      "id": "meshjs",
+      "label": "Mesh.js",
+      "kind": "offchain",
+      "discoveryPath": "offchain/meshjs/deno.json",
+      "statusPrefix": "mesh"
+    },
+    {
+      "id": "evolutionsdk",
+      "label": "Evolution SDK",
+      "kind": "offchain",
+      "discoveryPath": "offchain/evolutionsdk/deno.json",
+      "statusPrefix": "evosdk"
+    }
+  ]
+}

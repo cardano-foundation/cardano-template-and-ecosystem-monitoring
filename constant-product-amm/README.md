@@ -118,7 +118,7 @@ Choose your preferred Cardano smart contract language and framework:
 
 ### Off-chain Development
 Select appropriate off-chain tools based on your tech stack:
-- **JavaScript/TypeScript**: Lucid Evolution for DEX interactions, Mesh.js for AMM management
+- **JavaScript/TypeScript**: Evolution SDK for DEX interactions, Mesh.js for AMM management
 - **Java**: Cardano Client Library (CCL) with DeFi protocol support
 - **Python**: PyCardano with AMM calculation libraries
 - **Haskell**: Plutus Application Framework with native DeFi capabilities

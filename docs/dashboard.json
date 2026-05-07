@@ -1,0 +1,190 @@
+{
+  "lastUpdated": "2026-05-07T12:44:29Z",
+  "testSummary": {
+    "total": 47,
+    "passed": 47,
+    "failed": 0,
+    "skipped": 0,
+    "successRate": 1.00
+  },
+  "frameworks": [
+    {
+      "id": "aiken",
+      "label": "Aiken",
+      "kind": "onchain"
+    },
+    {
+      "id": "ccl-java",
+      "label": "CCL Java",
+      "kind": "offchain"
+    },
+    {
+      "id": "meshjs",
+      "label": "Mesh.js",
+      "kind": "offchain"
+    },
+    {
+      "id": "evolutionsdk",
+      "label": "Evolution SDK",
+      "kind": "offchain"
+    }
+  ],
+  "useCases": [
+    {
+      "name": "anonymous-data",
+      "aiken": "passed",
+      "ccl-java": "not-implemented",
+      "meshjs": "passed",
+      "evolutionsdk": "not-implemented"
+    },
+    {
+      "name": "atomic-transaction",
+      "aiken": "passed",
+      "ccl-java": "passed",
+      "meshjs": "passed",
+      "evolutionsdk": "passed"
+    },
+    {
+      "name": "auction",
+      "aiken": "passed",
+      "ccl-java": "not-implemented",
+      "meshjs": "passed",
+      "evolutionsdk": "passed"
+    },
+    {
+      "name": "bet",
+      "aiken": "passed",
+      "ccl-java": "not-implemented",
+      "meshjs": "not-implemented",
+      "evolutionsdk": "passed"
+    },
+    {
+      "name": "crowdfund",
+      "aiken": "passed",
+      "ccl-java": "passed",
+      "meshjs": "not-implemented",
+      "evolutionsdk": "not-implemented"
+    },
+    {
+      "name": "decentralized-identity",
+      "aiken": "passed",
+      "ccl-java": "not-implemented",
+      "meshjs": "not-implemented",
+      "evolutionsdk": "passed"
+    },
+    {
+      "name": "escrow",
+      "aiken": "passed",
+      "ccl-java": "not-implemented",
+      "meshjs": "passed",
+      "evolutionsdk": "passed"
+    },
+    {
+      "name": "factory",
+      "aiken": "passed",
+      "ccl-java": "not-implemented",
+      "meshjs": "passed",
+      "evolutionsdk": "not-implemented"
+    },
+    {
+      "name": "htlc",
+      "aiken": "passed",
+      "ccl-java": "passed",
+      "meshjs": "passed",
+      "evolutionsdk": "passed"
+    },
+    {
+      "name": "lottery",
+      "aiken": "passed",
+      "ccl-java": "not-implemented",
+      "meshjs": "passed",
+      "evolutionsdk": "not-implemented"
+    },
+    {
+      "name": "payment-splitter",
+      "aiken": "passed",
+      "ccl-java": "passed",
+      "meshjs": "passed",
+      "evolutionsdk": "not-implemented"
+    },
+    {
+      "name": "pricebet",
+      "aiken": "passed",
+      "ccl-java": "not-implemented",
+      "meshjs": "not-implemented",
+      "evolutionsdk": "passed"
+    },
+    {
+      "name": "simple-transfer",
+      "aiken": "passed",
+      "ccl-java": "passed",
+      "meshjs": "passed",
+      "evolutionsdk": "passed"
+    },
+    {
+      "name": "simple-wallet",
+      "aiken": "passed",
+      "ccl-java": "not-implemented",
+      "meshjs": "passed",
+      "evolutionsdk": "not-implemented"
+    },
+    {
+      "name": "storage",
+      "aiken": "passed",
+      "ccl-java": "not-implemented",
+      "meshjs": "not-implemented",
+      "evolutionsdk": "not-implemented"
+    },
+    {
+      "name": "token-transfer",
+      "aiken": "passed",
+      "ccl-java": "passed",
+      "meshjs": "not-implemented",
+      "evolutionsdk": "not-implemented"
+    },
+    {
+      "name": "upgradable-proxy",
+      "aiken": "passed",
+      "ccl-java": "not-implemented",
+      "meshjs": "not-implemented",
+      "evolutionsdk": "passed"
+    },
+    {
+      "name": "vault",
+      "aiken": "passed",
+      "ccl-java": "not-implemented",
+      "meshjs": "passed",
+      "evolutionsdk": "passed"
+    },
+    {
+      "name": "vesting",
+      "aiken": "passed",
+      "ccl-java": "not-implemented",
+      "meshjs": "passed",
+      "evolutionsdk": "not-implemented"
+    }
+  ],
+  "versions": {
+    "current": {
+      "aiken-compiler": "v1.1.21",
+      "aiken-lang/stdlib": "v3.1.0",
+      "sidan-lab/vodka": "0.1.23",
+      "@meshsdk/core": "1.9.0-beta.102",
+      "@meshsdk/core-csl": "1.9.0-beta.102",
+      "@meshsdk/common": "1.9.0-beta.102",
+      "@evolution-sdk/lucid": "2.0.1",
+      "cardano-client-lib": "0.8.0-pre4"
+    },
+    "latest": {
+      "aiken-compiler": "v1.1.21",
+      "aiken-lang/stdlib": "v3.1.0",
+      "sidan-lab/vodka": "0.1.23",
+      "@meshsdk/core": "1.9.0-beta.102",
+      "@meshsdk/core-csl": "1.9.0-beta.102",
+      "@meshsdk/common": "1.9.0-beta.102",
+      "@evolution-sdk/lucid": "2.0.1",
+      "cardano-client-lib": "0.8.0-pre4"
+    },
+    "outdated": []
+  }
+}

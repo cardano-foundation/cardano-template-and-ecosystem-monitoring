@@ -1,7 +1,6 @@
 use aiken/cbor
-use aiken/hash.{Blake2b_224, Hash}
-use aiken/pairs
-use aiken/transaction/credential.{Script}
+use aiken/collection/pairs
+use aiken/crypto.{Blake2b_224, Hash, Script}
 
 /// Represents a map of key-value pairs for price-related data
 pub type PriceMap =

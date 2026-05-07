@@ -7,7 +7,7 @@ The goal of this repository is to implement the 21 most common blockchain use ca
 This repository is divided into directories based on use cases and the technologies used for their implementation. The structure is as follows:
 
 - `/use-case/onchain/<technology>/`: Contains the on-chain implementation of a specific use case using a particular technology (e.g. aiken, scalus, plu-ts, etc.).
-- `/use-case/offchain/<framework>/`: Contains the off-chain implementation of the same use case using a specific framework (e.g. meshjs, lucid-evolution, cardano-client-lib, etc.).
+- `/use-case/offchain/<framework>/`: Contains the off-chain implementation of the same use case using a specific framework (e.g. meshjs, evolutionsdk, cardano-client-lib, etc.).
 
 For example:
 - `/payment-splitter/onchain/aiken/`

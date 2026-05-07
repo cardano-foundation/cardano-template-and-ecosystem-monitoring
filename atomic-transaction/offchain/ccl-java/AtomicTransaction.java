@@ -3,8 +3,8 @@
 // @formatter:off
 //JAVA 24+
 
-//DEPS com.bloxbean.cardano:cardano-client-lib:0.7.0-beta2
-//DEPS com.bloxbean.cardano:cardano-client-backend-blockfrost:0.7.0-beta2
+//DEPS com.bloxbean.cardano:cardano-client-lib:0.8.0-pre4
+//DEPS com.bloxbean.cardano:cardano-client-backend-blockfrost:0.8.0-pre4
 //DEPS com.bloxbean.cardano:aiken-java-binding:0.1.0
 // @formatter:on
 
@@ -46,7 +46,7 @@ public class AtomicTransaction {
 
         // Backend service to connect to Cardano node. Here we are using Blockfrost as
         // an example.
-        static BackendService backendService = new BFBackendService("http://localhost:8081/api/v1/", "Dummy Key");
+        static BackendService backendService = new BFBackendService("http://localhost:8080/api/v1/", "Dummy Key");
         static UtxoSupplier utxoSupplier = new DefaultUtxoSupplier(backendService.getUtxoService());
 
         // Dummy mnemonic for the example. Replace with a valid mnemonic.
@@ -92,11 +92,21 @@ public class AtomicTransaction {
                                                                 .build(),
                                                 account.baseAddress())
                                 .attachSpendingValidator(plutusScript);
-                TxResult txWrongPassword = quickTxBuilder.compose(scriptTxWrongPassword)
-                                .withSigner(SignerProviders.signerFrom(account))
-                                .feePayer(account.baseAddress())
-                                .completeAndWait();
-                System.out.println("Transaction with wrong password failed as expected: " + txWrongPassword.isSuccessful());
+
+                // CCL 0.8 throws TxBuildException on phase-2 script failure during cost
+                // evaluation. We expect the wrong password to fail validation, so a thrown
+                // exception here IS the success case for this negative test.
+                boolean wrongPasswordRejected = false;
+                try {
+                        TxResult txWrongPassword = quickTxBuilder.compose(scriptTxWrongPassword)
+                                        .withSigner(SignerProviders.signerFrom(account))
+                                        .feePayer(account.baseAddress())
+                                        .completeAndWait();
+                        wrongPasswordRejected = !txWrongPassword.isSuccessful();
+                } catch (Exception e) {
+                        wrongPasswordRejected = true;
+                }
+                System.out.println("Transaction with wrong password failed as expected: " + wrongPasswordRejected);
 
                 // // Now try to unlock the script UTXO and mint a demo token with the correct password
                 // Since both verifications will pass, the transaction will be successful
@@ -116,11 +126,16 @@ public class AtomicTransaction {
                                 .feePayer(account.baseAddress())
                                 .completeAndWait();
                 System.out.println("Transaction with correct password success: " + txCorrectPassword.isSuccessful());
+
+                if (!wrongPasswordRejected)
+                        throw new AssertionError("AtomicTransaction CCL test failed: wrong password tx should have failed");
+                if (!txCorrectPassword.isSuccessful())
+                        throw new AssertionError("AtomicTransaction CCL test failed: correct password tx failed");
         }
 
         private static PlutusScript getPlutusScript() {
                 String workingDir = System.getProperty("user.dir");
-                Path plutusJsonPath = Paths.get(workingDir, "..", "onchain", "aiken", "plutus.json");
+                Path plutusJsonPath = Paths.get(workingDir, "..", "..", "onchain", "aiken", "plutus.json");
 
                 PlutusContractBlueprint plutusContractBlueprint = PlutusBlueprintLoader
                                 .loadBlueprint(plutusJsonPath.toFile());

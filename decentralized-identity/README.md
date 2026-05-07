@@ -105,7 +105,7 @@ Identity verification through:
 ## ✅ Implementations in This Repository
 
 - **On-chain (Aiken)**: `decentralized-identity/onchain/aiken/`
-- **Off-chain (Lucid Evolution)**: `decentralized-identity/offchain/lucid-evolution/`
+- **Off-chain (Evolution SDK)**: `decentralized-identity/offchain/evolutionsdk/`
 
 ## 🛠️ Development Approach with Cardano
 
@@ -122,7 +122,7 @@ Choose your preferred Cardano smart contract language and framework:
 
 ### Off-chain Development
 Select appropriate off-chain tools based on your tech stack:
-- **JavaScript/TypeScript**: Lucid Evolution with DID libraries, Mesh.js for identity management
+- **JavaScript/TypeScript**: Evolution SDK with DID libraries, Mesh.js for identity management
 - **Java**: Cardano Client Library (CCL) with cryptographic identity support
 - **Python**: PyCardano with verifiable credential libraries
 - **Haskell**: Plutus Application Framework with native identity capabilities
