@@ -1,11 +1,11 @@
 {
-  "lastUpdated": "2026-05-07T12:44:29Z",
+  "lastUpdated": "2026-05-07T13:12:31Z",
   "testSummary": {
-    "total": 47,
-    "passed": 47,
-    "failed": 0,
+    "total": 52,
+    "passed": 50,
+    "failed": 2,
     "skipped": 0,
-    "successRate": 1.00
+    "successRate": 0.96
   },
   "frameworks": [
     {
@@ -33,9 +33,9 @@
     {
       "name": "anonymous-data",
       "aiken": "passed",
-      "ccl-java": "not-implemented",
+      "ccl-java": "failed",
       "meshjs": "passed",
-      "evolutionsdk": "not-implemented"
+      "evolutionsdk": "passed"
     },
     {
       "name": "atomic-transaction",
@@ -105,7 +105,7 @@
       "aiken": "passed",
       "ccl-java": "passed",
       "meshjs": "passed",
-      "evolutionsdk": "not-implemented"
+      "evolutionsdk": "passed"
     },
     {
       "name": "pricebet",
@@ -152,14 +152,14 @@
     {
       "name": "vault",
       "aiken": "passed",
-      "ccl-java": "not-implemented",
+      "ccl-java": "failed",
       "meshjs": "passed",
       "evolutionsdk": "passed"
     },
     {
       "name": "vesting",
       "aiken": "passed",
-      "ccl-java": "not-implemented",
+      "ccl-java": "passed",
       "meshjs": "passed",
       "evolutionsdk": "not-implemented"
     }
