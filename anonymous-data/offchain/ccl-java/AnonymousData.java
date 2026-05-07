@@ -132,9 +132,10 @@ public class AnonymousData {
 
         private static TxResult reveal(byte[] id, byte[] nonce) throws ApiException {
                 String idHex = HexUtil.encodeHexString(id);
+                String unit = policyId + idHex.toLowerCase();
                 Utxo target = utxoSupplier.getAll(scriptAddress.getAddress()).stream()
                                 .filter(u -> u.getAmount().stream().anyMatch(a ->
-                                                (policyId + idHex).equalsIgnoreCase(a.getUnit())))
+                                                unit.equalsIgnoreCase(a.getUnit())))
                                 .findFirst()
                                 .orElseThrow(() -> new IllegalStateException("Committed UTxO not found"));
 
@@ -146,11 +147,14 @@ public class AnonymousData {
                 // Note: we do NOT burn the token. The contract's mint handler enforces
                 // `token_minted(..., +1)` and would reject a -1 burn. The spend handler
                 // imposes no constraint on where the token goes, so we forward the
-                // entire UTxO value (token + lovelace) to the owner via change.
+                // entire UTxO value (lovelace + the singleton token) to the owner.
+                // CCL's ScriptCollectFromIntent silently drops the script input when
+                // there is no explicit output to anchor the UTxO's value, so we make
+                // the output explicit (pay the input's full amounts to the owner).
                 ScriptTx scriptTx = new ScriptTx()
                                 .collectFrom(List.of(target), spendRedeemer)
-                                .attachSpendingValidator(plutusScript)
-                                .withChangeAddress(ownerAddress.getAddress());
+                                .payToAddress(ownerAddress.getAddress(), target.getAmount())
+                                .attachSpendingValidator(plutusScript);
 
                 return quickTxBuilder.compose(scriptTx)
                                 .validFrom(slot - 5)
