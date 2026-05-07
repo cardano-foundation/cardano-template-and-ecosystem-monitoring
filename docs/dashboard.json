@@ -1,11 +1,11 @@
 {
-  "lastUpdated": "2026-05-07T13:19:29Z",
+  "lastUpdated": "2026-05-07T13:27:54Z",
   "testSummary": {
     "total": 52,
-    "passed": 51,
-    "failed": 1,
+    "passed": 52,
+    "failed": 0,
     "skipped": 0,
-    "successRate": 0.98
+    "successRate": 1.00
   },
   "frameworks": [
     {
@@ -33,7 +33,7 @@
     {
       "name": "anonymous-data",
       "aiken": "passed",
-      "ccl-java": "failed",
+      "ccl-java": "passed",
       "meshjs": "passed",
       "evolutionsdk": "passed"
     },
