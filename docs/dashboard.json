@@ -1,8 +1,8 @@
 {
-  "lastUpdated": "2026-05-07T13:27:54Z",
+  "lastUpdated": "2026-05-08T06:02:39Z",
   "testSummary": {
-    "total": 52,
-    "passed": 52,
+    "total": 57,
+    "passed": 57,
     "failed": 0,
     "skipped": 0,
     "successRate": 1.00
@@ -55,7 +55,7 @@
       "name": "bet",
       "aiken": "passed",
       "ccl-java": "not-implemented",
-      "meshjs": "not-implemented",
+      "meshjs": "passed",
       "evolutionsdk": "passed"
     },
     {
@@ -69,7 +69,7 @@
       "name": "decentralized-identity",
       "aiken": "passed",
       "ccl-java": "not-implemented",
-      "meshjs": "not-implemented",
+      "meshjs": "passed",
       "evolutionsdk": "passed"
     },
     {
@@ -126,7 +126,7 @@
       "aiken": "passed",
       "ccl-java": "not-implemented",
       "meshjs": "passed",
-      "evolutionsdk": "not-implemented"
+      "evolutionsdk": "passed"
     },
     {
       "name": "storage",
@@ -140,7 +140,7 @@
       "aiken": "passed",
       "ccl-java": "passed",
       "meshjs": "not-implemented",
-      "evolutionsdk": "not-implemented"
+      "evolutionsdk": "passed"
     },
     {
       "name": "upgradable-proxy",
@@ -161,7 +161,7 @@
       "aiken": "passed",
       "ccl-java": "passed",
       "meshjs": "passed",
-      "evolutionsdk": "not-implemented"
+      "evolutionsdk": "passed"
     }
   ],
   "versions": {
