@@ -1,11 +1,11 @@
 {
-  "lastUpdated": "2026-05-08T07:15:36Z",
+  "lastUpdated": "2026-05-08T07:25:04Z",
   "testSummary": {
     "total": 76,
-    "passed": 72,
-    "failed": 4,
+    "passed": 73,
+    "failed": 3,
     "skipped": 0,
-    "successRate": 0.95
+    "successRate": 0.96
   },
   "frameworks": [
     {
@@ -124,7 +124,7 @@
     {
       "name": "simple-wallet",
       "aiken": "passed",
-      "ccl-java": "failed",
+      "ccl-java": "passed",
       "meshjs": "passed",
       "evolutionsdk": "passed"
     },
