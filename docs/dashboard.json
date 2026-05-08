@@ -1,11 +1,11 @@
 {
-  "lastUpdated": "2026-05-08T06:54:46Z",
+  "lastUpdated": "2026-05-08T07:15:36Z",
   "testSummary": {
-    "total": 59,
-    "passed": 59,
-    "failed": 0,
+    "total": 76,
+    "passed": 72,
+    "failed": 4,
     "skipped": 0,
-    "successRate": 1.00
+    "successRate": 0.95
   },
   "frameworks": [
     {
@@ -47,7 +47,7 @@
     {
       "name": "auction",
       "aiken": "passed",
-      "ccl-java": "not-implemented",
+      "ccl-java": "passed",
       "meshjs": "passed",
       "evolutionsdk": "passed"
     },
@@ -62,8 +62,8 @@
       "name": "crowdfund",
       "aiken": "passed",
       "ccl-java": "passed",
-      "meshjs": "not-implemented",
-      "evolutionsdk": "not-implemented"
+      "meshjs": "passed",
+      "evolutionsdk": "passed"
     },
     {
       "name": "decentralized-identity",
@@ -75,16 +75,16 @@
     {
       "name": "escrow",
       "aiken": "passed",
-      "ccl-java": "not-implemented",
+      "ccl-java": "failed",
       "meshjs": "passed",
       "evolutionsdk": "passed"
     },
     {
       "name": "factory",
       "aiken": "passed",
-      "ccl-java": "not-implemented",
+      "ccl-java": "passed",
       "meshjs": "passed",
-      "evolutionsdk": "not-implemented"
+      "evolutionsdk": "passed"
     },
     {
       "name": "htlc",
@@ -96,9 +96,9 @@
     {
       "name": "lottery",
       "aiken": "passed",
-      "ccl-java": "not-implemented",
+      "ccl-java": "passed",
       "meshjs": "passed",
-      "evolutionsdk": "not-implemented"
+      "evolutionsdk": "passed"
     },
     {
       "name": "payment-splitter",
@@ -110,8 +110,8 @@
     {
       "name": "pricebet",
       "aiken": "passed",
-      "ccl-java": "not-implemented",
-      "meshjs": "not-implemented",
+      "ccl-java": "passed",
+      "meshjs": "passed",
       "evolutionsdk": "passed"
     },
     {
@@ -124,29 +124,29 @@
     {
       "name": "simple-wallet",
       "aiken": "passed",
-      "ccl-java": "not-implemented",
+      "ccl-java": "failed",
       "meshjs": "passed",
       "evolutionsdk": "passed"
     },
     {
       "name": "storage",
       "aiken": "passed",
-      "ccl-java": "not-implemented",
-      "meshjs": "not-implemented",
-      "evolutionsdk": "not-implemented"
+      "ccl-java": "failed",
+      "meshjs": "passed",
+      "evolutionsdk": "passed"
     },
     {
       "name": "token-transfer",
       "aiken": "passed",
       "ccl-java": "passed",
-      "meshjs": "not-implemented",
+      "meshjs": "passed",
       "evolutionsdk": "passed"
     },
     {
       "name": "upgradable-proxy",
       "aiken": "passed",
-      "ccl-java": "not-implemented",
-      "meshjs": "not-implemented",
+      "ccl-java": "failed",
+      "meshjs": "passed",
       "evolutionsdk": "passed"
     },
     {
