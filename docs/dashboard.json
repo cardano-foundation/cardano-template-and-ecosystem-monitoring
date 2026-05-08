@@ -1,11 +1,11 @@
 {
-  "lastUpdated": "2026-05-08T07:25:04Z",
+  "lastUpdated": "2026-05-08T09:25:14Z",
   "testSummary": {
     "total": 76,
-    "passed": 73,
-    "failed": 3,
+    "passed": 76,
+    "failed": 0,
     "skipped": 0,
-    "successRate": 0.96
+    "successRate": 1.00
   },
   "frameworks": [
     {
@@ -75,7 +75,7 @@
     {
       "name": "escrow",
       "aiken": "passed",
-      "ccl-java": "failed",
+      "ccl-java": "passed",
       "meshjs": "passed",
       "evolutionsdk": "passed"
     },
@@ -131,7 +131,7 @@
     {
       "name": "storage",
       "aiken": "passed",
-      "ccl-java": "failed",
+      "ccl-java": "passed",
       "meshjs": "passed",
       "evolutionsdk": "passed"
     },
@@ -145,7 +145,7 @@
     {
       "name": "upgradable-proxy",
       "aiken": "passed",
-      "ccl-java": "failed",
+      "ccl-java": "passed",
       "meshjs": "passed",
       "evolutionsdk": "passed"
     },
