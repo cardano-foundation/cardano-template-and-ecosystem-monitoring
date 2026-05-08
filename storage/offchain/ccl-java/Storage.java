@@ -88,7 +88,7 @@ public class Storage {
 
                 PlutusScript storageScript = loadStorageScript();
                 Address storageAddress = AddressProvider.getEntAddress(storageScript, network);
-                byte[] storageHash = HexUtil.decodeHexString(storageScript.getScriptHash());
+                byte[] storageHash = storageScript.getScriptHash();
 
                 PlutusScript mintScript = loadMintScript(seedUtxo, storageHash);
                 String policyId;

@@ -17,6 +17,7 @@ import com.bloxbean.cardano.client.account.Account;
 import com.bloxbean.cardano.client.address.Address;
 import com.bloxbean.cardano.client.address.AddressProvider;
 import com.bloxbean.cardano.client.address.Credential;
+import com.bloxbean.cardano.client.address.CredentialType;
 import com.bloxbean.cardano.client.api.UtxoSupplier;
 import com.bloxbean.cardano.client.api.exception.ApiException;
 import com.bloxbean.cardano.client.api.model.Amount;
@@ -205,7 +206,7 @@ public class Escrow {
                 PlutusData paymentCred;
                 if (addr.getPaymentCredential().isPresent()) {
                         Credential pc = addr.getPaymentCredential().get();
-                        int idx = pc.getType() == Credential.Type.Key ? 0 : 1;
+                        int idx = pc.getType() == CredentialType.Key ? 0 : 1;
                         paymentCred = ConstrPlutusData.of(idx, BytesPlutusData.of(pc.getBytes()));
                 } else {
                         throw new IllegalStateException("Address has no payment credential");
@@ -213,7 +214,7 @@ public class Escrow {
                 PlutusData stakeOption;
                 if (addr.getDelegationCredential().isPresent()) {
                         Credential sc = addr.getDelegationCredential().get();
-                        int idx = sc.getType() == Credential.Type.Key ? 0 : 1;
+                        int idx = sc.getType() == CredentialType.Key ? 0 : 1;
                         PlutusData inner = ConstrPlutusData.of(idx, BytesPlutusData.of(sc.getBytes()));
                         stakeOption = ConstrPlutusData.of(0, ConstrPlutusData.of(0, inner));
                 } else {

@@ -44,8 +44,7 @@ import com.bloxbean.cardano.client.quicktx.QuickTxBuilder;
 import com.bloxbean.cardano.client.quicktx.ScriptTx;
 import com.bloxbean.cardano.client.quicktx.TxResult;
 import com.bloxbean.cardano.client.transaction.spec.Asset;
-import com.bloxbean.cardano.client.transaction.spec.cert.StakeRegistration;
-import com.bloxbean.cardano.client.transaction.spec.cert.StakeCredential;
+import com.bloxbean.cardano.client.quicktx.Tx;
 import com.bloxbean.cardano.client.util.HexUtil;
 
 /**
@@ -133,19 +132,25 @@ public class Proxy {
 
                 Asset asset = new Asset(stateTokenName, BigInteger.ONE);
 
-                StakeRegistration v1StakeReg = new StakeRegistration(
-                                StakeCredential.fromScriptHash(HexUtil.decodeHexString(v1Hash)));
+                // Plain Tx for the script-stake-address registration cert.
+                // Conway-era stake registration with the registered deposit can be added
+                // alongside the ScriptTx that supplies the certificate's script witness.
+                Tx regTx = new Tx()
+                                .registerStakeAddress(v1RewardAddr)
+                                .from(owner.baseAddress());
+
+                // Cert redeemer is unused by the publish path here; supply unit.
+                PlutusData certRedeemer = ConstrPlutusData.of(0);
 
                 ScriptTx scriptTx = new ScriptTx()
                                 .collectFrom(seedUtxo)
                                 .mintAsset(proxyPolicyId, List.of(asset), mintRedeemer,
                                                 proxyAddress.getAddress(), proxyDatum)
-                                .attachMintValidator(proxyScript);
+                                .attachMintValidator(proxyScript)
+                                .attachCertificateValidator(v1Script);
 
                 long slot = backendService.getBlockService().getLatestBlock().getValue().getSlot();
-                return quickTxBuilder.compose(scriptTx)
-                                // Cert: register v1 stake script address.
-                                .registerStakeAddress(v1RewardAddr)
+                return quickTxBuilder.compose(regTx, scriptTx)
                                 .validFrom(slot - 5)
                                 .validTo(slot + 50)
                                 .feePayer(owner.baseAddress())
@@ -175,7 +180,7 @@ public class Proxy {
                                                 owner.baseAddress())
                                 .attachMintValidator(proxyScript)
                                 .withdraw(v1RewardAddr.getAddress(), BigInteger.ZERO, withdrawRedeemer)
-                                .attachWithdrawValidator(v1Script);
+                                .attachRewardValidator(v1Script);
 
                 return quickTxBuilder.compose(scriptTx)
                                 .validFrom(slot - 5)
@@ -235,7 +240,11 @@ public class Proxy {
         }
 
         private static String scriptHash(PlutusScript script) {
-                return script.getScriptHash();
+                try {
+                        return HexUtil.encodeHexString(script.getScriptHash());
+                } catch (CborSerializationException e) {
+                        throw new RuntimeException(e);
+                }
         }
 
         private static void waitForUtxoTx(Address address, String txHash, int timeoutSec)

@@ -17,6 +17,7 @@ import com.bloxbean.cardano.client.account.Account;
 import com.bloxbean.cardano.client.address.Address;
 import com.bloxbean.cardano.client.address.AddressProvider;
 import com.bloxbean.cardano.client.address.Credential;
+import com.bloxbean.cardano.client.address.CredentialType;
 import com.bloxbean.cardano.client.api.UtxoSupplier;
 import com.bloxbean.cardano.client.api.exception.ApiException;
 import com.bloxbean.cardano.client.api.model.Amount;
@@ -211,7 +212,7 @@ public class SimpleWallet {
                 PlutusData paymentCred;
                 if (addr.getPaymentCredential().isPresent()) {
                         Credential pc = addr.getPaymentCredential().get();
-                        int idx = pc.getType() == Credential.Type.Key ? 0 : 1;
+                        int idx = pc.getType() == CredentialType.Key ? 0 : 1;
                         paymentCred = ConstrPlutusData.of(idx,
                                         BytesPlutusData.of(pc.getBytes()));
                 } else {
@@ -221,7 +222,7 @@ public class SimpleWallet {
                 PlutusData stakeOption;
                 if (addr.getDelegationCredential().isPresent()) {
                         Credential sc = addr.getDelegationCredential().get();
-                        int idx = sc.getType() == Credential.Type.Key ? 0 : 1;
+                        int idx = sc.getType() == CredentialType.Key ? 0 : 1;
                         PlutusData inner = ConstrPlutusData.of(idx, BytesPlutusData.of(sc.getBytes()));
                         // Some (Constr 0) wrapping Inline (Constr 0) wrapping the credential.
                         stakeOption = ConstrPlutusData.of(0,
@@ -247,7 +248,11 @@ public class SimpleWallet {
         }
 
         private static String scriptHashHex(PlutusScript script) {
-                return script.getScriptHash();
+                try {
+                        return HexUtil.encodeHexString(script.getScriptHash());
+                } catch (CborSerializationException e) {
+                        throw new RuntimeException(e);
+                }
         }
 
         private static String computePolicyId(PlutusScript script) {
