@@ -116,7 +116,9 @@ public class Storage {
                                 snapshotTypeConstr,
                                 BytesPlutusData.of(commitmentHash));
 
-                Asset asset = new Asset(assetNameHex, BigInteger.ONE);
+                // CCL Asset interprets a String as UTF-8 unless prefixed with "0x".
+                // The on-chain asset name is the raw 32-byte sha256(snapshot_id), so prefix.
+                Asset asset = new Asset("0x" + assetNameHex, BigInteger.ONE);
 
                 ScriptTx scriptTx = new ScriptTx()
                                 .collectFrom(seedUtxo)

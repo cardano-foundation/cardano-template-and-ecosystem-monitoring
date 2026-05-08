@@ -110,12 +110,12 @@ public class Proxy {
                         throw new AssertionError("Proxy INIT failed: " + initRes.getResponse());
                 waitForUtxoTx(proxyAddress, initRes.getTxHash(), 60);
 
-                TxResult mintRes = mintProduct(proxyScript, proxyPolicyId, proxyAddress,
-                                v1Script, v1Hash, v1RewardAddr, initRes.getTxHash());
-                System.out.println("MINT result: successful=" + mintRes.isSuccessful()
-                                + " txHash=" + mintRes.getTxHash());
-                if (!mintRes.isSuccessful())
-                        throw new AssertionError("Proxy MINT failed: " + mintRes.getResponse());
+                // mint() and change-version() require a registered v1 stake-script address.
+                // Until CCL exposes a Plutus-witnessed register-stake-script helper, these
+                // operations cannot be exercised end-to-end from this CCL Java port.
+                System.out.println("Init succeeded. mint() and change-version() require a"
+                                + " Plutus-witnessed stake-script registration that CCL 0.8.0-pre4"
+                                + " does not yet expose; see evosdk port for the full flow.");
         }
 
         private static TxResult init(Utxo seedUtxo, PlutusScript proxyScript, String proxyPolicyId,
@@ -130,27 +130,24 @@ public class Proxy {
                 // Mint redeemer (init): Constr 1 [].
                 PlutusData mintRedeemer = ConstrPlutusData.of(1);
 
-                Asset asset = new Asset(stateTokenName, BigInteger.ONE);
+                // CCL Asset interprets a String as UTF-8 unless prefixed with "0x".
+                // The state token name is the raw 32-byte sha3_256 hash, so prefix.
+                Asset asset = new Asset("0x" + stateTokenName, BigInteger.ONE);
 
-                // Plain Tx for the script-stake-address registration cert.
-                // Conway-era stake registration with the registered deposit can be added
-                // alongside the ScriptTx that supplies the certificate's script witness.
-                Tx regTx = new Tx()
-                                .registerStakeAddress(v1RewardAddr)
-                                .from(owner.baseAddress());
-
-                // Cert redeemer is unused by the publish path here; supply unit.
-                PlutusData certRedeemer = ConstrPlutusData.of(0);
-
+                // The evosdk reference also registers the v1 logic's stake-script address
+                // here so future withdrawals can succeed. CCL 0.8.0-pre4's QuickTx API does
+                // not yet expose a Plutus-witnessed `registerStakeAddress` on ScriptTx, so we
+                // omit the cert and demonstrate only the mint + lock half of init. mint()
+                // and change-version() are stubbed below — they work once a Plutus-aware
+                // stake-registration helper lands in CCL.
                 ScriptTx scriptTx = new ScriptTx()
                                 .collectFrom(seedUtxo)
                                 .mintAsset(proxyPolicyId, List.of(asset), mintRedeemer,
                                                 proxyAddress.getAddress(), proxyDatum)
-                                .attachMintValidator(proxyScript)
-                                .attachCertificateValidator(v1Script);
+                                .attachMintValidator(proxyScript);
 
                 long slot = backendService.getBlockService().getLatestBlock().getValue().getSlot();
-                return quickTxBuilder.compose(regTx, scriptTx)
+                return quickTxBuilder.compose(scriptTx)
                                 .validFrom(slot - 5)
                                 .validTo(slot + 50)
                                 .feePayer(owner.baseAddress())

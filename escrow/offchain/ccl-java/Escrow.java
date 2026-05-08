@@ -44,6 +44,8 @@ import com.bloxbean.cardano.client.quicktx.ScriptTx;
 import com.bloxbean.cardano.client.quicktx.Tx;
 import com.bloxbean.cardano.client.quicktx.TxResult;
 
+// (Tx import already present above; left intact.)
+
 /**
  * Escrow — single spend validator (no parameters).
  *
@@ -171,6 +173,16 @@ public class Escrow {
 
                 long slot = backendService.getBlockService().getLatestBlock().getValue().getSlot();
 
+                // The script holds INITIATOR_LOVELACE + RECIPIENT_LOVELACE = 9 ADA. If
+                // the explicit payouts total exactly that, CCL deducts the fee from the
+                // change output (which routes back to the initiator), pushing initiator's
+                // received value below `recipient_assets` and failing the validator.
+                // We pair the script spend with a tiny fee-bearing Tx from the recipient's
+                // wallet so the fee is sourced externally and our payouts stay intact.
+                Tx feeTx = new Tx()
+                                .payToAddress(recipient.baseAddress(), Amount.ada(2))
+                                .from(recipient.baseAddress());
+
                 ScriptTx scriptTx = new ScriptTx()
                                 .collectFrom(List.of(utxo), redeemer)
                                 // Initiator gets the recipient's assets, and vice versa.
@@ -180,10 +192,10 @@ public class Escrow {
                                                 Amount.lovelace(BigInteger.valueOf(INITIATOR_LOVELACE)))
                                 .attachSpendingValidator(plutusScript);
 
-                return quickTxBuilder.compose(scriptTx)
+                return quickTxBuilder.compose(feeTx, scriptTx)
                                 .validFrom(slot - 5)
                                 .validTo(slot + 50)
-                                .feePayer(initiator.baseAddress())
+                                .feePayer(recipient.baseAddress())
                                 .withSigner(SignerProviders.signerFrom(initiator))
                                 .withSigner(SignerProviders.signerFrom(recipient))
                                 .withRequiredSigners(initiator.getBaseAddress(), recipient.getBaseAddress())
