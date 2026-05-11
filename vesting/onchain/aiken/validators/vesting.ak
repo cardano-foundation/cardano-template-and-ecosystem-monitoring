@@ -5,12 +5,17 @@ use mocktail/virgin_output_reference.{mock_utxo_ref}
 use cocktail/vodka_extra_signatories.{key_signed}
 use cocktail/vodka_validity_range.{valid_after}
 
+// Time-locked vesting. Owner can always reclaim (clawback); beneficiary can
+// only collect once lock_until passes. The datum carries both pkhs and the
+// unlock time, so a single script address can host many independent vesting
+// schedules.
+
 pub type VestingDatum {
-  /// POSIX time in milliseconds, e.g. 1672843961000
+  // POSIX milliseconds. Aiken/Plutus time is ms-since-epoch — keep this in
+  // sync with the wallet's slot-to-time conversion or the lock will appear
+  // to be off by an era offset.
   lock_until: Int,
-  /// Owner's credentials
   owner: ByteArray,
-  /// Beneficiary's credentials
   beneficiary: ByteArray,
 }
 
@@ -21,9 +26,9 @@ validator vesting {
     _input: OutputReference,
     tx: Transaction,
   ) {
-    // In principle, scripts can be used for different purpose (e.g. minting
-    // assets). Here we make sure it's only used when 'spending' from a eUTxO
     expect Some(datum) = datum_opt
+    // Owner has an unconditional clawback path; beneficiary is gated by
+    // time. Without the clawback the owner couldn't recover mis-sent funds.
     or {
       key_signed(tx.extra_signatories, datum.owner),
       and {

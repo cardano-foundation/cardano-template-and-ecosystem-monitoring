@@ -1,353 +1,268 @@
 import {
+  BlockfrostProvider,
+  MeshTxBuilder,
   MeshWallet,
+  builtinByteString,
+  integer,
+  mConStr,
+  mConStr0,
+  mConStr1,
+  resolvePaymentKeyHash,
   serializePlutusScript,
-  Transaction,
-  largestFirst,
-} from "@meshsdk/core";
-import { applyParamsToScript, deserializeAddress } from "@meshsdk/core-cst";
-import {
-  PlutusScript,
-  unixTimeToEnclosingSlot,
-  SLOT_CONFIG_NETWORK,
-} from "@meshsdk/common";
-
-import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
-import {
-  koiosProvider,
-  getWallet,
   stringToHex,
-  sha256,
-  loadStore,
-  saveStore,
-  showAddresses,
-  checkBalances,
-  listUtxos,
-  transfer,
-} from "./lib/utils.ts";
+  type UTxO,
+} from "@meshsdk/core";
+import { applyParamsToScript } from "@meshsdk/core-csl";
+import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
-async function prepare(amount: number) {
-  const addresses = [];
-  for (let i = 0; i < amount; i++) {
-    const mnemonic = MeshWallet.brew() as string[];
-    const wallet = new MeshWallet({
-      networkId: 0,
-      fetcher: koiosProvider,
-      submitter: koiosProvider,
-      key: {
-        type: "mnemonic",
-        words: mnemonic,
-      },
-    });
-    const address = await wallet.getChangeAddress();
-    addresses.push(address);
-    Deno.writeTextFileSync(`wallet_${i}.txt`, mnemonic.join(" "));
+// HTLC: parameterized validator (secret_hash, expiration_ms, owner_vkh) with GUESS / WITHDRAW.
+// Scenario runs both paths: claimer reveals the preimage; owner refunds the second lock.
+// Mesh quirk: omit `evaluator` so Mesh's CPU estimator is used against yaci-devkit.
+
+const YACI_URL = "http://localhost:8080/api/v1";
+const NETWORK = "preprod";
+const NETWORK_ID = 0;
+const FUNDER_MNEMONIC =
+  "test test test test test test test test test test test test test test test test test test test test test test test sauce";
+
+function provider(): BlockfrostProvider {
+  return new BlockfrostProvider(YACI_URL);
+}
+function makeWallet(words: string[]): MeshWallet {
+  const p = provider();
+  return new MeshWallet({
+    networkId: NETWORK_ID,
+    fetcher: p,
+    submitter: p,
+    key: { type: "mnemonic", words },
+  });
+}
+function funderWallet(): MeshWallet {
+  return makeWallet(FUNDER_MNEMONIC.split(/\s+/));
+}
+
+async function yaciTipSlot(): Promise<number> {
+  return (await fetch(`${YACI_URL}/blocks/latest`).then((r) => r.json())).slot;
+}
+async function yaciSystemStartSec(): Promise<number> {
+  const block = await fetch(`${YACI_URL}/blocks/latest`).then((r) => r.json());
+  return block.time - block.slot + 600;
+}
+function slotToMs(slot: number, systemStartSec: number): number {
+  return (systemStartSec + slot) * 1000;
+}
+
+async function waitForUtxoAt(addr: string, minCount = 1, timeoutSec = 60) {
+  const p = provider();
+  for (let i = 0; i < timeoutSec; i++) {
+    try {
+      const u = await p.fetchAddressUTxOs(addr);
+      if (u.length >= minCount) return;
+    } catch {}
+    await new Promise((r) => setTimeout(r, 1000));
   }
-  console.log(`Successfully prepared ${amount} wallet (seed phrases).`);
-  console.log(
-    `Make sure to send some tADA to the wallet ${addresses[0]} for fees and collateral.`
+  throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${addr}`);
+}
+
+async function waitForLockedUtxo(scriptAddr: string, initTxHash: string): Promise<UTxO> {
+  const p = provider();
+  for (let i = 0; i < 60; i++) {
+    const utxos = await p.fetchAddressUTxOs(scriptAddr);
+    const u = utxos.find((x) => x.input.txHash === initTxHash);
+    if (u) return u;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  throw new Error(`Locked UTxO ${initTxHash} not found at ${scriptAddr}`);
+}
+
+async function fundFromFunder(targetAddr: string, lovelace: bigint) {
+  const wallet = funderWallet();
+  const myAddr = await wallet.getChangeAddress();
+  const myUtxos = await provider().fetchAddressUTxOs(myAddr);
+  const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
+    .setNetwork(NETWORK);
+  await tx
+    .txOut(targetAddr, [{ unit: "lovelace", quantity: lovelace.toString() }])
+    .changeAddress(myAddr)
+    .selectUtxosFrom(myUtxos)
+    .complete();
+  const signed = await wallet.signTx(tx.txHex);
+  const txHash = await wallet.submitTx(signed);
+  console.log(`Funded ${targetAddr.slice(0, 20)}… with ${lovelace} lovelace. tx=${txHash}`);
+  await waitForUtxoAt(targetAddr, 1);
+}
+
+async function sha256Hex(s: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function loadScript(secretHashHex: string, expirationMs: bigint, ownerVkh: string) {
+  const compiled = blueprint.validators[0].compiledCode;
+  const script = applyParamsToScript(
+    compiled,
+    [
+      builtinByteString(secretHashHex),
+      integer(Number(expirationMs)),
+      builtinByteString(ownerVkh),
+    ],
+    "JSON",
   );
+  const { address: scriptAddress } = serializePlutusScript(
+    { code: script, version: "V3" },
+    undefined,
+    NETWORK_ID,
+  );
+  return { script, scriptAddress };
 }
 
-async function setup(wallet: MeshWallet, params?: any[]) {
-  let scriptCode = blueprint.validators[0].compiledCode;
-
-  if (params) {
-    scriptCode = applyParamsToScript(scriptCode, params);
-  }
-
-  const script: PlutusScript = {
-    code: scriptCode,
-    version: "V3",
-  };
-
-  const scriptAddress = serializePlutusScript(script, undefined, 0).address;
-
-  return {
-    wallet,
-    script,
-    scriptAddress,
-  };
-}
-
-async function initHtlc(
-  lovelaceAmount: string,
+async function init(
+  owner: MeshWallet,
+  ownerVkh: string,
   secret: string,
-  walletIndex = 0,
-  expirationSeconds = 3600
+  expirationMs: bigint,
+  lovelace: bigint,
+): Promise<{ txHash: string; secretHashHex: string }> {
+  const secretHashHex = await sha256Hex(secret);
+  const { scriptAddress } = loadScript(secretHashHex, expirationMs, ownerVkh);
+  const ownerAddr = await owner.getChangeAddress();
+  const utxos = await provider().fetchAddressUTxOs(ownerAddr);
+
+  // MeshBlockfrostProvider's evaluator mis-parses yaci-devkit's ogmios JSON-WSP response;
+  // omitting it makes mesh fall back to its CPU estimator.
+  const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
+    .setNetwork(NETWORK);
+  await tx
+    .txOut(scriptAddress, [{ unit: "lovelace", quantity: lovelace.toString() }])
+    .txOutInlineDatumValue(mConStr0([]))
+    .changeAddress(ownerAddr)
+    .selectUtxosFrom(utxos)
+    .complete();
+  const signed = await owner.signTx(tx.txHex);
+  const txHash = await owner.submitTx(signed);
+  console.log(`INIT ok. secretHash=${secretHashHex.slice(0, 12)}… tx=${txHash}`);
+  return { txHash, secretHashHex };
+}
+
+async function claim(
+  claimer: MeshWallet,
+  secret: string,
+  secretHashHex: string,
+  expirationMs: bigint,
+  ownerVkh: string,
+  initTxHash: string,
 ) {
-  const wallet = await getWallet(walletIndex);
-  const address = await wallet.getChangeAddress();
-  const ownerPkh =
-    deserializeAddress(address).asBase()?.getPaymentCredential().hash || "";
+  const { script, scriptAddress } = loadScript(secretHashHex, expirationMs, ownerVkh);
+  const utxo = await waitForLockedUtxo(scriptAddress, initTxHash);
+  const claimerAddr = await claimer.getChangeAddress();
+  const claimerVkh = resolvePaymentKeyHash(claimerAddr);
+  const ownUtxos = await provider().fetchAddressUTxOs(claimerAddr);
+  const collateral: UTxO[] = await claimer.getCollateral();
 
-  const secretHash = await sha256(secret);
-  const expiration = BigInt(Date.now() + expirationSeconds * 1000);
+  const redeemer = mConStr0([stringToHex(secret)]);
 
-  const params = [secretHash, expiration, ownerPkh];
-
-  const { scriptAddress } = await setup(wallet, params);
-
-  const utxos = await koiosProvider.fetchAddressUTxOs(address);
-
-  const tx = new Transaction({ initiator: wallet, fetcher: koiosProvider })
-    .setTxInputs(utxos)
-    .sendLovelace(
-    {
-      address: scriptAddress,
-      datum: {
-        value: { alternative: 0, fields: [] },
-        inline: true,
-      },
-    },
-    lovelaceAmount
-  );
-
-  try {
-    const unsignedTx = await tx.build();
-    const signedTx = await wallet.signTx(unsignedTx);
-    const txHash = await wallet.submitTx(signedTx);
-
-    const store = await loadStore();
-    store.push({
-      txHash,
-      amount: lovelaceAmount,
-      secretHash,
-      expiration: expiration.toString(),
-      ownerPkh,
-    });
-    await saveStore(store);
-
-    console.log(`Successfully locked ${lovelaceAmount} lovelace to ${scriptAddress}.
-See: https://preprod.cexplorer.io/tx/${txHash}`);
-    console.log(`Use the following command to claim:
-deno run -A htlc.ts claim ${txHash} <preimage> <walletIndex>`);
-  } catch (error) {
-    console.error("Error while submitting transaction:", error);
-    Deno.exit(1);
-  }
+  const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
+    .setNetwork(NETWORK);
+  await tx
+    .spendingPlutusScriptV3()
+    .txIn(utxo.input.txHash, utxo.input.outputIndex, utxo.output.amount, scriptAddress)
+    .txInScript(script)
+    .txInRedeemerValue(redeemer)
+    .txInInlineDatumPresent()
+    .txInCollateral(
+      collateral[0].input.txHash,
+      collateral[0].input.outputIndex,
+      collateral[0].output.amount,
+      collateral[0].output.address,
+    )
+    .requiredSignerHash(claimerVkh)
+    .changeAddress(claimerAddr)
+    .selectUtxosFrom(ownUtxos)
+    .complete();
+  const signed = await claimer.signTx(tx.txHex);
+  const txHash = await claimer.submitTx(signed);
+  console.log(`CLAIM ok. tx=${txHash}`);
 }
 
-async function claimHtlc(
-  transactionId: string,
-  preimage: string,
-  walletIndex = 1
+async function refund(
+  owner: MeshWallet,
+  secretHashHex: string,
+  expirationMs: bigint,
+  ownerVkh: string,
+  initTxHash: string,
+  validFromSlot: number,
 ) {
-  console.log(`Claiming HTLC with transaction ID: "${transactionId}" using wallet ${walletIndex}`);
-  const store = await loadStore();
-  const htlc = store.find((h) => h.txHash === transactionId);
-  if (!htlc) {
-    console.error("HTLC not found in local store.");
-    return;
-  }
+  const { script, scriptAddress } = loadScript(secretHashHex, expirationMs, ownerVkh);
+  const utxo = await waitForLockedUtxo(scriptAddress, initTxHash);
+  const ownerAddr = await owner.getChangeAddress();
+  const ownUtxos = await provider().fetchAddressUTxOs(ownerAddr);
+  const collateral: UTxO[] = await owner.getCollateral();
+  const redeemer = mConStr1([]);
 
-  const params = [htlc.secretHash, BigInt(htlc.expiration), htlc.ownerPkh];
-
-  const wallet = await getWallet(walletIndex);
-  const { script, scriptAddress } = await setup(wallet, params);
-  const address = await wallet.getChangeAddress();
-  console.log(`Using wallet address: ${address}`);
-  console.log(`Script address: ${scriptAddress}`);
-
-  const utxos = await koiosProvider.fetchAddressUTxOs(scriptAddress);
-  console.log(`Found ${utxos.length} UTXOs at script address.`);
-  const utxo = utxos.find((u) => u.input.txHash === transactionId);
-
-  if (!utxo) {
-    console.error(`No UTXOs found for transaction ID: ${transactionId}`);
-    return;
-  }
-
-  const collateralUtxos = largestFirst(
-    "5000000",
-    await koiosProvider.fetchAddressUTxOs(address)
-  );
-
-  const redeemer = {
-    alternative: 0, // GUESS
-    fields: [stringToHex(preimage)],
-  };
-
-  const slot = unixTimeToEnclosingSlot(
-    Number(htlc.expiration),
-    SLOT_CONFIG_NETWORK.preprod
-  );
-
-  const tx = new Transaction({ initiator: wallet, fetcher: koiosProvider })
-    .setTimeToExpire(slot.toString())
-    .redeemValue({
-      value: utxo,
-      script: script,
-      redeemer: { data: redeemer },
-    })
-    .setCollateral(collateralUtxos)
-    .sendValue(address, utxo);
-
-  try {
-    const unsignedTx = await tx.build();
-    const signedTx = await wallet.signTx(unsignedTx);
-    const txHash = await wallet.submitTx(signedTx);
-    console.log(`Successfully claimed HTLC with transaction ID ${transactionId}.
-See: https://preprod.cexplorer.io/tx/${txHash}`);
-  } catch (error) {
-    console.error("Error while submitting transaction:", error);
-    Deno.exit(1);
-  }
+  const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
+    .setNetwork(NETWORK);
+  await tx
+    .spendingPlutusScriptV3()
+    .txIn(utxo.input.txHash, utxo.input.outputIndex, utxo.output.amount, scriptAddress)
+    .txInScript(script)
+    .txInRedeemerValue(redeemer)
+    .txInInlineDatumPresent()
+    .txInCollateral(
+      collateral[0].input.txHash,
+      collateral[0].input.outputIndex,
+      collateral[0].output.amount,
+      collateral[0].output.address,
+    )
+    .requiredSignerHash(ownerVkh)
+    // WITHDRAW requires `valid_after expiration` — invalidBefore must be strictly past expirationSlot.
+    .invalidBefore(validFromSlot)
+    .invalidHereafter(validFromSlot + 120)
+    .changeAddress(ownerAddr)
+    .selectUtxosFrom(ownUtxos)
+    .complete();
+  const signed = await owner.signTx(tx.txHex);
+  const txHash = await owner.submitTx(signed);
+  console.log(`REFUND ok. tx=${txHash}`);
 }
 
-async function refundHtlc(transactionId: string, walletIndex = 0) {
-  console.log(`Refunding HTLC with transaction ID: "${transactionId}" using wallet ${walletIndex}`);
-  const store = await loadStore();
-  const htlc = store.find((h) => h.txHash === transactionId);
-  if (!htlc) {
-    console.error("HTLC not found in local store.");
-    return;
+async function runScenario() {
+  console.log("=== htlc scenario: init×2 → claim / refund ===");
+  // Roles: owner locks + may refund after expiry; claimer reveals the secret for the first lock.
+  const owner = makeWallet(MeshWallet.brew(false) as string[]);
+  const claimer = makeWallet(MeshWallet.brew(false) as string[]);
+  const ownerAddr = await owner.getChangeAddress();
+  const claimerAddr = await claimer.getChangeAddress();
+  await fundFromFunder(ownerAddr, 30_000_000n);
+  await fundFromFunder(claimerAddr, 20_000_000n);
+  const ownerVkh = resolvePaymentKeyHash(ownerAddr);
+
+  const secret1 = "open-sesame";
+  const exp1 = BigInt(Date.now() + 60 * 60 * 1000);
+  const { txHash: tx1, secretHashHex: h1 } = await init(owner, ownerVkh, secret1, exp1, 10_000_000n);
+  await waitForLockedUtxo(loadScript(h1, exp1, ownerVkh).scriptAddress, tx1);
+
+  const secret2 = "another-secret";
+  const systemStartSec = await yaciSystemStartSec();
+  const exp2Slot = (await yaciTipSlot()) + 10;
+  const exp2 = BigInt(slotToMs(exp2Slot, systemStartSec));
+  const { txHash: tx2, secretHashHex: h2 } = await init(owner, ownerVkh, secret2, exp2, 8_000_000n);
+
+  await claim(claimer, secret1, h1, exp1, ownerVkh, tx1);
+
+  for (let i = 0; i < 300; i++) {
+    const tip = await yaciTipSlot();
+    if (tip > exp2Slot) {
+      console.log(`tipSlot ${tip} > exp2Slot ${exp2Slot}, proceeding`);
+      break;
+    }
+    if (i % 10 === 0) console.log(`Waiting for chain slot ${tip} → ${exp2Slot}…`);
+    await new Promise((r) => setTimeout(r, 1000));
   }
+  await refund(owner, h2, exp2, ownerVkh, tx2, exp2Slot + 1);
 
-  const params = [htlc.secretHash, BigInt(htlc.expiration), htlc.ownerPkh];
-
-  const wallet = await getWallet(walletIndex);
-  const { script, scriptAddress } = await setup(wallet, params);
-  const address = await wallet.getChangeAddress();
-  console.log(`Using wallet address: ${address}`);
-
-  const utxos = await koiosProvider.fetchAddressUTxOs(address);
-
-  const scriptUtxos = await koiosProvider.fetchAddressUTxOs(scriptAddress);
-  const utxo = scriptUtxos.find((u) => u.input.txHash === transactionId);
-
-  if (!utxo) {
-    console.error(`No UTXOs found for transaction ID: ${transactionId}`);
-    return;
-  }
-
-  const collateralUtxos = largestFirst(
-    "5000000",
-    utxos
-  );
-
-  const redeemer = {
-    alternative: 1, // WITHDRAW
-    fields: [],
-  };
-
-  const slot =
-    unixTimeToEnclosingSlot(
-      Number(htlc.expiration),
-      SLOT_CONFIG_NETWORK.preprod
-    ) + 1;
-
-  const tx = new Transaction({ initiator: wallet, fetcher: koiosProvider })
-    .setTxInputs(utxos)
-    .setTimeToStart(slot.toString())
-    .redeemValue({
-      value: utxo,
-      script: script,
-      redeemer: { data: redeemer },
-    })
-    .setRequiredSigners([address])
-    .setCollateral(collateralUtxos)
-    .sendValue(address, utxo);
-
-  try {
-    const unsignedTx = await tx.build();
-    const signedTx = await wallet.signTx(unsignedTx);
-    const txHash = await wallet.submitTx(signedTx);
-    console.log(`Successfully refunded HTLC with transaction ID ${transactionId}.
-See: https://preprod.cexplorer.io/tx/${txHash}`);
-  } catch (error) {
-    console.error("Error while submitting transaction:", error);
-    Deno.exit(1);
-  }
+  console.log("=== Scenario complete ===");
 }
 
-const isPositiveNumber = (s: string) =>
-  Number.isInteger(Number(s)) && Number(s) > 0;
-
-if (Deno.args.length > 0) {
-  if (Deno.args[0] === "init") {
-    if (Deno.args.length > 2 && isPositiveNumber(Deno.args[1])) {
-      const amount = Deno.args[1];
-      const secret = Deno.args[2];
-      const walletIndex = Deno.args.length > 3 ? parseInt(Deno.args[3]) : 0;
-      const expirationSeconds =
-        Deno.args.length > 4 ? parseInt(Deno.args[4]) : 3600;
-      await initHtlc(amount, secret, walletIndex, expirationSeconds);
-    } else {
-      console.log("Expected lovelace amount and secret as arguments.");
-      console.log(
-        "Example usage: deno run -A htlc.ts init 10000000 mySecret 0 3600"
-      );
-    }
-  } else if (Deno.args[0] === "claim") {
-    if (Deno.args.length > 2 && Deno.args[1].match(/^[0-9a-fA-F]{64}$/)) {
-      const txHash = Deno.args[1];
-      const preimage = Deno.args[2];
-      const walletIndex = Deno.args.length > 3 ? parseInt(Deno.args[3]) : 1;
-      await claimHtlc(txHash, preimage, walletIndex);
-    } else {
-      console.log("Expected a valid transaction ID and preimage as arguments.");
-      console.log(
-        "Example usage: deno run -A htlc.ts claim 5714bd67aaeb664c3d2060ac34a33b66c2f4ec82e029b526a216024d27a8eaf5 preimage 1"
-      );
-    }
-  } else if (Deno.args[0] === "refund") {
-    if (Deno.args.length > 1 && Deno.args[1].match(/^[0-9a-fA-F]{64}$/)) {
-      const txHash = Deno.args[1];
-      const walletIndex = Deno.args.length > 2 ? parseInt(Deno.args[2]) : 0;
-      await refundHtlc(txHash, walletIndex);
-    } else {
-      console.log("Expected a valid transaction ID as the second argument.");
-      console.log(
-        "Example usage: deno run -A htlc.ts refund 5714bd67aaeb664c3d2060ac34a33b66c2f4ec82e029b526a216024d27a8eaf5 0"
-      );
-    }
-  } else if (Deno.args[0] === "prepare") {
-    if (Deno.args.length > 1 && isPositiveNumber(Deno.args[1])) {
-      const files = Deno.readDirSync(".");
-      const seeds = [];
-      for (const file of files) {
-        if (file.name.match(/wallet_[0-9]+.txt/) !== null) {
-          seeds.push(file.name);
-        }
-      }
-
-      if (seeds.length > 0) {
-        console.log(
-          "Seed phrases already exist. Remove them before preparing new ones."
-        );
-      } else {
-        await prepare(parseInt(Deno.args[1]));
-      }
-    } else {
-      console.log(
-        "Expected a positive number (of seed phrases to prepare) as the second argument."
-      );
-      console.log("Example usage: deno run -A htlc.ts prepare 5");
-    }
-  } else if (Deno.args[0] === "show-addresses") {
-    await showAddresses();
-  } else if (Deno.args[0] === "balances") {
-    await checkBalances();
-  } else if (Deno.args[0] === "list-utxos") {
-    await listUtxos();
-  } else if (Deno.args[0] === "transfer") {
-    if (Deno.args.length >= 4) {
-      const from = parseInt(Deno.args[1]);
-      const to = parseInt(Deno.args[2]);
-      const amount = Deno.args[3];
-      await transfer(from, to, amount);
-    } else {
-      console.log(
-        "Usage: deno run -A htlc.ts transfer <fromIndex> <toIndex> <amountLovelace>"
-      );
-    }
-  } else {
-    console.log(
-      'Invalid argument. Allowed arguments are "init", "claim", "refund", "prepare", "show-addresses", "balances", "list-utxos", or "transfer".'
-    );
-  }
-} else {
-  console.log(
-    'Expected an argument. Allowed arguments are "init", "claim", "refund", "prepare", "show-addresses", "balances", "list-utxos", or "transfer".'
-  );
+if (import.meta.main) {
+  await runScenario();
 }

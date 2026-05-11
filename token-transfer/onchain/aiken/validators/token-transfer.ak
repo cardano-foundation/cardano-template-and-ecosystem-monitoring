@@ -12,6 +12,11 @@ use mocktail/virgin_key_hash.{mock_policy_id, mock_pub_key_hash}
 use mocktail/virgin_output_reference.{mock_utxo_ref}
 use cocktail/vodka_extra_signatories.{key_signed}
 
+// Single-asset receiver script. Parameterised on (receiver, policy, assetName)
+// so each address corresponds to one specific token. When the target asset
+// is present, only the receiver can spend AND no other tokens may be routed
+// elsewhere in the same tx (anti-batching). UTxOs that lack the target
+// asset are spendable unconditionally — see the None branch below.
 validator token_transfer(
   receiver: VerificationKeyHash,
   policy: PolicyId,
@@ -29,11 +34,11 @@ validator token_transfer(
     let found_policy =
       list.find(policies, fn(policy_id) { policy_id == policy })
     when found_policy is {
-      // If the expected policy is found, we check if the receiver can withdraw
-      // the asset without any other assets being sent to a different address
+      // Asset present: enforce receiver signature AND that no foreign tokens
+      // leave the script in this tx. Outputs returning to this address are
+      // allowed (re-locking is fine); only departures matter.
       Some(expected_policy) -> {
         let expected_tokens = assets.tokens(spent_input.output.value, policy)
-        // check if there is an output with an unexpected asset sent to a different address
         let unexpected_assets_sent =
           list.any(
             outputs,
@@ -62,7 +67,9 @@ validator token_transfer(
           key_signed(extra_signatories, receiver),
         }
       }
-      // If a utxo without the expected policy is spent, we accept it to avoid locking funds indefinitely
+      // Liberal escape hatch: dust or unrelated tokens accidentally sent
+      // here can be retrieved by anyone. Without this clause such UTxOs
+      // would be permanently locked.
       None -> True
     }
   }

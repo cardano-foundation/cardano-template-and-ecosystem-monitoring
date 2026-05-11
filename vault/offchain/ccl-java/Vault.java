@@ -43,14 +43,14 @@ import com.bloxbean.cardano.client.quicktx.Tx;
 import com.bloxbean.cardano.client.quicktx.TxResult;
 
 /**
- * Vault use-case. Validator parameters: (owner: VerificationKeyHash, waitTime: Int).
- * Datum on locked UTxO: WithdrawDatum { lock_time: Int }.
- * Redeemer: Action { WITHDRAW (0) | FINALIZE (1) | CANCEL (2) }.
+ * Time-locked vault parametrised by (owner_pkh, waitTimeMs). Exercises
+ * WITHDRAW (Constr 0) which moves funds back to the script and starts the
+ * cool-down by setting lock_time = now, then FINALIZE (Constr 1) once chain
+ * time exceeds lock_time + waitTime. CANCEL (Constr 2) is omitted.
  *
- * Happy path covered here:
- *   1. lock(amount)  → pay to script with WithdrawDatum { lock_time = far future }.
- *   2. withdraw()    → consume UTxO, return funds to script with lock_time = now (starts the wait).
- *   3. finalize()    → after waitTime elapses, sweep funds back to owner.
+ * Validity-range time interacts subtly with chain POSIX: validFrom(slot - 5)
+ * widens the lower bound so the validator's strict-greater-than checks have
+ * a few seconds of slack.
  */
 public class Vault {
 
@@ -64,34 +64,29 @@ public class Vault {
         static Address ownerAddress = payee1.getBaseAddress();
         static QuickTxBuilder quickTxBuilder = new QuickTxBuilder(backendService);
 
-        // 60 seconds wait after WITHDRAW before FINALIZE is allowed (matches the
-        // contract parameter applied at script-instantiation time).
+        // Must match the on-chain validator's waitTime parameter that is baked into
+        // the script hash via getParametrisedPlutusScript.
         static long WAIT_TIME_MS = 60_000L;
 
         static PlutusScript plutusScript = getParametrisedPlutusScript();
         static Address scriptAddress = AddressProvider.getEntAddress(plutusScript, network);
 
         public static void main(String[] args) throws ApiException, InterruptedException {
-                // 1. Lock 20 ADA with a far-future lock_time so it can't be finalized yet.
                 long farFuture = Instant.now().plusSeconds(3_153_600_000L).toEpochMilli();
                 lockFunds(20, farFuture);
                 waitForScriptUtxo(60);
 
-                // 2. WITHDRAW: re-output to script with lock_time well in the past so
-                //    the validator's `valid_after(validity_range, lock_time)` check
-                //    holds — validity_lower from `validFrom(slot - 5)` maps to
-                //    chain_time - 5s, which must be strictly greater than lock_time.
+                // Set the new lock_time well in the past so the validator's
+                // valid_after(validity_range, lock_time) holds — the chain-side lower
+                // bound (slot - 5 mapped to chain time) must exceed lock_time strictly.
                 long withdrawLockTime = Instant.now().minusSeconds(60).toEpochMilli();
                 TxResult withdrawTx = withdraw(withdrawLockTime);
                 System.out.println("WITHDRAW result: successful=" + withdrawTx.isSuccessful()
                                 + " txHash=" + withdrawTx.getTxHash());
 
-                // 3. FINALIZE: validator requires
-                //      validity_lower > waitTime + lock_time.
-                //    lock_time = (now - 60s); waitTime = 60s. So FINALIZE is allowed
-                //    once chain_time > now (since (waitTime + lock_time) == now).
-                //    Sleeping ~30s past that gives plenty of margin.
                 System.out.println("Waiting for waitTime to elapse before FINALIZE...");
+                // FINALIZE requires validity_lower > lock_time + waitTime; lock_time is now-60s
+                // and waitTime is 60s, so once chain time crosses "now" the check passes.
                 Thread.sleep(30_000L);
                 waitForScriptUtxo(60);
                 TxResult finalizeTx = finalize_();
@@ -127,8 +122,6 @@ public class Vault {
                 System.out.println("Lock submitted. TxHash: " + res.getTxHash());
         }
 
-        // WITHDRAW (Constr 0): consume the script UTxO and re-output to script with
-        // new lock_time = now, returning the SAME lovelace amount (validator enforces).
         private static TxResult withdraw(long newLockTimeMs) throws ApiException {
                 Utxo utxo = utxoSupplier.getAll(scriptAddress.getAddress()).getFirst();
                 long slot = backendService.getBlockService().getLatestBlock().getValue().getSlot();
@@ -155,8 +148,6 @@ public class Vault {
                                 .completeAndWait();
         }
 
-        // FINALIZE (Constr 1): claim funds back to owner. Requires validity range
-        // lower bound > waitTime + lock_time, i.e. enough wall-clock has passed.
         private static TxResult finalize_() throws ApiException {
                 Utxo utxo = utxoSupplier.getAll(scriptAddress.getAddress()).getFirst();
                 long slot = backendService.getBlockService().getLatestBlock().getValue().getSlot();
@@ -184,7 +175,6 @@ public class Vault {
                 PlutusContractBlueprint blueprint = PlutusBlueprintLoader.loadBlueprint(plutusJson.toFile());
                 String compiledCode = blueprint.getValidators().getFirst().getCompiledCode();
 
-                // Validator params: (owner: VerificationKeyHash, waitTime: Int)
                 String parametrised = AikenScriptUtil.applyParamToScript(
                                 com.bloxbean.cardano.client.plutus.spec.ListPlutusData.of(
                                                 BytesPlutusData.of(ownerAddress.getPaymentCredentialHash().get()),

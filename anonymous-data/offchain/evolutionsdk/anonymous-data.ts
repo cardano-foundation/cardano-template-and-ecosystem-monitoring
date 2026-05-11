@@ -1,10 +1,9 @@
 import {
   Lucid,
-  Koios,
-  applyParamsToScript,
-  Constr,
+  Blockfrost,
   Data,
-  fromHex,
+  applyParamsToScript,
+  getAddressDetails,
   toUnit,
   validatorToAddress,
   validatorToScriptHash,
@@ -15,136 +14,104 @@ import blake2b from "blake2b";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
 // ----------------------------------------------------------------------------
-// Anonymous data commit/reveal — Evolution SDK port.
-//
-//   ID = blake2b_256(pkh || nonce)
-//
-// Commit (mint): mints exactly one token, asset_name = ID, sent to the script
-//   address with an inline datum (the user's opaque payload).
-// Reveal (spend): consumes the committed UTxO with redeemer = nonce; the spender
-//   is required-signed and their pkh + nonce must reproduce ID.
+// Anonymous-data commit/reveal. Exercises the validator's Mint (commit) and
+// Spend (reveal) redeemers. ID = blake2b_256(pkh || nonce); on reveal the
+// validator recomputes it from the signer's pkh and the nonce redeemer.
 // ----------------------------------------------------------------------------
 
-const KOIOS_URL = "https://preprod.koios.rest/api/v1";
+const YACI_URL = "http://localhost:8080/api/v1";
+const NETWORK = "Preprod" as const;
+const TEST_MNEMONIC =
+  "test test test test test test test test test test test test test test test test test test test test test test test sauce";
+
+async function lucidAt(accountIndex: number): Promise<LucidEvolution> {
+  const lucid = await Lucid(new Blockfrost(YACI_URL, "Dummy Key"), NETWORK);
+  lucid.selectWallet.fromSeed(TEST_MNEMONIC, { accountIndex });
+  return lucid;
+}
 
 function bytesToHex(bytes: Uint8Array): string {
   return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
-
 function hexToBytes(hex: string): Uint8Array {
   return new Uint8Array(hex.match(/.{1,2}/g)!.map((b) => parseInt(b, 16)));
 }
 
-// blake2b_256(pkh || nonce)
 function computeIdHex(pkhHex: string, nonceHex: string): string {
   const pkh = hexToBytes(pkhHex);
   const nonce = hexToBytes(nonceHex);
   const combined = new Uint8Array(pkh.length + nonce.length);
   combined.set(pkh);
   combined.set(nonce, pkh.length);
-  const hash = blake2b(blake2b.BYTES).update(combined).digest();
-  return bytesToHex(hash);
-}
-
-async function setup() {
-  const lucid = await Lucid(new Koios(KOIOS_URL), "Preprod");
-  // Wallet selection is up to the caller — `commit` / `reveal` accept a wallet path.
-  return { lucid };
+  return bytesToHex(blake2b(blake2b.BYTES).update(combined).digest());
 }
 
 function loadValidator(): { validator: Validator; policyId: string; scriptAddress: string } {
   const compiledCode = blueprint.validators[0].compiledCode;
-  // No validator parameters.
   const script = applyParamsToScript(compiledCode, []);
   const validator: Validator = { type: "PlutusV3", script };
-  const policyId = validatorToScriptHash(validator);
-  const scriptAddress = validatorToAddress("Preprod", validator);
-  return { validator, policyId, scriptAddress };
+  return {
+    validator,
+    policyId: validatorToScriptHash(validator),
+    scriptAddress: validatorToAddress(NETWORK, validator),
+  };
 }
 
-async function commit(walletFile: string, nonceHex: string, dataHex: string) {
-  const { lucid } = await setup();
-  const mnemonic = Deno.readTextFileSync(walletFile).trim();
-  lucid.selectWallet.fromSeed(mnemonic);
-
+async function commit(lucid: LucidEvolution, nonceHex: string, dataHex: string): Promise<string> {
   const address = await lucid.wallet().address();
-  const { paymentCredential } = (await import("@evolution-sdk/lucid")).getAddressDetails(address);
-  if (!paymentCredential) throw new Error("No payment credential on wallet");
-
-  const idHex = computeIdHex(paymentCredential.hash, nonceHex);
-  console.log(`ID = blake2b_256(pkh || nonce) = ${idHex}`);
-
+  const pkh = getAddressDetails(address).paymentCredential!.hash;
+  const idHex = computeIdHex(pkh, nonceHex);
   const { validator, policyId, scriptAddress } = loadValidator();
   const unit = toUnit(policyId, idHex);
 
-  // Mint redeemer for the policy is the id (ByteArray).
-  const mintRedeemer = Data.to(idHex);
-  // Inline datum on the script output is the user's data (opaque ByteArray).
-  const datum = Data.to(dataHex);
-
   const tx = await lucid
     .newTx()
-    .mintAssets({ [unit]: 1n }, mintRedeemer)
+    .mintAssets({ [unit]: 1n }, Data.to(idHex))
     .attach.MintingPolicy(validator)
-    .pay.ToContract(scriptAddress, { kind: "inline", value: datum }, { [unit]: 1n })
+    .pay.ToContract(scriptAddress, { kind: "inline", value: Data.to(dataHex) }, { [unit]: 1n })
     .complete();
-
   const signed = await tx.sign.withWallet().complete();
   const txHash = await signed.submit();
-  console.log(`Commit submitted. Tx: ${txHash}`);
-  console.log(`Reveal later with:  reveal ${walletFile} ${nonceHex}`);
+  console.log(`COMMIT ok. id=${idHex.slice(0, 16)}… tx=${txHash}`);
+  return idHex;
 }
 
-async function reveal(walletFile: string, nonceHex: string) {
-  const { lucid } = await setup();
-  const mnemonic = Deno.readTextFileSync(walletFile).trim();
-  lucid.selectWallet.fromSeed(mnemonic);
-
+async function reveal(lucid: LucidEvolution, nonceHex: string, idHex: string) {
   const address = await lucid.wallet().address();
-  const { paymentCredential } = (await import("@evolution-sdk/lucid")).getAddressDetails(address);
-  if (!paymentCredential) throw new Error("No payment credential on wallet");
-
-  const idHex = computeIdHex(paymentCredential.hash, nonceHex);
   const { validator, policyId, scriptAddress } = loadValidator();
   const unit = toUnit(policyId, idHex);
 
-  const utxos = await lucid.utxosAt(scriptAddress);
-  const utxo = utxos.find((u) => (u.assets[unit] ?? 0n) === 1n);
+  let utxo: { assets: Record<string, bigint> } | undefined;
+  for (let i = 0; i < 60; i++) {
+    const utxos = await lucid.utxosAt(scriptAddress);
+    utxo = utxos.find((u) => (u.assets[unit] ?? 0n) === 1n) as never;
+    if (utxo) break;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
   if (!utxo) throw new Error(`Committed UTxO with unit ${unit} not found`);
 
-  const spendRedeemer = Data.to(nonceHex);
-
-  // Note: we do NOT burn the token. The mint handler enforces
-  // `token_minted(..., +1)` and would reject a -1 burn. The spend handler
-  // imposes no constraint on where the token goes, so we send the full
-  // UTxO value (token + lovelace) back to the spender's wallet via change.
   const tx = await lucid
     .newTx()
-    .collectFrom([utxo], spendRedeemer)
+    .collectFrom([utxo as never], Data.to(nonceHex))
     .attach.SpendingValidator(validator)
     .addSigner(address)
     .complete();
-
   const signed = await tx.sign.withWallet().complete();
   const txHash = await signed.submit();
-  console.log(`Reveal submitted. Tx: ${txHash}`);
+  console.log(`REVEAL ok. tx=${txHash}`);
+}
+
+async function runScenario() {
+  console.log("=== anonymous-data scenario: commit → reveal ===");
+  const lucid = await lucidAt(0);
+  const nonceHex = bytesToHex(crypto.getRandomValues(new Uint8Array(16)));
+  const dataHex = bytesToHex(new TextEncoder().encode("hello-world"));
+  const idHex = await commit(lucid, nonceHex, dataHex);
+  await new Promise((r) => setTimeout(r, 2000));
+  await reveal(lucid, nonceHex, idHex);
+  console.log("=== Scenario complete ===");
 }
 
 if (import.meta.main) {
-  const [cmd, ...args] = Deno.args;
-  if (!cmd) {
-    console.log(
-      "Usage:\n" +
-        "  commit <wallet.json> <nonce_hex> <data_hex>\n" +
-        "  reveal <wallet.json> <nonce_hex>\n",
-    );
-  } else if (cmd === "commit") {
-    if (args.length !== 3) console.error("Usage: commit <wallet.json> <nonce_hex> <data_hex>");
-    else await commit(args[0], args[1], args[2]);
-  } else if (cmd === "reveal") {
-    if (args.length !== 2) console.error("Usage: reveal <wallet.json> <nonce_hex>");
-    else await reveal(args[0], args[1]);
-  } else {
-    console.log("Unknown command");
-  }
+  await runScenario();
 }

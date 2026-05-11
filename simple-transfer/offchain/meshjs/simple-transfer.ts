@@ -1,274 +1,171 @@
 import {
-    KoiosProvider,
-    MeshTxBuilder,
-    MeshWallet,
-    resolvePaymentKeyHash,
-    serializePlutusScript,
-    builtinByteString,
-    UTxO,
+  BlockfrostProvider,
+  MeshTxBuilder,
+  MeshWallet,
+  builtinByteString,
+  mConStr0,
+  resolvePaymentKeyHash,
+  serializePlutusScript,
+  type UTxO,
 } from "@meshsdk/core";
-
 import { applyParamsToScript } from "@meshsdk/core-csl";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
-// ------------------------------------------------------------
-// Configuration
-// ------------------------------------------------------------
+// Simple transfer: parameterized validator (receiver_vkh); only the recipient may claim.
+// Mesh quirk: omit `evaluator` so Mesh's CPU estimator is used against yaci-devkit.
 
+const YACI_URL = "http://localhost:8080/api/v1";
 const NETWORK = "preprod";
 const NETWORK_ID = 0;
+const FUNDER_MNEMONIC =
+  "test test test test test test test test test test test test test test test test test test test test test test test sauce";
 
-// ------------------------------------------------------------
-// Wallet helpers
-// ------------------------------------------------------------
-
-function loadWalletFromFile(path: string): MeshWallet {
-    const mnemonic = JSON.parse(Deno.readTextFileSync(path));
-    const provider = new KoiosProvider(NETWORK);
-
-    return new MeshWallet({
-        networkId: NETWORK_ID,
-        fetcher: provider,
-        submitter: provider,
-        key: {
-            type: "mnemonic",
-            words: mnemonic,
-        },
-    });
+function provider(): BlockfrostProvider {
+  return new BlockfrostProvider(YACI_URL);
 }
 
-// ------------------------------------------------------------
-// Script helpers
-// ------------------------------------------------------------
-
-function getValidator(name: string) {
-    const v = blueprint.validators.find(v =>
-        v.title.startsWith(name),
-    );
-    if (!v) throw new Error(`Validator not found: ${name}`);
-    return v.compiledCode;
+function makeWallet(words: string[]): MeshWallet {
+  const p = provider();
+  return new MeshWallet({
+    networkId: NETWORK_ID,
+    fetcher: p,
+    submitter: p,
+    key: { type: "mnemonic", words },
+  });
 }
 
-function getScriptAddress(compiled: string) {
-    const { address } = serializePlutusScript(
-        { code: compiled, version: "V3" },
-        undefined,
-        NETWORK_ID,
-    );
-    return address;
+function funder(): MeshWallet {
+  return makeWallet(FUNDER_MNEMONIC.split(/\s+/));
 }
 
-function loadSimpleTransferScript(receiverPkh: string) {
-    const script = applyParamsToScript(
-        getValidator("simple_transfer"),
-        [builtinByteString(receiverPkh)],
-        "JSON",
-    );
-
-    return {
-        script,
-        address: getScriptAddress(script),
-    };
+async function waitForUtxoAt(addr: string, minCount = 1, timeoutSec = 60): Promise<void> {
+  const p = provider();
+  for (let i = 0; i < timeoutSec; i++) {
+    try {
+      const utxos = await p.fetchAddressUTxOs(addr);
+      if (utxos.length >= minCount) return;
+    } catch {}
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${addr}`);
 }
 
-// ------------------------------------------------------------
-// Deposit / Lock ADA into simple_transfer script
-// Depositor specifies receiverPkh
-// ------------------------------------------------------------
+async function fundFromFunder(targetAddr: string, lovelace: bigint): Promise<void> {
+  const wallet = funder();
+  const myAddr = await wallet.getChangeAddress();
+  const myUtxos = await provider().fetchAddressUTxOs(myAddr);
 
-async function depositAda(
-    walletFile: string,
-    receiverPkh: string,
-    lovelace: string,
-) {
-    const wallet = loadWalletFromFile(walletFile);
-    const provider = new KoiosProvider(NETWORK);
+  const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
+    .setNetwork(NETWORK);
+  await tx
+    .txOut(targetAddr, [{ unit: "lovelace", quantity: lovelace.toString() }])
+    .changeAddress(myAddr)
+    .selectUtxosFrom(myUtxos)
+    .complete();
 
-    const changeAddr = await wallet.getChangeAddress();
-    const signerPkh = resolvePaymentKeyHash(changeAddr);
-
-    const utxos = await provider.fetchAddressUTxOs(changeAddr);
-    if (!utxos.length) throw new Error("No wallet UTxOs");
-
-    const walletUtxos = await wallet.getUtxos();
-    const collateral = await wallet.getCollateral();
-    if (!collateral.length) throw new Error("No collateral UTxO");
-
-    const { address } = loadSimpleTransferScript(receiverPkh);
-
-    const tx = new MeshTxBuilder({
-        fetcher: provider,
-        submitter: provider,
-        evaluator: provider,
-    }).setNetwork(NETWORK);
-
-    await tx
-        // Depositor wallet input
-        .txIn(
-            utxos[0].input.txHash,
-            utxos[0].input.outputIndex,
-            utxos[0].output.amount,
-            utxos[0].output.address,
-        )
-
-        // Lock ADA at script address
-        .txOut(address, [
-            { unit: "lovelace", quantity: lovelace },
-        ])
-        .txOutInlineDatumValue({ alternative: 0, fields: [] }) // unit datum
-
-        // Collateral
-        .txInCollateral(
-            collateral[0].input.txHash,
-            collateral[0].input.outputIndex,
-            collateral[0].output.amount,
-            collateral[0].output.address,
-        )
-
-        // Depositor signs
-        .requiredSignerHash(signerPkh)
-        .changeAddress(changeAddr)
-        .selectUtxosFrom(walletUtxos)
-        .complete();
-
-    const signed = await wallet.signTx(tx.txHex);
-    const txHash = await wallet.submitTx(signed);
-
-    console.log("ADA locked at script");
-    console.log("Receiver PKH:", receiverPkh);
-    console.log("Amount (lovelace):", lovelace);
-    console.log("TxHash:", txHash);
+  const signed = await wallet.signTx(tx.txHex);
+  const txHash = await wallet.submitTx(signed);
+  console.log(`Funded ${targetAddr} with ${lovelace} lovelace. tx=${txHash}`);
+  await waitForUtxoAt(targetAddr, 1);
 }
 
-// ------------------------------------------------------------
-// Collect / Unlock ADA from script
-// Must be called by receiver wallet
-// ------------------------------------------------------------
-
-export async function collectAda(walletFile: string) {
-    const wallet = loadWalletFromFile(walletFile);
-    const provider = new KoiosProvider(NETWORK);
-
-    const changeAddr = await wallet.getChangeAddress();
-    const receiverPkh = resolvePaymentKeyHash(changeAddr);
-
-    const { script, address } = loadSimpleTransferScript(receiverPkh);
-
-    const scriptUtxos = await provider.fetchAddressUTxOs(address);
-    if (!scriptUtxos.length) throw new Error("No script UTxO found");
-
-    const scriptUtxo: UTxO = scriptUtxos[0];
-
-    const collateral = await wallet.getCollateral();
-    if (!collateral.length) throw new Error("No collateral UTxO");
-
-    const walletUtxos = await provider.fetchAddressUTxOs(changeAddr);
-
-    const tx = new MeshTxBuilder({
-        fetcher: provider,
-        submitter: provider,
-        evaluator: provider,
-    }).setNetwork(NETWORK);
-
-    await tx
-        // Spend script UTxO
-        .spendingPlutusScriptV3()
-        .txIn(
-            scriptUtxo.input.txHash,
-            scriptUtxo.input.outputIndex,
-            scriptUtxo.output.amount,
-            address,
-        )
-        .txInInlineDatumPresent()
-        .txInRedeemerValue("") // unit
-        .txInScript(script)
-
-        // Pay ADA to receiver wallet
-        .txOut(changeAddr, [
-            { unit: "lovelace", quantity: scriptUtxo.output.amount[0].quantity },
-        ])
-
-        // Collateral
-        .txInCollateral(
-            collateral[0].input.txHash,
-            collateral[0].input.outputIndex,
-            collateral[0].output.amount,
-            collateral[0].output.address,
-        )
-
-        // Receiver must sign
-        .requiredSignerHash(receiverPkh)
-        .changeAddress(changeAddr)
-        .selectUtxosFrom(walletUtxos)
-        .complete();
-
-    const signed = await wallet.signTx(tx.txHex, true);
-    const txHash = await wallet.submitTx(signed);
-
-    console.log("ADA collected from script");
-    console.log("Receiver PKH:", receiverPkh);
-    console.log("TxHash:", txHash);
+function buildScript(receiverVkh: string) {
+  const validator = blueprint.validators.find(
+    (v) => v.title === "simple_transfer.simpleTransfer.spend",
+  );
+  if (!validator) throw new Error("Validator not found");
+  const script = applyParamsToScript(
+    validator.compiledCode,
+    [builtinByteString(receiverVkh)],
+    "JSON",
+  );
+  const { address } = serializePlutusScript(
+    { code: script, version: "V3" },
+    undefined,
+    NETWORK_ID,
+  );
+  return { script, scriptAddress: address };
 }
 
-// ------------------------------------------------------------
-// CLI entrypoint
-// ------------------------------------------------------------
+async function lock(senderWallet: MeshWallet, receiverAddr: string, lovelace: bigint) {
+  const senderAddr = await senderWallet.getChangeAddress();
+  const receiverVkh = resolvePaymentKeyHash(receiverAddr);
+  const { scriptAddress } = buildScript(receiverVkh);
 
-function printUsage() {
-    console.log(
-        "Usage:\n\n" +
-        "  deno run -A simple-transfer.ts deposit <wallet.json> <receiverPkh> <lovelace>\n" +
-        "  deno run -A simple-transfer.ts collect <wallet.json>\n",
-    );
+  const utxos = await provider().fetchAddressUTxOs(senderAddr);
+  // MeshBlockfrostProvider's evaluator mis-parses yaci-devkit's ogmios JSON-WSP response;
+  // omitting it makes mesh fall back to its CPU estimator.
+  const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
+    .setNetwork(NETWORK);
+  await tx
+    .txOut(scriptAddress, [{ unit: "lovelace", quantity: lovelace.toString() }])
+    // Mesh-shape {alternative,fields}: default encoder here is "Mesh", not "JSON" —
+    // a JSON-shape {constructor,fields} value would silently produce the wrong CBOR.
+    .txOutInlineDatumValue({ alternative: 0, fields: [] })
+    .changeAddress(senderAddr)
+    .selectUtxosFrom(utxos)
+    .complete();
+
+  const signed = await senderWallet.signTx(tx.txHex);
+  const txHash = await senderWallet.submitTx(signed);
+  console.log(`LOCK ok. ${lovelace} lovelace to ${scriptAddress}. tx=${txHash}`);
+  await waitForUtxoAt(scriptAddress, 1);
+  return scriptAddress;
 }
 
-async function main() {
-    const [command, ...args] = Deno.args;
+async function claim(receiverWallet: MeshWallet) {
+  const receiverAddr = await receiverWallet.getChangeAddress();
+  const receiverVkh = resolvePaymentKeyHash(receiverAddr);
+  const { script, scriptAddress } = buildScript(receiverVkh);
 
-    if (!command) {
-        printUsage();
-        return;
-    }
+  const scriptUtxos = await provider().fetchAddressUTxOs(scriptAddress);
+  if (scriptUtxos.length === 0) throw new Error("No script UTxOs to claim");
+  const target = scriptUtxos[0];
 
-    if (command === "deposit") {
-        if (args.length !== 3) {
-            console.error(
-                "Usage:\n" +
-                "deno run -A simple-transfer.ts deposit <wallet.json> <receiverPkh> <lovelace>",
-            );
-            Deno.exit(1);
-        }
+  const ownUtxos = await provider().fetchAddressUTxOs(receiverAddr);
+  const collateral: UTxO[] = await receiverWallet.getCollateral();
 
-        const [walletFile, receiverPkh, lovelace] = args;
-        await depositAda(walletFile, receiverPkh, lovelace);
-        return;
-    }
+  const tx = new MeshTxBuilder({
+    fetcher: provider(),
+    submitter: provider(),
+  }).setNetwork(NETWORK);
 
-    if (command === "collect") {
-        if (args.length !== 1) {
-            console.error(
-                "Usage:\n" +
-                "  deno run -A simple-transfer.ts collect <wallet.json>",
-            );
-            Deno.exit(1);
-        }
+  await tx
+    .spendingPlutusScriptV3()
+    .txIn(target.input.txHash, target.input.outputIndex, target.output.amount, target.output.address)
+    .txInScript(script)
+    .txInRedeemerValue("")
+    .txInInlineDatumPresent()
+    .txInCollateral(
+      collateral[0].input.txHash,
+      collateral[0].input.outputIndex,
+      collateral[0].output.amount,
+      collateral[0].output.address,
+    )
+    .requiredSignerHash(receiverVkh)
+    .changeAddress(receiverAddr)
+    .selectUtxosFrom(ownUtxos)
+    .complete();
 
-        await collectAda(args[0]);
-        return;
-    }
-
-    console.error(`Unknown command: ${command}\n`);
-    printUsage();
-    Deno.exit(1);
+  const signed = await receiverWallet.signTx(tx.txHex);
+  const txHash = await receiverWallet.submitTx(signed);
+  console.log(`CLAIM ok. tx=${txHash}`);
 }
 
-// ------------------------------------------------------------
-// Run
-// ------------------------------------------------------------
+async function runScenario() {
+  console.log("=== simple-transfer scenario: lock → claim ===");
+
+  // Brewed recipient: gives a pure-ADA wallet (no leftover assets) for clean collateral on yaci.
+  const recipient = makeWallet(MeshWallet.brew(false) as string[]);
+  const recipientAddr = await recipient.getChangeAddress();
+  await fundFromFunder(recipientAddr, 25_000_000n);
+
+  await lock(funder(), recipientAddr, 10_000_000n);
+  await claim(recipient);
+
+  console.log("=== Scenario complete ===");
+}
 
 if (import.meta.main) {
-    main().catch(err => {
-        console.error("❌ Error:", err);
-        Deno.exit(1);
-    });
+  await runScenario();
 }

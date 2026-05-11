@@ -1,5 +1,5 @@
 ///usr/bin/env jbang "$0" "$@" ; exit $?
-/// 
+///
 // @formatter:off
 //JAVA 24+
 
@@ -42,19 +42,25 @@ import com.bloxbean.cardano.client.transaction.spec.Asset;
 import com.bloxbean.cardano.client.quicktx.Tx;
 import com.bloxbean.cardano.client.quicktx.TxResult;
 
+/**
+ * Demonstrates Cardano transaction atomicity by combining one always-true spend
+ * validator with a password-checking mint policy in the same tx. The spend
+ * succeeds unconditionally; the mint's redeemer (Constr 0 [password]) is what
+ * gates the whole atomic bundle — so a wrong password rolls back the spend too.
+ *
+ * CCL quirk: in 0.8 a phase-2 script failure during cost evaluation surfaces as
+ * a TxBuildException instead of a TxResult with isSuccessful()=false, so the
+ * negative path catches the exception as the success signal.
+ */
 public class AtomicTransaction {
 
-        // Backend service to connect to Cardano node. Here we are using Blockfrost as
-        // an example.
         static BackendService backendService = new BFBackendService("http://localhost:8080/api/v1/", "Dummy Key");
         static UtxoSupplier utxoSupplier = new DefaultUtxoSupplier(backendService.getUtxoService());
 
-        // Dummy mnemonic for the example. Replace with a valid mnemonic.
         static String mnemonic = "test test test test test test test test test test test test test test test test test test test test test test test sauce";
 
-        static String secret = "Secret Answer"; // The secret answer to be used in the HTLC
+        static String secret = "Secret Answer";
 
-        // The network used for this example is Testnet
         static Network network = Networks.testnet();
 
         static Account account = Account.createFromMnemonic(network, mnemonic);
@@ -65,7 +71,6 @@ public class AtomicTransaction {
 
         public static void main(String[] args) throws ApiException, InterruptedException {
 
-                // Fund the script address first
                 Tx tx = new Tx()
                                 .payToAddress(scriptAddress.getAddress(), Amount.ada(10))
                                 .from(account.baseAddress());
@@ -78,9 +83,8 @@ public class AtomicTransaction {
                 UtxoSupplier utxoSupplier = new DefaultUtxoSupplier(backendService.getUtxoService());
                 List<Utxo> utxos = utxoSupplier.getAll(scriptAddress.getAddress());
                 Utxo utxoToUnlock = utxos.getFirst();
-                // Now try to unlock the script UTXO and mint a demo token with the wrong password
-                // Since transactions in cardano are atomic eventhough the spend is always true
-                // the transaction will fail since the wrong password is provided
+                // ConstrPlutusData.of encodes Aiken sum-type constructors (alt 0 = first variant),
+                // ListPlutusData.of holds positional fields, BytesPlutusData encodes ByteArray.
                 ScriptTx scriptTxWrongPassword = new ScriptTx()
                                 .collectFrom(utxoToUnlock, PlutusData.unit())
                                 .payToAddress(account.baseAddress(), Amount.ada(10))
@@ -93,9 +97,8 @@ public class AtomicTransaction {
                                                 account.baseAddress())
                                 .attachSpendingValidator(plutusScript);
 
-                // CCL 0.8 throws TxBuildException on phase-2 script failure during cost
-                // evaluation. We expect the wrong password to fail validation, so a thrown
-                // exception here IS the success case for this negative test.
+                // CCL 0.8 raises TxBuildException on phase-2 failure during cost evaluation,
+                // so the catch IS the assertion that the wrong password was rejected.
                 boolean wrongPasswordRejected = false;
                 try {
                         TxResult txWrongPassword = quickTxBuilder.compose(scriptTxWrongPassword)
@@ -108,8 +111,6 @@ public class AtomicTransaction {
                 }
                 System.out.println("Transaction with wrong password failed as expected: " + wrongPasswordRejected);
 
-                // // Now try to unlock the script UTXO and mint a demo token with the correct password
-                // Since both verifications will pass, the transaction will be successful
                 ScriptTx scriptTxCorrectPassword = new ScriptTx()
                                 .collectFrom(utxoToUnlock, PlutusData.unit())
                                 .payToAddress(account.baseAddress(), Amount.ada(10))

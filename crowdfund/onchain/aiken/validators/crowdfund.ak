@@ -9,6 +9,11 @@ use cocktail/vodka_extra_signatories.{key_signed}
 use cocktail/vodka_validity_range.{valid_after}
 use utils.{get_output_by_address}
 
+// All-or-nothing crowdfund. Donors accumulate into a single script UTxO; the
+// datum is a per-donor ledger of contributions. After the deadline the
+// beneficiary withdraws iff goal reached; otherwise each donor reclaims
+// exactly their stake. Parameters fix the campaign at script-hash time.
+
 pub type Action {
   DONATE
   WITHDRAW
@@ -36,16 +41,18 @@ validator crowdfund(
       Some(datum) -> {
         expect Some(spent_utxo) = find_input(inputs, utxo)
         when redeemer is {
+          // WITHDRAW — beneficiary takes the pot after the deadline iff the
+          // goal was met. No continuing UTxO; campaign ends.
           WITHDRAW -> and {
-              // Check if the deadline is exceeded
               valid_after(validity_range, deadline),
-              // Check if the goal is reached
               assets.lovelace_of(spent_utxo.output.value) >= goal,
-              // Check if the beneficiary signed the transaction
               key_signed(extra_signatories, beneficiary),
             }
+          // RECLAIM — donors recover their stake after the deadline if the
+          // goal failed. Supports batch reclaim by multiple signers in one tx.
           RECLAIM -> {
-            // Allowing to extract the total donated amount of multiple donators
+            // Sum only the contributions of signers in this tx — refusing to
+            // pay anyone whose key didn't authorise the spend.
             let donated_amount =
               dict.from_pairs(datum.wallets)
                 |> dict.filter(fn(k, _v) { list.has(extra_signatories, k) })
@@ -53,20 +60,23 @@ validator crowdfund(
                 |> list.reduce(0, fn(x, acc) { x + acc })
             let lovelace_in_script = assets.lovelace_of(spent_utxo.output.value)
             when donated_amount == lovelace_in_script is {
-              // Withdrawing all of the funds, there will be no payback
+              // Last reclaimers — draining the UTxO. No continuing output
+              // required; goal must have failed.
               True -> and {
-                  // Check if the deadline is exceeded
                   valid_after(validity_range, deadline),
-                  // Check if the goal is reached
                   lovelace_in_script <= goal,
                 }
-              // Check if the beneficiary signed the transaction
+              // Partial reclaim — must rebuild a script UTxO with the
+              // reclaiming donors removed from the ledger and the matching
+              // lovelace subtracted.
               False -> {
                 let script_output_opt =
                   get_output_by_address(outputs, spent_utxo.output.address)
                 expect Some(script_output) = script_output_opt
                 expect InlineDatum(current_datum_data) = script_output.datum
                 expect Some(CrowdfundDatum { wallets }) = current_datum_data
+                // Anti-replay: every signer must have been deleted from the
+                // new wallet map — otherwise they could reclaim again later.
                 let donors_removed =
                   list.any(
                     extra_signatories,
@@ -77,37 +87,37 @@ validator crowdfund(
                 and {
                   donors_removed == False,
                   lovelace_in_script <= assets.lovelace_of(script_output.value) + donated_amount,
-                  // Check if the deadline is exceeded
                   valid_after(validity_range, deadline),
-                  // Check if the goal is reached
                   assets.lovelace_of(spent_utxo.output.value) < goal,
                 }
               }
             }
           }
+          // DONATE — append to the ledger and grow the pot. No deadline check
+          // here: late donations are harmless because withdrawal/reclaim
+          // gates handle the outcome. Datum-sum must equal new balance,
+          // preventing a donor from over-claiming credit.
           DONATE -> {
             let script_output_opt =
               get_output_by_address(outputs, spent_utxo.output.address)
             expect Some(script_output) = script_output_opt
             expect InlineDatum(current_datum_data) = script_output.datum
             expect CrowdfundDatum { wallets } = current_datum_data
-            // Checking the overall donated amount
             let donated_amount =
               dict.from_pairs(wallets)
                 |> dict.values()
                 |> list.reduce(0, fn(x, acc) { x + acc })
             and {
-              // There is now more funds in the script UTxO than before
               assets.lovelace_of(spent_utxo.output.value) < assets.lovelace_of(
                 script_output.value,
               ),
-              // The map of wallets is updated with the new donation
               donated_amount == assets.lovelace_of(script_output.value),
             }
           }
         }
       }
-      // Unlocking a UTxO without a datum is allowed to avoid locking indefinitely
+      // Datum-less UTxOs at this address are unlocked unconditionally —
+      // otherwise dust sent here by mistake would be permanently lost.
       None -> True
     }
   }

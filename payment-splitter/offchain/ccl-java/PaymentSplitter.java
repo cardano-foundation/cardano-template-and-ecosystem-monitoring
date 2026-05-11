@@ -31,9 +31,21 @@ import com.bloxbean.cardano.client.util.JsonUtil;
 
 import java.io.File;
 
+/**
+ * Payment splitter parametrised by the list of payee pkhs. Exercises lock
+ * (owner sends 10 ADA to the script with the owner-datum) and unlock (owner
+ * spends the script UTxO and pays an equal share to each of the 5 payees).
+ *
+ * CCL quirk: if `unlock` does not include a separate fee-bearing Tx, CCL
+ * deducts the fee from the script payouts, breaking the validator's exact
+ * even-split check — so a dummy self-transfer Tx is composed alongside.
+ */
+
 static BackendService backendService = new BFBackendService("http://localhost:8080/api/v1/", "Dummy Key");
 static String mnemonic = "test test test test test test test test test test test test test test test test test test test test test test test sauce";
 
+// Roles: payee1 is the funded mnemonic owner (locks and pays fee); payees 2-5
+// are fresh accounts that receive payouts.
 static Account payee1 = new Account(Networks.testnet(), mnemonic);
 
 static Address payee1Addr = payee1.getBaseAddress();
@@ -52,7 +64,6 @@ static void init() {
     var plutusContractBlueprint = PlutusBlueprintLoader.loadBlueprint(new File("../../onchain/aiken/plutus.json"));
     String paymentSplitterValidatorCompiledCode = plutusContractBlueprint.getValidators().get(0).getCompiledCode();
 
-    //Apply parameters to the validator compiled code to get the final compiled code
     String compiledCode = AikenScriptUtil.applyParamToScript(ListPlutusData.of(
             ListPlutusData.of(
                     BytesPlutusData.of(payee1Addr.getPaymentCredentialHash().get()),
@@ -65,7 +76,6 @@ static void init() {
 
     plutusScript = PlutusBlueprintUtil.getPlutusScriptFromCompiledCode(compiledCode, PlutusVersion.v3);
 
-    //Get script address
     scriptAddress = AddressProvider.getEntAddress(plutusScript, Networks.testnet()).toBech32();
     System.out.println("Script Address: " + scriptAddress);
 }
@@ -110,8 +120,9 @@ static void unlock() throws ApiException {
             .payToAddress(payee5Addr.toBech32(), Amount.ada(splitAmount))
             .attachSpendingValidator(plutusScript);
 
-    //A dummy tx which pays from payee1 to payee1. This is to make sure the outputs from ScriptTx are not touched
-    //to deduct fee.
+    // Dummy self-transfer from payee1 so the tx fee is taken from this wallet
+    // input instead of being deducted from the ScriptTx payouts (which would
+    // break the validator's equal-split check).
     Tx tx = new Tx()
             .payToAddress(payee1Addr.toBech32(), Amount.ada(2))
             .from(payee1Addr.toBech32());
@@ -132,7 +143,6 @@ static void unlock() throws ApiException {
         throw new AssertionError("Unlock tx failed " + result);
 }
 
-//Main method
 void main(String[] args) throws ApiException {
     init();
 
@@ -142,7 +152,5 @@ void main(String[] args) throws ApiException {
     System.out.println("Unlocking funds from the script address");
     unlock();
 
-    // Verify all transactions succeeded
-    // Note: lock() and unlock() methods already check isSuccessful() and print status
     System.out.println("PaymentSplitter CCL test completed successfully");
 }

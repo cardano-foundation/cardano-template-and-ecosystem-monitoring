@@ -1,281 +1,195 @@
-import { 
-  Lucid, 
-  Koios, 
-  validatorToAddress,
-  applyParamsToScript,
-  Data,
-  fromText,
-  toUnit,
+import {
+  Lucid,
+  Blockfrost,
   Constr,
+  Data,
+  applyParamsToScript,
   getAddressDetails,
-  generateSeedPhrase,
-  LucidEvolution,
-  Validator
+  validatorToAddress,
+  type LucidEvolution,
+  type Validator,
 } from "@evolution-sdk/lucid";
+import { SLOT_CONFIG_NETWORK } from "@evolution-sdk/plutus";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
-const PREPROD_SYSTEM_START = 1655683200000; // Mon Jun 20 2022 (Preprod)
-const SLOT_LENGTH = 1000;
+// ----------------------------------------------------------------------------
+// Timelock vault. Parameterised PlutusV3 spend validator (owner_vkh,
+// wait_time_ms). Withdraw arms the cooldown by writing a new lock_time;
+// Finalize requires valid_after(lock_time + wait_time); Cancel returns the
+// funds to the script with no datum.
+// ----------------------------------------------------------------------------
 
-function getSlotFromTime(timeVal: number): number {
-    return Math.floor((timeVal - PREPROD_SYSTEM_START) / SLOT_LENGTH);
+const YACI_URL = "http://localhost:8080/api/v1";
+const NETWORK = "Preview" as const;
+const TEST_MNEMONIC =
+  "test test test test test test test test test test test test test test test test test test test test test test test sauce";
+// 10 seconds — short enough for the demo to actually reach FINALIZE.
+const WAIT_TIME = 10_000n;
+const ERA_OFFSET_SECONDS = 600;
+
+// yaci-devkit boots through several "instant" eras and enters Babbage at
+// relative slot/time 600s, so TxInfo POSIX = (systemStart + 600 + slot) * 1000.
+// We pre-bake that offset in SLOT_CONFIG_NETWORK so validFrom(Date.now())
+// round-trips against the validator's view of time.
+async function alignSlotConfig() {
+  const block = await fetch(`${YACI_URL}/blocks/latest`).then((r) => r.json());
+  const zeroTime = (block.time - block.slot + ERA_OFFSET_SECONDS) * 1000;
+  SLOT_CONFIG_NETWORK.Preview.zeroTime = zeroTime;
+  SLOT_CONFIG_NETWORK.Preview.zeroSlot = 0;
+  SLOT_CONFIG_NETWORK.Preview.slotLength = 1000;
 }
 
-function getTimeFromSlot(slot: number): number {
-    return (slot * SLOT_LENGTH) + PREPROD_SYSTEM_START;
+async function lucidAt(accountIndex: number): Promise<LucidEvolution> {
+  const lucid = await Lucid(new Blockfrost(YACI_URL, "Dummy Key"), NETWORK);
+  lucid.selectWallet.fromSeed(TEST_MNEMONIC, { accountIndex });
+  return lucid;
 }
 
-async function getNetworkTime(): Promise<number> {
-    try {
-        const resp = await fetch("https://preprod.koios.rest/api/v1/tip");
-        const data = await resp.json();
-        const slot = Number(data[0].abs_slot);
-        return getTimeFromSlot(slot);
-    } catch (e) {
-        console.warn("Failed to fetch network time, using system time", e);
-        return Date.now();
-    }
+async function yaciTipSlot(): Promise<number> {
+  return (await fetch(`${YACI_URL}/blocks/latest`).then((r) => r.json())).slot;
+}
+function slotToMs(slot: number): number {
+  const cfg = SLOT_CONFIG_NETWORK.Preview;
+  return cfg.zeroTime + (slot - cfg.zeroSlot) * cfg.slotLength;
 }
 
-const WAIT_TIME = 60000n; // 60 seconds
-
-// Helper to select wallet from file
-function selectWallet(lucid: LucidEvolution, index: string | number) {
-    const fileName = `wallet_${index}.txt`;
-    try {
-        const mnemonic = Deno.readTextFileSync(fileName).trim();
-        lucid.selectWallet.fromSeed(mnemonic);
-    } catch {
-        console.error(`Error reading ${fileName}. Run 'prepare' first.`);
-        // no-args: print usage and exit normally
-    }
+async function setup() {
+  const lucid = await lucidAt(0);
+  const address = await lucid.wallet().address();
+  const ownerVkh = getAddressDetails(address).paymentCredential!.hash;
+  const script = applyParamsToScript(blueprint.validators[0].compiledCode, [
+    ownerVkh,
+    WAIT_TIME,
+  ]);
+  const validator: Validator = { type: "PlutusV3", script };
+  return { lucid, validator, scriptAddress: validatorToAddress(NETWORK, validator), address };
 }
 
-async function prepare(amount: number) {
-    for (let i = 0; i < amount; i++) {
-        const fileName = `wallet_${i}.txt`;
-        try {
-            await Deno.stat(fileName);
-            console.log(`${fileName} already exists, skipping.`);
-        } catch {
-            const mnemonic = generateSeedPhrase();
-            await Deno.writeTextFile(fileName, mnemonic);
-            const lucid = await Lucid(new Koios("https://preprod.koios.rest/api/v1"), "Preprod");
-            lucid.selectWallet.fromSeed(mnemonic);
-            console.log(`Generated ${fileName}. Address: ${await lucid.wallet().address()}`);
-        }
-    }
+async function lock(amount: bigint, lockInfinite: boolean): Promise<string> {
+  const { lucid, scriptAddress } = await setup();
+  const lockTime = lockInfinite
+    ? BigInt(Date.now() + 365 * 24 * 60 * 60 * 1000)
+    : BigInt(Date.now() - 60_000);
+  const datum = Data.to(new Constr(0, [lockTime]));
+  const tx = await lucid
+    .newTx()
+    .pay.ToContract(scriptAddress, { kind: "inline", value: datum }, { lovelace: amount })
+    .complete();
+  const signed = await tx.sign.withWallet().complete();
+  const txHash = await signed.submit();
+  console.log(`LOCK${lockInfinite ? " (infinite)" : " (withdrawable)"} ok. tx=${txHash}`);
+  return txHash;
 }
 
-async function setup(walletIndex: string | number = 0) {
-     const lucid = await Lucid(new Koios("https://preprod.koios.rest/api/v1"), "Preprod");
-     selectWallet(lucid, walletIndex);
-     
-     const address = await lucid.wallet().address();
-     const { paymentCredential } = getAddressDetails(address);
-     
-     const compiledCode = blueprint.validators[0].compiledCode;
-     
-     const script = applyParamsToScript(compiledCode, [
-        paymentCredential?.hash!,
-        WAIT_TIME
-     ]);
-     
-     // const script = compiledCode;
-
-     const validator: Validator = {
-        type: "PlutusV3",
-        script: script
-     };
-     
-     const scriptAddress = validatorToAddress("Preprod", validator);
-     
-     return { lucid, validator, scriptAddress, address };
-}
-
-async function init() {
-    const { scriptAddress } = await setup();
-    console.log(`Vault Script Address: ${scriptAddress}`);
-}
-
-async function lock(amount: string, infinite: boolean = true) {
-    const { lucid, validator, scriptAddress, address } = await setup();
-    
-    let lockTime;
-    if (infinite) {
-        lockTime = BigInt(Date.now() + 3153600000000);
-    } else {
-        lockTime = BigInt(Date.now() - 100000); // Past
-    }
-    
-    // Datum is the WithdrawDatum struct: { lock_time: Int }
-    const datum = Data.to(new Constr(0, [lockTime]));
-    
-    const tx = await lucid.newTx()
-        .pay.ToContract(
-            scriptAddress,
-            { kind: "inline", value: datum },
-            { lovelace: BigInt(amount) }
-        )
-        .complete();
-        
-    const signedTx = await tx.sign.withWallet().complete();
-    const txHash = await signedTx.submit();
-    console.log(`Locked ${amount} lovelace. Tx: ${txHash}`);
-}
-
-async function withdraw(txHash: string) {
-    const { lucid, validator, scriptAddress, address } = await setup();
-    
+async function findScriptUtxo(lucid: LucidEvolution, scriptAddress: string, txHash: string) {
+  for (let i = 0; i < 60; i++) {
     const utxos = await lucid.utxosAt(scriptAddress);
-    const utxo = utxos.find(u => u.txHash === txHash);
-    if (!utxo) throw new Error("UTxO not found");
-    
-    // Use consistent time from network
-    const now = await getNetworkTime();
-
-    // New datum: lockTime = Now - 5000 (buffer for slot rounding)
-    const newDatum = Data.to(new Constr(0, [BigInt(now - 5000)]));
-    const redeemer = Data.to(new Constr(0, [])); // Withdraw
-    
-    // We need to set invalidBefore (validFrom) to ensure transaction handling is correct
-    // But mainly we just need to consume and output back
-    
-    const tx = await lucid.newTx()
-        .collectFrom([utxo], redeemer)
-        .attach.SpendingValidator(validator)
-        .pay.ToContract(
-            scriptAddress, 
-            { kind: "inline", value: newDatum }, 
-            utxo.assets // Return same assets
-        )
-        .addSigner(address)
-        .validFrom(now)
-        .validTo(now + 120000)
-        .complete();
-        
-    const signedTx = await tx.sign.withWallet().complete();
-    const subHash = await signedTx.submit();
-    console.log(`Withdraw requested (Unlocking). Tx: ${subHash}`);
+    const u = utxos.find((x) => x.txHash === txHash);
+    if (u) return u;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  throw new Error(`UTxO ${txHash} not found at ${scriptAddress}`);
 }
 
-async function finalize(txHash: string) {
-    const { lucid, validator, scriptAddress, address } = await setup();
-    
-    const utxos = await lucid.utxosAt(scriptAddress);
-    const utxo = utxos.find(u => u.txHash === txHash);
-    if (!utxo) throw new Error("UTxO not found");
-    
-    if (!utxo.datum) throw new Error("No datum on UTxO");
-    const d = Data.from(utxo.datum) as Constr<any>;
-    const lockTime = d.fields[0] as bigint; 
-    
-    const validAfter = Number(lockTime + WAIT_TIME);
-    
-    while (true) {
-        const now = await getNetworkTime();
-        if (now >= validAfter) break;
-        
-        const diff = validAfter - now;
-        console.log(`Too early. Waiting ${(diff / 1000).toFixed(1)}s until ${new Date(validAfter).toISOString()}...`);
-        // Wait diff + 5s buffer, then check again
-        await new Promise(resolve => setTimeout(resolve, diff + 5000));
-    }
-
-    console.log("Time reached. Finalizing...");
-    
-    // Refresh utxos/context? No, UTxO is same.
-    // validFrom must be >= validAfter
-    
-    const redeemer = Data.to(new Constr(1, [])); // Finalize
-    
-    const tx = await lucid.newTx()
-        .collectFrom([utxo], redeemer)
-        .attach.SpendingValidator(validator)
-        .addSigner(address)
-        // Ensure transaction is valid from the moment we can finalize
-        // Adding a small buffer to validAfter to ensure we strictly satisfy > condition if needed
-        .validFrom(validAfter + 1000) 
-        // Extend validTo significantly to account for submission delays
-        .validTo(validAfter + 300000) // + 5 mins
-        .complete();
-        
-    const signedTx = await tx.sign.withWallet().complete();
-    const subHash = await signedTx.submit();
-    console.log(`Finalized (Claimed). Tx: ${subHash}`);
+async function withdraw(txHash: string): Promise<string> {
+  const { lucid, validator, scriptAddress, address } = await setup();
+  const utxo = await findScriptUtxo(lucid, scriptAddress, txHash);
+  // Withdraw requires valid_after(lock_time). We set the new lock_time
+  // just before validFrom so the predicate passes while anchoring the
+  // wait_time cooldown to roughly "now".
+  const tipSlot = await yaciTipSlot();
+  const validFromSlot = tipSlot - 5;
+  const lockTime = BigInt(slotToMs(validFromSlot - 5));
+  const newDatum = Data.to(new Constr(0, [lockTime]));
+  const redeemer = Data.to(new Constr(0, []));
+  const tx = await lucid
+    .newTx()
+    .collectFrom([utxo], redeemer)
+    .attach.SpendingValidator(validator)
+    .pay.ToContract(scriptAddress, { kind: "inline", value: newDatum }, utxo.assets)
+    .addSigner(address)
+    .validFrom(slotToMs(validFromSlot))
+    .validTo(slotToMs(tipSlot + 60))
+    .complete();
+  const signed = await tx.sign.withWallet().complete();
+  const subHash = await signed.submit();
+  console.log(`WITHDRAW ok. new lockTime=${lockTime} tx=${subHash}`);
+  return subHash;
 }
 
-async function cancel(txHash: string) {
-    // Note: Replicating MeshJS logic which sends funds BACK to script
-    // This seems to be a "Reset" or "Re-lock" action in this specific contract design
-    
-    const { lucid, validator, scriptAddress, address } = await setup();
-    
-    const utxos = await lucid.utxosAt(scriptAddress);
-    const utxo = utxos.find(u => u.txHash === txHash);
-    if (!utxo) throw new Error("UTxO not found");
-    
-    const redeemer = Data.to(new Constr(2, [])); // Cancel
-    
-    // In MeshJS cancel, it outputs back to script WITHOUT datum?
-    // If we assume standard Lucid behavior:
-    // If you pay to contract without datum, it's just paying to the address.
-    // If the validator demands inline datum, it might fail later or be unspendable.
-    // However, if the intent is to abort, usually we return to owner. 
-    // BUT the MeshJS code specifically did `.txOut(scriptAddress, amount)`.
-    // Let's assume we return to script with SAME datum for safety if "cancel" means "reset".
-    // Or if "cancel" means "abort unlock", we should reset datum to Infinite?
-    // The MeshJS code `// No datum (reset)` comment implies NO DATUM.
-    // Let's try sending WITHOUT datum.
-    
-    const tx = await lucid.newTx()
-        .collectFrom([utxo], redeemer)
-        .attach.SpendingValidator(validator)
-        .pay.ToAddress(
-            scriptAddress,
-            utxo.assets
-        )
-        .addSigner(address)
-        .complete();
-        
-    const signedTx = await tx.sign.withWallet().complete();
-    const subHash = await signedTx.submit();
-    console.log(`Cancelled. Tx: ${subHash}`);
+async function finalize(txHash: string): Promise<string> {
+  const { lucid, validator, scriptAddress, address } = await setup();
+  const utxo = await findScriptUtxo(lucid, scriptAddress, txHash);
+  if (!utxo.datum) throw new Error("No datum");
+  const d = Data.from(utxo.datum) as Constr<bigint>;
+  const lockTime = d.fields[0] as bigint;
+  const validAfterMs = Number(lockTime + WAIT_TIME);
+  const cfg = SLOT_CONFIG_NETWORK.Preview;
+  const validAfterSlot = Math.floor((validAfterMs - cfg.zeroTime) / cfg.slotLength) + cfg.zeroSlot;
+  for (let i = 0; i < 300; i++) {
+    const tip = await yaciTipSlot();
+    if (tip > validAfterSlot) break;
+    if (i % 10 === 0) console.log(`Waiting for chain slot ${tip} → ${validAfterSlot}…`);
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  const tipSlot = await yaciTipSlot();
+  const validFromSlot = Math.max(validAfterSlot + 1, tipSlot - 5);
+  const redeemer = Data.to(new Constr(1, []));
+  const tx = await lucid
+    .newTx()
+    .collectFrom([utxo], redeemer)
+    .attach.SpendingValidator(validator)
+    .addSigner(address)
+    .validFrom(slotToMs(validFromSlot))
+    .validTo(slotToMs(validFromSlot + 60))
+    .complete();
+  const signed = await tx.sign.withWallet().complete();
+  const subHash = await signed.submit();
+  console.log(`FINALIZE ok. tx=${subHash}`);
+  return subHash;
 }
 
-const isPositiveNumber = (s: string) => Number.isInteger(Number(s)) && Number(s) > 0;
+async function cancel(txHash: string): Promise<string> {
+  const { lucid, validator, scriptAddress, address } = await setup();
+  const utxo = await findScriptUtxo(lucid, scriptAddress, txHash);
+  const redeemer = Data.to(new Constr(2, []));
+  // Cancel pays the assets back to the script with NoDatum, effectively
+  // returning the vault to its initial undated state.
+  const tx = await lucid
+    .newTx()
+    .collectFrom([utxo], redeemer)
+    .attach.SpendingValidator(validator)
+    .pay.ToAddress(scriptAddress, utxo.assets)
+    .addSigner(address)
+    .complete();
+  const signed = await tx.sign.withWallet().complete();
+  const subHash = await signed.submit();
+  console.log(`CANCEL ok. tx=${subHash}`);
+  return subHash;
+}
+
+async function runScenario() {
+  console.log("=== vault scenario: lock×2 → withdraw → cancel (first lock) ; withdraw → finalize (second lock) ===");
+  await alignSlotConfig();
+
+  // Lock A exercises Withdraw -> Cancel; Lock B exercises Withdraw -> Finalize.
+  const txA = await lock(8_000_000n, true);
+  await new Promise((r) => setTimeout(r, 2000));
+  const txB = await lock(6_000_000n, true);
+  await new Promise((r) => setTimeout(r, 2000));
+
+  const txA2 = await withdraw(txA);
+  await new Promise((r) => setTimeout(r, 2000));
+  await cancel(txA2);
+  await new Promise((r) => setTimeout(r, 2000));
+
+  const txB2 = await withdraw(txB);
+  await new Promise((r) => setTimeout(r, 2000));
+  await finalize(txB2);
+
+  console.log("=== Scenario complete ===");
+}
 
 if (import.meta.main) {
-  const args = Deno.args;
-  if (args.length === 0) {
-      console.log("Commands: init, lock <amt>, lock-withdrawable <amt>, withdraw <tx>, finalize <tx>, cancel <tx>, prepare <count>");
-      // no-args: print usage and exit normally
-  }
-  
-  const cmd = args[0];
-  
-  if (cmd === 'init') {
-      await init();
-  } else if (cmd === 'lock') {
-      if (args[1] && isPositiveNumber(args[1])) await lock(args[1], true);
-      else console.log("Provide amount");
-  } else if (cmd === 'lock-withdrawable') {
-      if (args[1] && isPositiveNumber(args[1])) await lock(args[1], false);
-      else console.log("Provide amount");
-  } else if (cmd === 'withdraw') {
-      if (args[1]) await withdraw(args[1]);
-      else console.log("Provide txHash");
-  } else if (cmd === 'finalize') {
-      if (args[1]) await finalize(args[1]);
-      else console.log("Provide txHash");
-  } else if (cmd === 'cancel') {
-      if (args[1]) await cancel(args[1]);
-      else console.log("Provide txHash");
-  } else if (cmd === 'prepare') {
-      if (args[1]) await prepare(parseInt(args[1]));
-      else console.log("Provide count");
-  } else {
-      console.log("Unknown command");
-  }
+  await runScenario();
 }
-

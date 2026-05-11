@@ -1,10 +1,9 @@
 import {
   Lucid,
-  Koios,
-  applyParamsToScript,
+  Blockfrost,
   Constr,
   Data,
-  generateSeedPhrase,
+  applyParamsToScript,
   getAddressDetails,
   validatorToAddress,
   type LucidEvolution,
@@ -13,142 +12,106 @@ import {
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
 // ----------------------------------------------------------------------------
-// Configuration
-// Validator parameter: List<VerificationKeyHash> — the payees who all receive
-// equal lovelace shares when the contract pays out.
-// Datum: Datum { owner: VerificationKeyHash }
-// Redeemer: Redeemer { message: ByteArray }
+// Payment splitter. Parameterised PlutusV3 spend validator carrying the
+// payee VKH list; spending must produce exactly one equal-share output per
+// payee. Account 0 (the payer) must itself be a payee, otherwise lucid's
+// change output would be flagged as an unexpected extra credential.
 // ----------------------------------------------------------------------------
 
+const YACI_URL = "http://localhost:8080/api/v1";
+const NETWORK = "Preprod" as const;
+const TEST_MNEMONIC =
+  "test test test test test test test test test test test test test test test test test test test test test test test sauce";
 const PAYEE_COUNT = 5;
-const KOIOS_URL = "https://preprod.koios.rest/api/v1";
+const PAYEE_INDICES = [0, 1, 2, 3, 4];
 
-function selectWallet(lucid: LucidEvolution, index: number) {
-  const fileName = `wallet_${index}.txt`;
-  try {
-    const mnemonic = Deno.readTextFileSync(fileName).trim();
-    lucid.selectWallet.fromSeed(mnemonic);
-  } catch {
-    console.error(`Error reading ${fileName}. Run 'prepare' first.`);
-  }
+async function lucidAt(accountIndex: number): Promise<LucidEvolution> {
+  const lucid = await Lucid(new Blockfrost(YACI_URL, "Dummy Key"), NETWORK);
+  lucid.selectWallet.fromSeed(TEST_MNEMONIC, { accountIndex });
+  return lucid;
 }
 
-async function prepare() {
-  for (let i = 0; i < PAYEE_COUNT; i++) {
-    const fileName = `wallet_${i}.txt`;
-    try {
-      await Deno.stat(fileName);
-      console.log(`${fileName} already exists, skipping.`);
-    } catch {
-      const mnemonic = generateSeedPhrase();
-      await Deno.writeTextFile(fileName, mnemonic);
-      const lucid = await Lucid(new Koios(KOIOS_URL), "Preprod");
-      lucid.selectWallet.fromSeed(mnemonic);
-      console.log(`Generated ${fileName}. Address: ${await lucid.wallet().address()}`);
-    }
-  }
+async function vkhOf(accountIndex: number): Promise<string> {
+  const l = await lucidAt(accountIndex);
+  return getAddressDetails(await l.wallet().address()).paymentCredential!.hash;
 }
 
-// Read all PAYEE_COUNT wallets and return their payment-credential VKHs.
+async function addrOf(accountIndex: number): Promise<string> {
+  const l = await lucidAt(accountIndex);
+  return await l.wallet().address();
+}
+
 async function loadPayeeVkhs(): Promise<string[]> {
-  const vkhs: string[] = [];
-  for (let i = 0; i < PAYEE_COUNT; i++) {
-    const mnemonic = Deno.readTextFileSync(`wallet_${i}.txt`).trim();
-    const lucid = await Lucid(new Koios(KOIOS_URL), "Preprod");
-    lucid.selectWallet.fromSeed(mnemonic);
-    const addr = await lucid.wallet().address();
-    const { paymentCredential } = getAddressDetails(addr);
-    if (!paymentCredential) throw new Error(`No payment credential on wallet_${i}`);
-    vkhs.push(paymentCredential.hash);
-  }
-  return vkhs;
+  return await Promise.all(PAYEE_INDICES.map((i) => vkhOf(i)));
 }
 
-async function setup(walletIndex: number) {
-  const lucid = await Lucid(new Koios(KOIOS_URL), "Preprod");
-  selectWallet(lucid, walletIndex);
-
+async function setup(payerAccount: number) {
+  const lucid = await lucidAt(payerAccount);
   const payeeVkhs = await loadPayeeVkhs();
-
-  const compiledCode = blueprint.validators[0].compiledCode;
-  // Validator param is a single argument: List<VKH>. applyParamsToScript takes
-  // the list of params; we wrap our list-of-VKHs as one Plutus list.
-  const script = applyParamsToScript(compiledCode, [payeeVkhs]);
-
+  const script = applyParamsToScript(blueprint.validators[0].compiledCode, [payeeVkhs]);
   const validator: Validator = { type: "PlutusV3", script };
-  const scriptAddress = validatorToAddress("Preprod", validator);
-
-  return { lucid, validator, scriptAddress, payeeVkhs };
+  return {
+    lucid,
+    validator,
+    scriptAddress: validatorToAddress(NETWORK, validator),
+    payeeVkhs,
+  };
 }
 
-async function lock(amount: string) {
+async function lock(amount: bigint): Promise<string> {
   const { lucid, scriptAddress, payeeVkhs } = await setup(0);
-
-  // Datum: Datum { owner: VerificationKeyHash }  →  Constr 0 [bytes]
   const datum = Data.to(new Constr(0, [payeeVkhs[0]]));
-
   const tx = await lucid
     .newTx()
-    .pay.ToContract(scriptAddress, { kind: "inline", value: datum }, { lovelace: BigInt(amount) })
+    .pay.ToContract(scriptAddress, { kind: "inline", value: datum }, { lovelace: amount })
     .complete();
-
   const signed = await tx.sign.withWallet().complete();
   const txHash = await signed.submit();
-  console.log(`Locked ${amount} lovelace at ${scriptAddress}. Tx: ${txHash}`);
+  console.log(`LOCK ok. ${amount} lovelace. tx=${txHash}`);
+  return txHash;
 }
 
 async function payout() {
-  const { lucid, validator, scriptAddress, payeeVkhs } = await setup(0);
-
-  const utxos = await lucid.utxosAt(scriptAddress);
+  const { lucid, validator, scriptAddress } = await setup(0);
+  let utxos: Awaited<ReturnType<LucidEvolution["utxosAt"]>> = [];
+  for (let i = 0; i < 60; i++) {
+    utxos = await lucid.utxosAt(scriptAddress);
+    if (utxos.length > 0) break;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
   if (utxos.length === 0) throw new Error("No script UTxOs to spend");
   const utxo = utxos[0];
 
   const totalLovelace = utxo.assets.lovelace ?? 0n;
-  // Even split. Any leftover after integer division goes back to payee 0
-  // implicitly via change. The on-chain contract enforces only that all payees
-  // receive equal amounts, so the chosen split below has to match.
   const sharePerPayee = totalLovelace / BigInt(PAYEE_COUNT);
-
-  // Redeemer: Redeemer { message: ByteArray }  →  Constr 0 [bytes("payout")]
-  const redeemer = Data.to(new Constr(0, [Buffer.from("payout").toString("hex")]));
+  const redeemer = Data.to(new Constr(0, [
+    Array.from(new TextEncoder().encode("payout"))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join(""),
+  ]));
 
   let txBuilder = lucid
     .newTx()
     .collectFrom([utxo], redeemer)
     .attach.SpendingValidator(validator);
-
-  for (let i = 0; i < PAYEE_COUNT; i++) {
-    const mnemonic = Deno.readTextFileSync(`wallet_${i}.txt`).trim();
-    const tmp = await Lucid(new Koios(KOIOS_URL), "Preprod");
-    tmp.selectWallet.fromSeed(mnemonic);
-    const payeeAddr = await tmp.wallet().address();
+  for (const i of PAYEE_INDICES) {
+    const payeeAddr = await addrOf(i);
     txBuilder = txBuilder.pay.ToAddress(payeeAddr, { lovelace: sharePerPayee });
   }
-
   const tx = await txBuilder.complete();
   const signed = await tx.sign.withWallet().complete();
   const txHash = await signed.submit();
-  console.log(`Payout submitted. Tx: ${txHash}`);
+  console.log(`PAYOUT ok. share=${sharePerPayee} tx=${txHash}`);
+}
+
+async function runScenario() {
+  console.log("=== payment-splitter scenario: lock → payout ===");
+  await lock(50_000_000n);
+  await new Promise((r) => setTimeout(r, 3000));
+  await payout();
+  console.log("=== Scenario complete ===");
 }
 
 if (import.meta.main) {
-  const [cmd, ...args] = Deno.args;
-  if (!cmd) {
-    console.log(
-      "Usage:\n" +
-        "  prepare                  # generate 5 wallet seeds (wallet_0.txt..wallet_4.txt)\n" +
-        "  lock <lovelace>          # lock funds at the splitter script\n" +
-        "  payout                   # split the script UTxO equally to all 5 payees\n",
-    );
-  } else if (cmd === "prepare") {
-    await prepare();
-  } else if (cmd === "lock") {
-    if (!args[0]) console.error("Usage: lock <lovelace>");
-    else await lock(args[0]);
-  } else if (cmd === "payout") {
-    await payout();
-  } else {
-    console.log("Unknown command");
-  }
+  await runScenario();
 }

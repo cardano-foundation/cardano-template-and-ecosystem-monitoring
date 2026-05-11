@@ -7,6 +7,12 @@ use cocktail/vodka_inputs.{inputs_at}
 use cocktail/vodka_outputs.{outputs_at}
 use cocktail/vodka_value.{get_all_value_to, value_geq}
 
+// Two-party asset swap with explicit recipient opt-in.
+// Lifecycle: Initiation (initiator locks their side) -> ActiveEscrow (recipient
+// deposits their side and is named in the datum) -> CompleteTrade (atomic
+// swap to both addresses) or CancelTrade (return funds). The datum carries
+// both addresses and asset bundles; no third-party arbitration.
+
 pub type MValue =
   Pairs<PolicyId, Pairs<AssetName, Int>>
 
@@ -37,10 +43,13 @@ validator escrow {
     expect Some(own_input) = find_input(inputs, input)
     let own_address = own_input.output.address
     when redeemer is {
+      // RecipientDeposit — transition Initiation -> ActiveEscrow. Anyone can
+      // call this (no signature check): the redeemer names the recipient,
+      // and value_geq forces them to put up their side. Initiator's side
+      // must remain locked unchanged.
       RecipientDeposit { recipient, recipient_assets } -> {
         expect ([input], [output]) =
           (inputs_at(inputs, own_address), outputs_at(outputs, own_address))
-        // Only 1 input & output from same address
         expect InlineDatum(raw_input_datum) = input.output.datum
         expect InlineDatum(raw_output_datum) = output.datum
         expect Initiation { initiator, initiator_assets }: EscrowDatum =
@@ -65,6 +74,9 @@ validator escrow {
             recipient_assets |> from_asset_list
           )
 
+        // >= rather than ==: extra ada riding along is fine, what matters is
+        // the recipient's bundle being fully present in addition to what
+        // was already locked.
         let is_value_deposited =
           value_geq(
             output.value,
@@ -73,6 +85,13 @@ validator escrow {
           )
         is_initiator_correct && is_recipient_correct && is_initiator_assets_correct && is_recipient_assets_correct && is_value_deposited
       }
+      // CancelTrade — unwind. Two regimes:
+      //   Initiation: only the initiator deposited; their signature alone
+      //     suffices to reclaim.
+      //   ActiveEscrow: both sides committed assets; either party can
+      //     trigger the unwind, but the tx must repay BOTH sides their
+      //     original deposits — preventing one party from canceling and
+      //     pocketing the other's funds.
       CancelTrade -> {
         expect ([input], []) =
           (inputs_at(inputs, own_address), outputs_at(outputs, own_address))
@@ -113,6 +132,9 @@ validator escrow {
           }
         }
       }
+      // CompleteTrade — atomic swap. Requires BOTH signatures (neither party
+      // can force settlement) and crosses the asset bundles: initiator
+      // receives recipient_assets, recipient receives initiator_assets.
       CompleteTrade -> {
         expect ([input], []) =
           (inputs_at(inputs, own_address), outputs_at(outputs, own_address))

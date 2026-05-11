@@ -1,0 +1,41 @@
+name: 'Setup Aiken'
+description: 'Restore Aiken from cache or install via aikup, and add it to PATH.'
+
+inputs:
+  aiken-version:
+    description: 'Aiken compiler version (with or without leading v, e.g. v1.1.21).'
+    required: false
+    default: 'v1.1.21'
+  cache-version:
+    description: 'Cache-buster suffix. Bump to invalidate every consumer in one step.'
+    required: false
+    default: 'v1'
+
+runs:
+  using: composite
+  steps:
+    - name: Restore Aiken from cache
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: ~/.aiken
+        key: aiken-${{ inputs.aiken-version }}-${{ inputs.cache-version }}-${{ runner.os }}
+
+    - name: Install Aiken
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        # aikup fetches release metadata from the GitHub API. Unauthenticated
+        # calls share a 60/hr quota across the entire runner IP and
+        # routinely hit rate-limit failures. Authenticated calls get 5000/hr.
+        GITHUB_TOKEN: ${{ github.token }}
+      run: |
+        curl --proto '=https' --tlsv1.2 -LsSf https://install.aiken-lang.org | sh
+        export PATH="$HOME/.aiken/bin:$PATH"
+        # aikup install accepts either "v1.1.21" or "1.1.21"; let it normalize.
+        aikup install "${{ inputs.aiken-version }}" || aikup
+        aiken --version
+
+    - name: Add Aiken to PATH
+      shell: bash
+      run: echo "$HOME/.aiken/bin" >> "$GITHUB_PATH"

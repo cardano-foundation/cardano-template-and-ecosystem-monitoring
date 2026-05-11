@@ -41,11 +41,13 @@ import com.bloxbean.cardano.client.quicktx.Tx;
 import com.bloxbean.cardano.client.quicktx.TxResult;
 
 /**
- * Vesting use-case. No validator parameters.
- * Datum: VestingDatum { lock_until: Int, owner: ByteArray, beneficiary: ByteArray }
- * Spend allowed if (owner signed) OR (beneficiary signed AND now > lock_until).
+ * Vesting against a single spend validator (no params). Datum carries
+ * (lock_until, owner_vkh, beneficiary_vkh); the validator allows the spend
+ * when (owner signed) OR (beneficiary signed AND now > lock_until). Exercises
+ * lock + beneficiary withdraw after the lock elapses.
  *
- * Happy path: lock funds on behalf of a beneficiary, beneficiary withdraws after lock_until.
+ * Single mnemonic plays both owner and beneficiary so the happy path is
+ * self-funding on yaci-devkit.
  */
 public class Vesting {
 
@@ -53,10 +55,9 @@ public class Vesting {
                         new BFBackendService("http://localhost:8080/api/v1/", "Dummy Key");
         static UtxoSupplier utxoSupplier = new DefaultUtxoSupplier(backendService.getUtxoService());
 
-        // Owner mnemonic (same wallet for both owner and beneficiary, since we test
-        // happy paths against yaci-devkit with a single funded account).
         static String mnemonic = "test test test test test test test test test test test test test test test test test test test test test test test sauce";
         static Network network = Networks.testnet();
+        // Roles: single account plays both owner and beneficiary in this happy-path demo.
         static Account owner = Account.createFromMnemonic(network, mnemonic);
         static Address ownerAddress = owner.getBaseAddress();
         static Address beneficiaryAddress = owner.getBaseAddress();
@@ -66,12 +67,10 @@ public class Vesting {
         static Address scriptAddress = AddressProvider.getEntAddress(plutusScript, network);
 
         public static void main(String[] args) throws ApiException, InterruptedException {
-                // Lock 20 ADA, lock_until = 30s in the future.
                 long lockUntil = Instant.now().plusSeconds(30).toEpochMilli();
                 lockFunds(20, lockUntil);
                 waitForScriptUtxo(60);
 
-                // Wait for lock to elapse, then withdraw as beneficiary.
                 System.out.println("Waiting for lock_until to elapse...");
                 Thread.sleep(45_000L);
                 waitForScriptUtxo(60);
@@ -120,7 +119,6 @@ public class Vesting {
                 long slot = backendService.getBlockService().getLatestBlock().getValue().getSlot();
                 System.out.println("WITHDRAW at slot " + slot);
 
-                // Redeemer: unused by validator (`_redeemer: Data`); use unit.
                 ConstrPlutusData redeemer = ConstrPlutusData.of(0L);
 
                 ScriptTx scriptTx = new ScriptTx()
@@ -128,6 +126,9 @@ public class Vesting {
                                 .payToAddress(beneficiaryAddress.getAddress(), utxo.getAmount())
                                 .attachSpendingValidator(plutusScript);
 
+                // validFrom(slot - 5) shifts the validity lower bound a few slots into
+                // the past so the chain-side strict-greater-than (now > lock_until)
+                // check has some clock-drift slack.
                 return quickTxBuilder.compose(scriptTx)
                                 .validFrom(slot - 5)
                                 .validTo(slot + 5)
@@ -142,7 +143,6 @@ public class Vesting {
                                 "..", "..", "onchain", "aiken", "plutus.json");
                 PlutusContractBlueprint blueprint = PlutusBlueprintLoader.loadBlueprint(plutusJson.toFile());
                 String compiledCode = blueprint.getValidators().getFirst().getCompiledCode();
-                // No validator parameters for vesting — use compiled code as-is.
                 return PlutusBlueprintUtil.getPlutusScriptFromCompiledCode(compiledCode, PlutusVersion.v3);
         }
 }

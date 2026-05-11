@@ -1,0 +1,32 @@
+name: 'Setup Deno'
+description: 'Install Deno; optionally cache per-example dependency directory.'
+
+inputs:
+  deno-version:
+    description: 'Deno version channel (e.g. v2.x).'
+    required: false
+    default: 'v2.x'
+  example:
+    description: 'Example name. When provided together with subdir, the action also
+      restores a per-example ~/.cache/deno keyed on the deno.json hash.'
+    required: false
+    default: ''
+  subdir:
+    description: 'Sub-path under the example, e.g. offchain/meshjs.'
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Install Deno
+      uses: denoland/setup-deno@v2
+      with:
+        deno-version: ${{ inputs.deno-version }}
+
+    - name: Restore per-example Deno cache
+      if: inputs.example != '' && inputs.subdir != ''
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/deno
+        key: deno-${{ inputs.example }}-${{ hashFiles(format('{0}/{1}/deno.json', inputs.example, inputs.subdir)) }}

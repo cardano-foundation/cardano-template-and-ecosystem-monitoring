@@ -12,66 +12,54 @@ use mocktail/virgin_key_hash.{mock_policy_id, mock_pub_key_hash}
 use mocktail/virgin_output_reference.{mock_utxo_ref}
 use mocktail/virgin_validity_range.{mock_interval}
 
-/// Represents the state of a two-player betting game
-/// The bet starts with player1 creating it, then player2 can join
-/// The oracle decides the winner and triggers the payout
+// Two-player oracle-resolved bet.
+// Lifecycle: mint = CREATE (player1 stakes), JOIN (player2 matches), then
+// ANNOUNCE_WINNER (oracle picks a side after expiration). The minted token
+// is the bet's identity and must travel with the UTxO until settlement.
+
 pub type BetDatum {
-  /// The public key hash of the first player (bet creator)
   player1: VerificationKeyHash,
-  /// The public key hash of the second player (None if no one has joined yet)
+  // Empty bytes ("") = no opponent yet. Flat sentinel instead of Option to
+  // keep the datum cheap to compare on-chain.
   player2: VerificationKeyHash,
-  /// The public key hash of the trusted oracle who will announce the winner
   oracle: VerificationKeyHash,
-  /// The expiration time of the bet (in seconds since the epoch)
   expiration: Int,
 }
 
-/// Actions that can be performed on the betting contract
 pub type Action {
-  /// Action for player2 to join an existing bet
   JOIN
-  /// Action for the oracle to announce the winner and trigger payout
   ANNOUNCE_WINNER { winner: VerificationKeyHash }
 }
 
-/// Main betting validator
 validator bet {
-  /// Minting policy: Controls the creation of bet tokens
-  /// This ensures proper initialization of a new bet
+  // CREATE — initial mint. One script output, player1 signed, no opponent,
+  // oracle distinct from player1, and the bet still in its open window.
+  // Exact-output-routing of the bet UTxO is the off-chain side's job.
   mint(_redeemer: Data, policy_id: ByteArray, transaction: Transaction) {
     let Transaction { outputs, extra_signatories, validity_range, .. } =
       transaction
-    // Find all outputs going to this script's address
     let outputs_to_script =
       list.filter(
         outputs,
         fn(output) { output.address == from_script(policy_id) },
       )
 
-    // Ensure exactly one output goes to the script (the bet UTXO)
     expect list.length(outputs_to_script) == 1
     expect Some(bet_output) = list.head(outputs_to_script)
     let Output { datum, .. } = bet_output
 
-    // Extract and validate the bet datum
     expect InlineDatum(bet_datum_data) = datum
     expect BetDatum { player1, player2, oracle, expiration } = bet_datum_data
 
-    // Validation rules for bet initialization:
     and {
-      // 1. Player1 must sign the transaction (they're creating the bet)
       key_signed(extra_signatories, player1)?,
-      // 2. Player2 must be "" (no one has joined yet)
       (player2 == "")?,
-      // 3. Oracle cannot be the same as player1 (conflict of interest)
+      // Oracle == player1 would let the creator self-decide the outcome.
       (oracle != player1)?,
-      // 4. The bet must have a valid expiration time (after the current time)
       valid_before(validity_range, expiration)?,
     }
   }
 
-  /// Spending validator: Controls how the bet UTXO can be spent
-  /// Handles both JOIN and ANNOUNCE_WINNER actions
   spend(
     input_datum: Option<BetDatum>,
     redeemer: Action,
@@ -81,99 +69,83 @@ validator bet {
     let Transaction { inputs, outputs, extra_signatories, validity_range, .. } =
       transaction
 
-    // Find the input being spent
     expect Some(spent_input) = find_input(inputs, spent_output_ref)
     let Output { value: input_value, .. } = spent_input.output
 
     when redeemer is {
-      // Handle player2 joining the bet
+      // JOIN — player2 matches player1's stake. Re-issues the script UTxO
+      // with the same identity (bet token), unchanged oracle/player1/expiry,
+      // and doubled lovelace. Open-bet invariants come from CREATE.
       JOIN -> {
-        // Verify the input contains the bet token (proves it's a valid bet UTXO)
+        // Identity check: the bet token's policy must equal the script that
+        // currently owns the UTxO — anything else is an impostor UTxO.
         let has_bet_token =
           list.has(
             list.map(policies(input_value), fn(policy) { from_script(policy) }),
             spent_input.output.address,
           )
 
-        // Find the continuing output (bet UTXO with updated datum)
         let continuing_outputs =
           list.filter(
             outputs,
             fn(output) { output.address == spent_input.output.address },
           )
 
-        // Ensure exactly one continuing output
         expect list.length(continuing_outputs) == 1
         expect Some(continuing_output) = list.head(continuing_outputs)
         let Output { value: output_value, datum: updated_datum, .. } =
           continuing_output
 
-        // Extract the current bet state
         expect Some(current_datum) = input_datum
 
-        // Extract the updated bet state
         expect InlineDatum(updated_datum) = updated_datum
         expect new_datum: BetDatum = updated_datum
         let joining_player = new_datum.player2
 
-        // Validation rules for joining:
         and {
-          // 1. Current bet must not have a player2 yet
           (current_datum.player2 == "")?,
-          // 2. Input must contain the bet token
           has_bet_token?,
-          // 3. Player2 must sign the transaction
           key_signed(extra_signatories, joining_player)?,
-          // 4. Oracle must remain unchanged
           (new_datum.oracle == current_datum.oracle)?,
-          // 5. Player1 must remain unchanged
           (new_datum.player1 == current_datum.player1)?,
-          // 6. Player2 cannot be the same as player1
+          // Forbid self-bet and oracle-as-player conflicts of interest.
           (joining_player != current_datum.player1)?,
-          // 7. Player2 cannot be the same as oracle
           (joining_player != current_datum.oracle)?,
-          // 8. The bet amount must double (player2 matches player1's bet)
+          // Exact double — not >= — so the pot is provably symmetric.
           (lovelace_of(output_value) == 2 * lovelace_of(input_value))?,
-          // 9. The updated datum must have the same expiration as the current one
           new_datum.expiration == current_datum.expiration,
-          // 10. Joining must happen before the bet expiration
           valid_before(validity_range, new_datum.expiration)?,
         }
       }
-      // Handle oracle announcing the winner
+
+      // ANNOUNCE_WINNER — oracle settles after expiration. Single output
+      // (the payout), no continuing datum, no further state. Requires the
+      // bet to have been joined; an unjoined bet must be reclaimed another
+      // way (not implemented here — it would lock funds).
       ANNOUNCE_WINNER { winner } -> {
-        // Extract the current bet state
         expect Some(current_datum_data) = input_datum
         let BetDatum { player1, player2, oracle, expiration } =
           current_datum_data
 
-        // Ensure there's exactly one output (the payout to winner)
         expect list.length(outputs) == 1
         expect Some(payout_output) = list.head(outputs)
-        // Validation rules for announcing winner:
         and {
-          // 1. Winner must be either player1 or player2
           or {
             winner == player1,
             winner == player2,
           },
-          // 2. Both players must have joined (player2 is not None)
           (player2 != "")?,
-          // 3. No continuing datum (bet is being closed)
           (payout_output.datum == NoDatum)?,
-          // 4. Payout goes to the winner's address
           (payout_output.address == from_verification_key(winner))?,
-          // 5. Oracle must sign the transaction
           key_signed(extra_signatories, oracle)?,
-          // 6. The bet must have been expired (no future bets allowed) before announcing
+          // valid_after(range, point) <=> range.lower_bound > point.
+          // Forces settlement strictly after expiry — no early calls.
           valid_after(validity_range, expiration)?,
         }
       }
     }
   }
 
-  /// Catch-all for any other redeemer - always fails
-  /// This ensures the contract can only be used as intended
   else(_) {
     fail
   }

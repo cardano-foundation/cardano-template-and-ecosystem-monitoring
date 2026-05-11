@@ -1,22 +1,45 @@
 import {
   Lucid,
-  Koios,
-  assetsToValue,
-  generateSeedPhrase,
-  validatorToAddress,
-  validatorToScriptHash,
-  Validator,
-  toUnit,
+  Blockfrost,
+  Constr,
+  Data,
+  credentialToAddress,
   fromText,
   getAddressDetails,
-  credentialToAddress,
-  Data,
-  LucidEvolution,
-  Constr,
-} from '@evolution-sdk/lucid';
+  toUnit,
+  validatorToAddress,
+  validatorToScriptHash,
+  type LucidEvolution,
+  type Validator,
+} from "@evolution-sdk/lucid";
+import { SLOT_CONFIG_NETWORK } from "@evolution-sdk/plutus";
+import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
-// Blueprint is loaded lazily inside setup() to allow running commands
-// like `prepare` without requiring the compiled Aiken artifact.
+// ----------------------------------------------------------------------------
+// English auction. Single PlutusV3 validator with mint (init the NFT lot)
+// and spend (Bid / End) redeemers. End requires validFrom > expiration, so
+// the close path waits for the chain tip to roll past the deadline before
+// building the tx.
+// ----------------------------------------------------------------------------
+
+const YACI_URL = "http://localhost:8080/api/v1";
+const NETWORK = "Preview" as const;
+const TEST_MNEMONIC =
+  "test test test test test test test test test test test test test test test test test test test test test test test sauce";
+const ASSET_NAME = "auction_nft";
+const ERA_OFFSET_SECONDS = 600;
+
+// yaci-devkit boots through several "instant" eras and enters Babbage at
+// relative slot/time 600s, so TxInfo POSIX = (systemStart + 600 + slot) * 1000.
+// We pre-bake that offset in SLOT_CONFIG_NETWORK so validFrom(Date.now())
+// round-trips against the validator's view of time.
+async function alignSlotConfig() {
+  const block = await fetch(`${YACI_URL}/blocks/latest`).then((r) => r.json());
+  const zeroTime = (block.time - block.slot + ERA_OFFSET_SECONDS) * 1000;
+  SLOT_CONFIG_NETWORK.Preview.zeroTime = zeroTime;
+  SLOT_CONFIG_NETWORK.Preview.zeroSlot = 0;
+  SLOT_CONFIG_NETWORK.Preview.slotLength = 1000;
+}
 
 const AuctionDatumSchema = Data.Object({
   seller: Data.Bytes(),
@@ -29,384 +52,260 @@ const AuctionDatumSchema = Data.Object({
 type AuctionDatum = Data.Static<typeof AuctionDatumSchema>;
 const AuctionDatum = AuctionDatumSchema as unknown as AuctionDatum;
 
-async function prepare(amount: number) {
-  const lucid = await Lucid(
-    new Koios('https://preprod.koios.rest/api/v1'),
-    'Preprod'
-  );
+async function lucidAt(accountIndex: number): Promise<LucidEvolution> {
+  const lucid = await Lucid(new Blockfrost(YACI_URL, "Dummy Key"), NETWORK);
+  lucid.selectWallet.fromSeed(TEST_MNEMONIC, { accountIndex });
+  return lucid;
+}
 
-  const addresses: string[] = [];
-  for (let i = 0; i < amount; i++) {
-    const mnemonic = generateSeedPhrase();
-    lucid.selectWallet.fromSeed(mnemonic);
-    const address = await lucid.wallet().address();
-    addresses.push(address);
-    Deno.writeTextFileSync(`wallet_${i}.txt`, mnemonic);
+async function yaciTipSlot(): Promise<number> {
+  return (await fetch(`${YACI_URL}/blocks/latest`).then((r) => r.json())).slot;
+}
+function slotToMs(slot: number): number {
+  const cfg = SLOT_CONFIG_NETWORK.Preview;
+  return cfg.zeroTime + (slot - cfg.zeroSlot) * cfg.slotLength;
+}
+
+async function waitForUtxosAt(
+  lucid: LucidEvolution,
+  address: string,
+  minCount: number,
+  timeoutSec = 60,
+) {
+  for (let i = 0; i < timeoutSec; i++) {
+    try {
+      const u = await lucid.utxosAt(address);
+      if (u.length >= minCount) return;
+    } catch {}
+    await new Promise((r) => setTimeout(r, 1000));
   }
-  console.log(`Successfully prepared ${amount} wallet (seed phrases).`);
-  console.log(`Fund wallet ${addresses[0]} with tADA for fees and collateral.`);
+  throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${address}`);
 }
 
-function selectWallet(lucid: LucidEvolution, index: number) {
-  const mnemonic = Deno.readTextFileSync(`wallet_${index}.txt`);
-  lucid.selectWallet.fromSeed(mnemonic);
-}
-
-async function setup() {
-  const lucid = await Lucid(
-    new Koios('https://preprod.koios.rest/api/v1'),
-    'Preprod'
-  );
-  selectWallet(lucid, 0);
-  let compiledCode: string;
-  try {
-    const jsonUrl = new URL('../../onchain/aiken/plutus.json', import.meta.url);
-    await Deno.stat(jsonUrl); // ensure file exists
-
-    // Read and parse JSON directly instead of using dynamic import with assertions
-    const blueprintText = await Deno.readTextFile(jsonUrl);
-    const blueprint = JSON.parse(blueprintText);
-    const validators =
-      (blueprint as any).default?.validators ?? (blueprint as any).validators;
-    compiledCode = validators[0].compiledCode;
-  } catch (e) {
-    if (e instanceof Deno.errors.NotFound) {
-      console.error(
-        'Missing Aiken blueprint (plutus.json). Please compile the auction Aiken project:'
-      );
-      console.error(
-        '1) Install Aiken, 2) cd auction/onchain/aiken, 3) aiken build'
-      );
-      throw e;
-    }
-    console.error('Failed to load Aiken blueprint (plutus.json):', e);
-    throw e;
+async function fundFromIndex0(targets: Array<{ address: string; lovelace: bigint }>) {
+  const lucid = await lucidAt(0);
+  let txb = lucid.newTx();
+  for (const t of targets) txb = txb.pay.ToAddress(t.address, { lovelace: t.lovelace });
+  const tx = await txb.complete();
+  const signed = await tx.sign.withWallet().complete();
+  const txHash = await signed.submit();
+  console.log(`Funded ${targets.length} target(s). tx=${txHash}`);
+  for (const t of targets) await waitForUtxosAt(lucid, t.address, 1, 60);
+  // Funder is the next caller — wait for its own new change UTxO so lucid
+  // doesn't re-select the spent input.
+  const funderAddr = await lucid.wallet().address();
+  for (let i = 0; i < 60; i++) {
+    const u = await lucid.utxosAt(funderAddr);
+    if (u.some((x) => x.txHash === txHash)) break;
+    await new Promise((r) => setTimeout(r, 1000));
   }
-  const validator: Validator = {
-    type: 'PlutusV3',
-    script: compiledCode,
-  };
-
-  const scriptAddress = validatorToAddress('Preprod', validator);
-
-  return {
-    lucid,
-    scriptAddress,
-    validator,
-  };
 }
 
-async function initAuction(startingBidLovelace: string) {
-  const { lucid, scriptAddress, validator } = await setup();
+function setup() {
+  const compiledCode = blueprint.validators[0].compiledCode;
+  const validator: Validator = { type: "PlutusV3", script: compiledCode };
+  return { validator, scriptAddress: validatorToAddress(NETWORK, validator) };
+}
 
-  const sellerAddress = await lucid.wallet().address();
-  const { paymentCredential: sellerPc } = getAddressDetails(sellerAddress);
+async function findScriptUtxo(lucid: LucidEvolution, scriptAddress: string, txHash: string) {
+  for (let i = 0; i < 60; i++) {
+    const utxos = await lucid.utxosAt(scriptAddress);
+    const u = utxos.find((x) => x.txHash === txHash && x.outputIndex === 0);
+    if (u) return u;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  throw new Error(`UTxO ${txHash}#0 not found`);
+}
 
+async function initAuction(
+  seller: LucidEvolution,
+  startingBid: bigint,
+  expirationMs: bigint,
+): Promise<string> {
+  const { validator, scriptAddress } = setup();
+  const sellerAddr = await seller.wallet().address();
+  const sellerPc = getAddressDetails(sellerAddr).paymentCredential!.hash;
   const policy = validatorToScriptHash(validator);
-  const assetNameText = 'auction_nft';
-  const unit = toUnit(policy, fromText(assetNameText));
+  const unit = toUnit(policy, fromText(ASSET_NAME));
 
-  const datum = Data.to(
-    {
-      seller: sellerPc?.hash || '',
-      highest_bidder: '',
-      highest_bid: BigInt(startingBidLovelace),
-      expiration: BigInt(Date.now() + 1000 * 60 * 16), // +16 minutes (matches MeshJS test)
-      asset_policy: policy,
-      asset_name: fromText(assetNameText),
-    },
-    AuctionDatum
-  );
+  // Anchor validity to yaci's actual tip slot rather than Date.now(): yaci's
+  // chain ticks slightly faster than wall clock under load.
+  const tipSlot = await yaciTipSlot();
+  const cfg = SLOT_CONFIG_NETWORK.Preview;
+  const expirationSlot = Math.floor((Number(expirationMs) - cfg.zeroTime) / cfg.slotLength) + cfg.zeroSlot;
+  // Bid/Init both check valid_before(expiration); validTo must land short of it.
+  const validToSlot = Math.min(tipSlot + 10, expirationSlot - 5);
+  const datum = Data.to({
+    seller: sellerPc,
+    highest_bidder: "",
+    highest_bid: startingBid,
+    expiration: expirationMs,
+    asset_policy: policy,
+    asset_name: fromText(ASSET_NAME),
+  }, AuctionDatum);
 
-  const tx = await lucid
+  const tx = await seller
     .newTx()
     .attach.MintingPolicy(validator)
     .mintAssets({ [unit]: 1n }, Data.void())
     .pay.ToContract(
       scriptAddress,
-      { kind: 'inline', value: datum },
-      {
-        lovelace: BigInt(startingBidLovelace),
-        [unit]: 1n,
-      }
+      { kind: "inline", value: datum },
+      { lovelace: startingBid, [unit]: 1n },
     )
-    .addSigner(sellerAddress)
-    .validFrom(Date.now() - 60_000)
-    .validTo(Date.now() + 600_000);
-
-  try {
-    const unsignedTx = await tx.complete();
-    const signedTx = await unsignedTx.sign.withWallet();
-    const txHash = await (await signedTx.complete()).submit();
-    console.log(
-      `Auction initialized at ${scriptAddress} with starting bid ${startingBidLovelace} lovelace.\nSee: https://preprod.cexplorer.io/tx/${txHash}`
-    );
-    console.log(
-      `To bid: deno run -A auction.ts bid ${txHash} <newBidLovelace>`
-    );
-  } catch (error) {
-    console.error('Error while submitting init transaction:', error);
-    Deno.exit(1);
-  }
+    .addSigner(sellerAddr)
+    .validFrom(slotToMs(tipSlot - 5))
+    .validTo(slotToMs(validToSlot))
+    .complete();
+  const signed = await tx.sign.withWallet().complete();
+  const txHash = await signed.submit();
+  console.log(`INIT ok. tx=${txHash}`);
+  return txHash;
 }
 
-async function bidAuction(auctionTxId: string, newBidLovelace: string) {
-  console.log(`Placing bid on auction UTXO from tx: ${auctionTxId}`);
-  const { lucid, scriptAddress, validator } = await setup();
-
-  // Use bidder wallet index 1
-  selectWallet(lucid, 1);
-  const bidderAddress = await lucid.wallet().address();
-  const { paymentCredential: bidderPc } = getAddressDetails(bidderAddress);
-  console.log(`Using bidder address: ${bidderAddress}`);
-
-  let utxos: any[] = [];
-  try {
-    // utxos = await lucid.utxosByOutRef([
-    //   { txHash: auctionTxId, outputIndex: 0 },
-    // ]);
-    // Fallback to utxosAt to avoid Koios schema parsing issues with utxosByOutRef
-    const scriptUtxos = await lucid.utxosAt(scriptAddress);
-    utxos = scriptUtxos.filter(
-      (u) => u.txHash === auctionTxId && u.outputIndex === 0
-    );
-  } catch (error) {
-    console.error(
-      `Error fetching UTXOs for transaction ID ${auctionTxId}:`,
-      error
-    );
-    return;
-  }
-
-  if (utxos.length === 0) {
-    console.error(`No UTXOs found for transaction ID: ${auctionTxId}`);
-    return;
-  }
-
-  const utxo = utxos[0];
-  if (!utxo.datum) {
-    console.error(`UTXO ${auctionTxId} has no inline datum.`);
-    return;
-  }
-
-  const auction = Data.from(utxo.datum, AuctionDatum) as any;
-
-  const currentBid: bigint = BigInt(auction.highest_bid);
-  const nextBid: bigint = BigInt(newBidLovelace);
-  if (nextBid <= currentBid) {
-    console.error(
-      `New bid must be greater than current highest bid (${currentBid}).`
-    );
-    return;
-  }
-
+async function bid(
+  bidder: LucidEvolution,
+  prevTxHash: string,
+  newBid: bigint,
+): Promise<string> {
+  const { validator, scriptAddress } = setup();
+  const bidderAddr = await bidder.wallet().address();
+  const bidderVkh = getAddressDetails(bidderAddr).paymentCredential!.hash;
+  const utxo = await findScriptUtxo(bidder, scriptAddress, prevTxHash);
+  if (!utxo.datum) throw new Error("No datum");
+  const auction = Data.from(utxo.datum, AuctionDatum) as unknown as {
+    seller: string; highest_bidder: string; highest_bid: bigint;
+    expiration: bigint; asset_policy: string; asset_name: string;
+  };
   const policy = validatorToScriptHash(validator);
   const unit = toUnit(policy, auction.asset_name);
 
-  auction.highest_bidder = bidderPc?.hash || '';
-  auction.highest_bid = nextBid;
+  const previousBidder = auction.highest_bidder;
+  const updated = {
+    ...auction,
+    highest_bidder: bidderVkh,
+    highest_bid: newBid,
+  };
+  const newDatum = Data.to(updated, AuctionDatum);
 
-  const datum = Data.to(auction, AuctionDatum);
+  // First bid has no previous bidder, so the seller's reserved starting bid
+  // is what gets refunded out.
+  const refundAddrHash = previousBidder && previousBidder.length > 0
+    ? previousBidder
+    : auction.seller;
+  const refundAddr = credentialToAddress(NETWORK, { type: "Key", hash: refundAddrHash });
 
-  const previousBidder = utxo.datum
-    ? (Data.from(utxo.datum, AuctionDatum) as any).highest_bidder
-    : '';
-  const sellerHash = (Data.from(utxo.datum!, AuctionDatum) as any).seller;
-
-  let refundAddress: string;
-  if (previousBidder && previousBidder.length > 0) {
-    refundAddress = credentialToAddress('Preprod', {
-      type: 'Key',
-      hash: previousBidder,
-    });
-  } else {
-    // If no previous bidder, refund the seller who put up the initial liquidity
-    refundAddress = credentialToAddress('Preprod', {
-      type: 'Key',
-      hash: sellerHash,
-    });
-  }
-
-  const tx = await lucid
+  const tipSlot = await yaciTipSlot();
+  const cfg = SLOT_CONFIG_NETWORK.Preview;
+  const expirationSlot = Math.floor((Number(auction.expiration) - cfg.zeroTime) / cfg.slotLength) + cfg.zeroSlot;
+  const validToSlot = Math.min(tipSlot + 10, expirationSlot - 5);
+  const tx = await bidder
     .newTx()
     .attach.SpendingValidator(validator)
     .collectFrom([utxo], Data.void())
     .pay.ToContract(
       scriptAddress,
-      { kind: 'inline', value: datum },
-      {
-        lovelace: nextBid,
-        [unit]: 1n,
-      }
+      { kind: "inline", value: newDatum },
+      { lovelace: newBid, [unit]: 1n },
     )
-    .pay.ToAddress(refundAddress, { lovelace: currentBid }) // Refund previous bidder or seller
-    .addSigner(bidderAddress)
-    .validFrom(Date.now() - 60_000)
-    .validTo(Date.now() + 600_000);
-
-  try {
-    const unsignedTx = await tx.complete();
-    const signedTx = await unsignedTx.sign.withWallet();
-    const txHash = await (await signedTx.complete()).submit();
-    console.log(
-      `Successfully placed bid of ${nextBid} lovelace.\nSee: https://preprod.cexplorer.io/tx/${txHash}`
-    );
-  } catch (error) {
-    console.error('Error while submitting bid transaction:', error);
-    Deno.exit(1);
-  }
+    .pay.ToAddress(refundAddr, { lovelace: auction.highest_bid })
+    .addSigner(bidderAddr)
+    .validFrom(slotToMs(tipSlot - 5))
+    .validTo(slotToMs(validToSlot))
+    .complete();
+  const signed = await tx.sign.withWallet().complete();
+  const txHash = await signed.submit();
+  console.log(`BID ok. ${newBid} lovelace tx=${txHash}`);
+  return txHash;
 }
 
-async function closeAuction(auctionTxId: string) {
-  console.log(`Closing auction UTXO from tx: ${auctionTxId}`);
-  const { lucid, scriptAddress, validator } = await setup();
-  selectWallet(lucid, 0); // Seller closes? Anyone can close usually if expired.
-  const address = await lucid.wallet().address();
-
-  let utxos: any[] = [];
-  try {
-    // utxos = await lucid.utxosByOutRef([
-    //   { txHash: auctionTxId, outputIndex: 0 },
-    // ]);
-    const scriptUtxos = await lucid.utxosAt(scriptAddress);
-    utxos = scriptUtxos.filter(
-      (u) => u.txHash === auctionTxId && u.outputIndex === 0
-    );
-  } catch (error) {
-    console.error(`Error fetching UTXOs:`, error);
-    return;
-  }
-
-  if (utxos.length === 0) {
-    console.error(`No UTXOs found for transaction ID: ${auctionTxId}`);
-    return;
-  }
-
-  const utxo = utxos[0];
-  if (!utxo.datum) {
-    console.error(`UTXO ${auctionTxId} has no inline datum.`);
-    return;
-  }
-
-  const auction = Data.from(utxo.datum, AuctionDatum) as any;
-  const expiration = Number(auction.expiration);
-  const now = Date.now();
-
-  if (now < expiration) {
-    console.error(
-      `Auction has not expired yet. Expiration: ${new Date(
-        expiration
-      ).toLocaleString()}, Now: ${new Date(now).toLocaleString()}`
-    );
-    return;
-  }
-
+async function close(
+  caller: LucidEvolution,
+  txHash: string,
+  expirationMs: bigint,
+) {
+  const { validator, scriptAddress } = setup();
+  const callerAddr = await caller.wallet().address();
+  const utxo = await findScriptUtxo(caller, scriptAddress, txHash);
+  if (!utxo.datum) throw new Error("No datum");
+  const auction = Data.from(utxo.datum, AuctionDatum) as unknown as {
+    seller: string; highest_bidder: string; highest_bid: bigint;
+    expiration: bigint; asset_policy: string; asset_name: string;
+  };
   const policy = validatorToScriptHash(validator);
   const unit = toUnit(policy, auction.asset_name);
-  const highestBid = BigInt(auction.highest_bid);
-  const highestBidder = auction.highest_bidder;
-  const seller = auction.seller;
+  const sellerAddr = credentialToAddress(NETWORK, { type: "Key", hash: auction.seller });
 
-  const sellerAddress = credentialToAddress('Preprod', {
-    type: 'Key',
-    hash: seller,
-  });
+  // End requires valid_after(expiration); the tx must declare a validity
+  // window that starts strictly past the deadline, so block until the chain
+  // tip has actually rolled there.
+  const cfg = SLOT_CONFIG_NETWORK.Preview;
+  const expirationSlot = Math.floor((Number(expirationMs) - cfg.zeroTime) / cfg.slotLength) + cfg.zeroSlot;
+  for (let i = 0; i < 300; i++) {
+    const tip = await yaciTipSlot();
+    if (tip > expirationSlot) {
+      console.log(`tipSlot ${tip} > expirationSlot ${expirationSlot}, proceeding`);
+      break;
+    }
+    if (i % 10 === 0) console.log(`Waiting for chain slot ${tip} → ${expirationSlot}…`);
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  const tipSlot = await yaciTipSlot();
+  const validFromSlot = Math.max(expirationSlot + 1, tipSlot - 5);
 
-  const tx = lucid
+  let txb = caller
     .newTx()
     .attach.SpendingValidator(validator)
-    .collectFrom([utxo], Data.to(new Constr(2, []))); // END = Index 2
-
-  if (highestBidder && highestBidder.length > 0) {
-    const winnerAddress = credentialToAddress('Preprod', {
-      type: 'Key',
-      hash: highestBidder,
+    .collectFrom([utxo], Data.to(new Constr(2, [])));
+  if (auction.highest_bidder && auction.highest_bidder.length > 0) {
+    const winnerAddr = credentialToAddress(NETWORK, {
+      type: "Key", hash: auction.highest_bidder,
     });
-    console.log(`Winner identified: ${winnerAddress}`);
-    console.log(`Sending NFT to Winner and ${highestBid} ADA to Seller.`);
-
-    tx.pay
-      .ToAddress(winnerAddress, { [unit]: 1n })
-      .pay.ToAddress(sellerAddress, { lovelace: highestBid });
+    txb = txb
+      .pay.ToAddress(winnerAddr, { [unit]: 1n })
+      .pay.ToAddress(sellerAddr, { lovelace: auction.highest_bid });
   } else {
-    console.log(`No bids. Returning NFT to Seller.`);
-    tx.pay.ToAddress(sellerAddress, { [unit]: 1n });
+    txb = txb.pay.ToAddress(sellerAddr, { [unit]: 1n });
   }
-
-  tx.addSigner(address)
-    .validFrom(Date.now() - 60_000)
-    .validTo(Date.now() + 600_000);
-
-  try {
-    const unsignedTx = await tx.complete();
-    const signedTx = await unsignedTx.sign.withWallet();
-    const txHash = await (await signedTx.complete()).submit();
-    console.log(
-      `Auction closed successfully.\nSee: https://preprod.cexplorer.io/tx/${txHash}`
-    );
-  } catch (error) {
-    console.error('Error while submitting close transaction:', error);
-    Deno.exit(1);
-  }
+  const tx = await txb
+    .addSigner(callerAddr)
+    .validFrom(slotToMs(validFromSlot))
+    .validTo(slotToMs(validFromSlot + 120))
+    .complete();
+  const signed = await tx.sign.withWallet().complete();
+  const subHash = await signed.submit();
+  console.log(`END ok. tx=${subHash}`);
 }
 
-const isPositiveNumber = (s: string) =>
-  Number.isInteger(Number(s)) && Number(s) > 0;
-const isTxId = (s: string) => /^[0-9a-fA-F]{64}$/.test(s);
+async function runScenario() {
+  console.log("=== auction scenario: init → bid → bid → end ===");
+  await alignSlotConfig();
 
-if (Deno.args.length > 0) {
-  if (Deno.args[0] === 'prepare') {
-    if (Deno.args.length > 1 && isPositiveNumber(Deno.args[1])) {
-      const files = Deno.readDirSync('.');
-      const seeds: string[] = [];
-      for (const file of files) {
-        if (file.name.match(/wallet_[0-9]+.txt/) !== null) {
-          seeds.push(file.name);
-        }
-      }
-      if (seeds.length > 0) {
-        console.log(
-          'Seed phrases already exist. Remove wallet_*.txt before preparing new ones.'
-        );
-      } else {
-        await prepare(parseInt(Deno.args[1]));
-      }
-    } else {
-      console.log(
-        'Expected a positive number (seed phrases to prepare). Example: deno run -A auction.ts prepare 3'
-      );
-    }
-  } else if (Deno.args[0] === 'init') {
-    if (Deno.args.length > 1 && isPositiveNumber(Deno.args[1])) {
-      await initAuction(Deno.args[1]);
-    } else {
-      console.log(
-        'Expected a positive number (starting bid in lovelace). Example: deno run -A auction.ts init 3000000'
-      );
-    }
-  } else if (Deno.args[0] === 'bid') {
-    if (
-      Deno.args.length > 2 &&
-      isTxId(Deno.args[1]) &&
-      isPositiveNumber(Deno.args[2])
-    ) {
-      await bidAuction(Deno.args[1], Deno.args[2]);
-    } else {
-      console.log(
-        'Usage: deno run -A auction.ts bid <TX_ID> <NEW_BID_LOVELACE>'
-      );
-    }
-  } else if (Deno.args[0] === 'close') {
-    if (Deno.args.length > 1 && isTxId(Deno.args[1])) {
-      await closeAuction(Deno.args[1]);
-    } else {
-      console.log('Usage: deno run -A auction.ts close <TX_ID>');
-    }
-  } else {
-    console.log(
-      'Invalid argument. Allowed arguments: prepare, init, bid, close.'
-    );
-  }
-} else {
-  console.log('Expected an argument. Allowed: prepare, init, bid, close.');
+  // account 0 = seller / funder ; 1 = bidder1 ; 2 = bidder2
+  const seller = await lucidAt(0);
+  const bidder1 = await lucidAt(1);
+  const bidder2 = await lucidAt(2);
+  await fundFromIndex0([
+    { address: await bidder1.wallet().address(), lovelace: 30_000_000n },
+    { address: await bidder2.wallet().address(), lovelace: 30_000_000n },
+  ]);
+
+  const cfg = SLOT_CONFIG_NETWORK.Preview;
+  const tipSlot = await yaciTipSlot();
+  const expirationSlot = tipSlot + 25;
+  const expirationMs = BigInt(slotToMs(expirationSlot));
+
+  const initTx = await initAuction(seller, 3_000_000n, expirationMs);
+  await new Promise((r) => setTimeout(r, 2000));
+  const bid1Tx = await bid(bidder1, initTx, 6_000_000n);
+  await new Promise((r) => setTimeout(r, 2000));
+  const bid2Tx = await bid(bidder2, bid1Tx, 10_000_000n);
+  await new Promise((r) => setTimeout(r, 2000));
+  await close(seller, bid2Tx, expirationMs);
+
+  console.log("=== Scenario complete ===");
+}
+
+if (import.meta.main) {
+  await runScenario();
 }

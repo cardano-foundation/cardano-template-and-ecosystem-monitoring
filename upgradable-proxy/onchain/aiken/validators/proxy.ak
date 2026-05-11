@@ -12,6 +12,13 @@ use cardano/transaction.{
 }
 use cocktail/vodka_extra_signatories.{key_signed}
 
+// Upgradable proxy. The state UTxO holds a unique state-token (name derived
+// from the seed utxo_ref so the script hash is one-of-a-kind) and its datum
+// points to the *current* logic script. To run business logic, callers must
+// include a withdrawal from the pointed script — that withdrawal triggers
+// whichever logic version is wired in today. UPDATE rotates the pointer;
+// every other interaction routes through SPEND/MINT and the live logic.
+
 pub type ProxyMintRedeemer {
   MINT
   INIT
@@ -43,6 +50,8 @@ validator proxy(utxo_ref: OutputReference) {
       ..
     } = transaction
 
+    // State token name = sha3_256(seed). Deterministic, unforgeable, and
+    // unique per (utxo_ref) because that UTxO can only be spent once.
     let state_token_name =
       sha3_256(
         concat(
@@ -52,11 +61,12 @@ validator proxy(utxo_ref: OutputReference) {
       )
 
     when redeemer is {
+      // INIT — bootstrap the proxy: consume the seed (one-shot), mint the
+      // single state token, lock it to the proxy with the initial datum.
+      // Owner must sign so a third party can't grief the seed-spender.
       INIT -> {
-        // Initialization can only run once
         expect
           list.any(inputs, fn(input) { input.output_reference == utxo_ref })
-        // Collect all outputs locked at this script and holding the policy token
         let outputs_to_script =
           list.filter(
             outputs,
@@ -68,13 +78,11 @@ validator proxy(utxo_ref: OutputReference) {
             },
           )
 
-        // There should be just one output going to this script
         expect Some(output) = list.head(outputs_to_script)
         let Output { datum, .. } = output
         expect InlineDatum(datum) = datum
         expect ProxyDatum { script_owner, .. } = datum
 
-        // token name must be state_token_name and there should be just 1 token minted
         let minted_tokens =
           mint
             |> tokens(policy_id)
@@ -90,15 +98,19 @@ validator proxy(utxo_ref: OutputReference) {
           key_signed(extra_signatories, script_owner)?,
         }
       }
+      // MINT — issue domain tokens under this proxy. Two guards:
+      //   1. Cannot mint another state_token (would clone the proxy).
+      //   2. Must invoke a withdrawal from the pointed logic script, so
+      //      whatever rules that logic enforces apply to the mint.
       MINT -> {
-        // token name is not allowed to be state_token_name
         let minted_tokens =
           mint
             |> tokens(policy_id)
             |> dict.to_pairs()
             |> pairs.keys
 
-        // reference input with pointer token should be around
+        // Read the current pointer from a reference input — we don't spend
+        // the state UTxO during MINT, just observe it.
         let script_pointer_refs =
           list.filter(
             reference_inputs,
@@ -122,7 +134,6 @@ validator proxy(utxo_ref: OutputReference) {
         expect InlineDatum(datum) = script_pointer_ref.output.datum
         expect proxy_datum: ProxyDatum = datum
 
-        // withdrawal from script with upgradeable logic must be part of the transaction
         let included_withdrawal_scripts = pairs.keys(withdrawals)
 
         and {
@@ -151,9 +162,7 @@ validator proxy(utxo_ref: OutputReference) {
       ..
     } = transaction
 
-    // Find the input being spent
     expect Some(spent_input) = find_input(inputs, spent_output_ref)
-    // Getting the policy of tokens produced by this script
     expect Script(policy_id) = spent_input.output.address.payment_credential
 
     let Output { value, datum: input_datum, .. } = spent_input.output
@@ -171,12 +180,18 @@ validator proxy(utxo_ref: OutputReference) {
         ),
       )
 
+    // Inverted: true when this UTxO does NOT carry the state token (i.e. a
+    // regular asset UTxO under this script). UPDATE requires the state UTxO,
+    // SPEND requires a non-state UTxO — see each branch below.
     let state_token_still_locked =
       !list.has(script_tokens_in_input, state_token_name)
 
     when redeemer is {
+      // UPDATE — rotate the logic pointer / owner. Must be applied to the
+      // state UTxO (state_token_still_locked == False), continue the state
+      // token forward, and be signed by the current owner. If owner rotates,
+      // the new owner must co-sign to opt-in.
       UPDATE -> {
-        // There must be an output, that has the state token with an updated state
         expect Some(script_output) =
           list.find(
             outputs,
@@ -213,15 +228,17 @@ validator proxy(utxo_ref: OutputReference) {
         and {
           !state_token_still_locked,
           key_signed(extra_signatories, old_script_owner),
-          // if the script owner changed, both, old and new owner need to sign the transaction
           or {
             new_script_owner == old_script_owner,
             key_signed(extra_signatories, new_script_owner),
           },
         }
       }
+      // SPEND — withdraw a regular (non-state) UTxO from the proxy. Must NOT
+      // be the state UTxO (state_token_still_locked == True), and must
+      // invoke a withdrawal from the currently pointed logic script — same
+      // delegation mechanism as MINT.
       SPEND -> {
-        // reference input with pointer token should be around
         let script_pointer_refs =
           list.filter(
             reference_inputs,
@@ -245,7 +262,6 @@ validator proxy(utxo_ref: OutputReference) {
         expect InlineDatum(datum) = script_pointer_ref.output.datum
         expect proxy_datum: ProxyDatum = datum
 
-        // withdrawal from script with upgradeable logic must be part of the transaction
         let included_withdrawal_scripts = pairs.keys(withdrawals)
 
         and {

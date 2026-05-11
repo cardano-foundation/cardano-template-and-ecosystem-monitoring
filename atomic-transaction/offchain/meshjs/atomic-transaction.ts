@@ -1,281 +1,215 @@
 import {
-  applyParamsToScript,
-  conStr0,
-  DEFAULT_REDEEMER_BUDGET,
-  KoiosProvider,
+  BlockfrostProvider,
   MeshTxBuilder,
   MeshWallet,
+  mConStr0,
   resolvePaymentKeyHash,
   resolveScriptHash,
   serializePlutusScript,
   stringToHex,
-  UTxO
-} from '@meshsdk/core';
+  type UTxO,
+} from "@meshsdk/core";
+import { applyParamsToScript } from "@meshsdk/core-csl";
+import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
-import blueprint from '../../onchain/aiken/plutus.json' with { type: 'json' };
-import { alwaysSucceedCbor, alwaysSucceedHash } from './test-util.ts';
+// Atomic transaction: one PlutusV3 validator handling both mint and spend.
+// Scenario: mintAndLock → collect (single tx that spends the locked UTxO AND mints) → burn.
+// Mesh quirk: omit `evaluator` so Mesh's CPU estimator is used against yaci-devkit.
 
-// ------------------------------------------------------------
-// Configuration
-// ------------------------------------------------------------
-
-const NETWORK = 'preprod';
+const YACI_URL = "http://localhost:8080/api/v1";
+const NETWORK = "preprod";
 const NETWORK_ID = 0;
+const ASSET_NAME = "AtomicToken";
+const PASSWORD = "super_secret_password";
+const FUNDER_MNEMONIC =
+  "test test test test test test test test test test test test test test test test test test test test test test test sauce";
 
-// ------------------------------------------------------------
-// Wallet helpers
-// ------------------------------------------------------------
-
-function loadWalletFromFile(path: string): MeshWallet {
-  const mnemonic = JSON.parse(Deno.readTextFileSync(path));
-  const provider = new KoiosProvider(NETWORK);
-
+function provider(): BlockfrostProvider {
+  return new BlockfrostProvider(YACI_URL);
+}
+function makeWallet(words: string[]): MeshWallet {
+  const p = provider();
   return new MeshWallet({
     networkId: NETWORK_ID,
-    fetcher: provider,
-    submitter: provider,
-    key: {
-      type: 'mnemonic',
-      words: mnemonic
-    }
+    fetcher: p,
+    submitter: p,
+    key: { type: "mnemonic", words },
   });
 }
-
-// ------------------------------------------------------------
-// Script helpers
-// ------------------------------------------------------------
-
-function getValidator(name: string) {
-  const v = blueprint.validators.find(v =>
-    v.title.startsWith(name)
-  );
-  if (!v) throw new Error(`Validator not found: ${name}`);
-  return v.compiledCode;
+function funderWallet(): MeshWallet {
+  return makeWallet(FUNDER_MNEMONIC.split(/\s+/));
 }
 
-function getScriptAddress(compiled: string) {
+async function waitForUtxoAt(addr: string, minCount = 1, timeoutSec = 60) {
+  const p = provider();
+  for (let i = 0; i < timeoutSec; i++) {
+    try {
+      const u = await p.fetchAddressUTxOs(addr);
+      if (u.length >= minCount) return;
+    } catch {}
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${addr}`);
+}
+
+async function fundFromFunder(targetAddr: string, lovelace: bigint) {
+  const wallet = funderWallet();
+  const myAddr = await wallet.getChangeAddress();
+  const myUtxos = await provider().fetchAddressUTxOs(myAddr);
+  const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
+    .setNetwork(NETWORK);
+  await tx
+    .txOut(targetAddr, [{ unit: "lovelace", quantity: lovelace.toString() }])
+    .changeAddress(myAddr)
+    .selectUtxosFrom(myUtxos)
+    .complete();
+  const signed = await wallet.signTx(tx.txHex);
+  const txHash = await wallet.submitTx(signed);
+  console.log(`Funded ${targetAddr.slice(0, 20)}… with ${lovelace} lovelace. tx=${txHash}`);
+  await waitForUtxoAt(targetAddr, 1);
+}
+
+function getScriptDetails() {
+  const v = blueprint.validators.find((x) => x.title === "atomic.placeholder.mint");
+  if (!v) throw new Error("Validator not found");
+  const script = applyParamsToScript(v.compiledCode, [], "JSON");
   const { address } = serializePlutusScript(
-    { code: compiled, version: 'V3' },
+    { code: script, version: "V3" },
     undefined,
-    NETWORK_ID
+    NETWORK_ID,
   );
-  return address;
+  return { script, address, policyId: resolveScriptHash(script, "V3") };
 }
 
-function getScriptDetails(scriptName: string) {
-  const script = applyParamsToScript(
-    getValidator(scriptName),
-    [],
-    'JSON'
-  );
+async function mintAndLock(wallet: MeshWallet): Promise<string> {
+  const { script, address: scriptAddress, policyId } = getScriptDetails();
+  const myAddr = await wallet.getChangeAddress();
+  const myVkh = resolvePaymentKeyHash(myAddr);
+  const unit = policyId + stringToHex(ASSET_NAME);
+  const redeemer = mConStr0([stringToHex(PASSWORD)]);
+  const utxos = await provider().fetchAddressUTxOs(myAddr);
+  const collateral: UTxO[] = await wallet.getCollateral();
 
-  return {
-    script,
-    address: getScriptAddress(script),
-    policyId: resolveScriptHash(script, 'V3')
-  };
-}
-
-// ------------------------------------------------------------
-// Utils
-// ------------------------------------------------------------
-
-async function waitForScriptUtxo(
-  provider: KoiosProvider,
-  address: string,
-  retries = 5,
-  delayMs = 20_000
-): Promise<UTxO> {
-
-  console.log('Polling blockchain ledger to detect script utxo');
-  for (let i = 0; i < retries; i++) {
-    const utxos = await provider.fetchAddressUTxOs(address);
-    if (utxos.length) {
-      console.log('Script UTxO found');
-      return utxos[0];
-    }
-    console.log('Waiting for 20 seconds before next check..');
-    await new Promise(r => setTimeout(r, delayMs));
-  }
-
-  throw new Error('Script UTxO not found');
-}
-
-export const atomicMintRedeemer = (password: string) =>
-  conStr0([
-    { bytes: stringToHex(password) }
-  ]);
-
-// ------------------------------------------------------------
-// Atomic transaction demo
-// ------------------------------------------------------------
-
-export async function atomicTransaction(walletFile: string) {
-  const wallet = loadWalletFromFile(walletFile);
-  const provider = new KoiosProvider(NETWORK);
-
-  const changeAddr = await wallet.getChangeAddress();
-  const signerPkh = resolvePaymentKeyHash(changeAddr);
-
-  const collateral = await wallet.getCollateral();
-  if (!collateral.length) throw new Error('No collateral UTxO');
-
-  const walletUtxos = await provider.fetchAddressUTxOs(changeAddr);
-  if (!walletUtxos.length) throw new Error('No wallet UTxOs');
-
-  const {
-    script: atomicScript,
-    address: atomicScriptAddress,
-    policyId: atomicPolicyId
-  } = getScriptDetails('atomic.placeholder');
-
-  // --------------------------------------------------------
-  // STEP 1: Mint using always-success policy, lock at script
-  // --------------------------------------------------------
-
-  console.log('Step 1: Minting (using always succeed script) and locking at script');
-
-  const tx1 = new MeshTxBuilder({
-    fetcher: provider,
-    submitter: provider,
-    evaluator: provider
-  }).setNetwork(NETWORK);
-
-  const scriptUtxoTokenNameHex = stringToHex('ScriptUtxoToken');
-  await tx1
-    .txIn(
-      walletUtxos[0].input.txHash,
-      walletUtxos[0].input.outputIndex,
-      walletUtxos[0].output.amount,
-      walletUtxos[0].output.address
-    )
-
-    // Mint via always-success policy
+  // MeshBlockfrostProvider's evaluator mis-parses yaci-devkit's ogmios JSON-WSP response;
+  // omitting it makes mesh fall back to its CPU estimator.
+  const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
+    .setNetwork(NETWORK);
+  await tx
     .mintPlutusScriptV3()
-    .mint('1', alwaysSucceedHash, scriptUtxoTokenNameHex)
-    .mintingScript(alwaysSucceedCbor)
-    .mintRedeemerValue({ alternative: 0, fields: [] })
-
-    // Lock minted token at atomic script
-    .txOut(atomicScriptAddress, [
-      { unit: 'lovelace', quantity: '3000000' },
-      { unit: alwaysSucceedHash + scriptUtxoTokenNameHex, quantity: '1' }
-    ])
-    .txOutInlineDatumValue({ alternative: 0, fields: [] })
-
+    .mint("1", policyId, stringToHex(ASSET_NAME))
+    // Inline minting script (vs. mintTxInReference): no reference UTxO infrastructure for this demo.
+    .mintingScript(script)
+    .mintRedeemerValue(redeemer)
+    .txOut(scriptAddress, [{ unit, quantity: "1" }])
+    .txOutInlineDatumValue(redeemer)
     .txInCollateral(
       collateral[0].input.txHash,
       collateral[0].input.outputIndex,
       collateral[0].output.amount,
-      collateral[0].output.address
+      collateral[0].output.address,
     )
-    .requiredSignerHash(signerPkh)
-    .changeAddress(changeAddr)
-    .selectUtxosFrom(walletUtxos)
+    .requiredSignerHash(myVkh)
+    .changeAddress(myAddr)
+    .selectUtxosFrom(utxos)
     .complete();
+  const signed = await wallet.signTx(tx.txHex);
+  const txHash = await wallet.submitTx(signed);
+  console.log(`MINT+LOCK ok. tx=${txHash}`);
+  return scriptAddress;
+}
 
-  const signed1 = await wallet.signTx(tx1.txHex);
-  const txHash1 = await wallet.submitTx(signed1);
-  console.log('Script utxo setup tx submitted: Tx hash: ', txHash1);
+async function collect(wallet: MeshWallet, scriptAddress: string) {
+  const { script, policyId } = getScriptDetails();
+  const myAddr = await wallet.getChangeAddress();
+  const myVkh = resolvePaymentKeyHash(myAddr);
+  const unit = policyId + stringToHex(ASSET_NAME);
+  const redeemer = mConStr0([stringToHex(PASSWORD)]);
 
-  // --------------------------------------------------------
-  // STEP 2: Wait for script UTxO to be confirmed on chain
-  // --------------------------------------------------------
+  let target: UTxO | undefined;
+  for (let i = 0; i < 60; i++) {
+    const utxos = await provider().fetchAddressUTxOs(scriptAddress);
+    target = utxos.find((u) => u.output.amount.some((a) => a.unit === unit && a.quantity === "1"));
+    if (target) break;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  if (!target) throw new Error("No AtomicToken UTxO at script");
+  const ownUtxos = await provider().fetchAddressUTxOs(myAddr);
+  const collateral: UTxO[] = await wallet.getCollateral();
+  // Multiple Plutus scripts in one tx — default per-redeemer budget × N exceeds the tx limit,
+  // so set conservative explicit exUnits per call.
+  const exUnits = { mem: 4_000_000, steps: 2_000_000_000 };
 
-  const scriptUtxo = await waitForScriptUtxo(
-    provider,
-    atomicScriptAddress
-  );
-
-  // --------------------------------------------------------
-  // STEP 3: Atomic transaction : spend + password-gated mint
-  // --------------------------------------------------------
-
-  console.log('Step 2: Executing atomic spend + mint');
-
-  const tx2 = new MeshTxBuilder({
-    fetcher: provider,
-    submitter: provider,
-    evaluator: provider
-  }).setNetwork(NETWORK);
-
-
-  let superSecretPassword = 'super_secret_password';
-  await tx2
-    .mintPlutusScriptV3()
-    .mint('1', atomicPolicyId, stringToHex('AtomicTxToken'))
-    .mintingScript(atomicScript)
-    .mintRedeemerValue(
-      atomicMintRedeemer(superSecretPassword),
-      'JSON',
-      DEFAULT_REDEEMER_BUDGET
-    )
-
-    // Spend from script (always true)
+  const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
+    .setNetwork(NETWORK);
+  await tx
     .spendingPlutusScriptV3()
-    .txIn(
-      scriptUtxo.input.txHash,
-      scriptUtxo.input.outputIndex,
-      scriptUtxo.output.amount,
-      atomicScriptAddress
-    )
+    .txIn(target.input.txHash, target.input.outputIndex, target.output.amount, scriptAddress)
+    .txInScript(script)
+    .txInRedeemerValue(redeemer, "Mesh", exUnits)
     .txInInlineDatumPresent()
-    .txInRedeemerValue('')
-    .txInScript(atomicScript)
-
-    // Collect tokens
-    .txOut(changeAddr, [
-      { unit: 'lovelace', quantity: '2000000' }, // 2 ADA safety floor
-      ...scriptUtxo.output.amount.filter(a => a.unit !== 'lovelace')
-    ])
-
-    .txOut(changeAddr, [
-      { unit: 'lovelace', quantity: '2000000' }, // 2 ADA safety floor
-      { unit: atomicPolicyId + stringToHex('AtomicTxToken'), quantity: '1' }
-    ])
-
+    .mintPlutusScriptV3()
+    .mint("1", policyId, stringToHex(ASSET_NAME))
+    .mintingScript(script)
+    .mintRedeemerValue(redeemer, "Mesh", exUnits)
+    .txOut(myAddr, [{ unit, quantity: "2" }])
     .txInCollateral(
       collateral[0].input.txHash,
       collateral[0].input.outputIndex,
       collateral[0].output.amount,
-      collateral[0].output.address
+      collateral[0].output.address,
     )
-    .requiredSignerHash(signerPkh)
-    .changeAddress(changeAddr)
-    .selectUtxosFrom(walletUtxos)
+    .requiredSignerHash(myVkh)
+    .changeAddress(myAddr)
+    .selectUtxosFrom(ownUtxos)
     .complete();
-
-  const signed2 = await wallet.signTx(tx2.txHex);
-  const txHash2 = await wallet.submitTx(signed2);
-
-  console.log('Atomic transaction submitted: Tx hash: ', txHash2);
+  const signed = await wallet.signTx(tx.txHex);
+  const txHash = await wallet.submitTx(signed);
+  console.log(`COLLECT (atomic spend+mint) ok. tx=${txHash}`);
 }
 
-// ------------------------------------------------------------
-// CLI
-// ------------------------------------------------------------
+async function burn(wallet: MeshWallet, amount: number) {
+  const { script, policyId } = getScriptDetails();
+  const myAddr = await wallet.getChangeAddress();
+  const myVkh = resolvePaymentKeyHash(myAddr);
+  const redeemer = mConStr0([stringToHex(PASSWORD)]);
+  const utxos = await provider().fetchAddressUTxOs(myAddr);
+  const collateral: UTxO[] = await wallet.getCollateral();
 
-function printUsage() {
-  console.log(
-    'Usage:\n\n' +
-    '  deno run -A atomic-transaction.ts run <wallet.json>\n'
-  );
+  const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
+    .setNetwork(NETWORK);
+  await tx
+    .mintPlutusScriptV3()
+    .mint((-amount).toString(), policyId, stringToHex(ASSET_NAME))
+    .mintingScript(script)
+    .mintRedeemerValue(redeemer)
+    .txInCollateral(
+      collateral[0].input.txHash,
+      collateral[0].input.outputIndex,
+      collateral[0].output.amount,
+      collateral[0].output.address,
+    )
+    .requiredSignerHash(myVkh)
+    .changeAddress(myAddr)
+    .selectUtxosFrom(utxos)
+    .complete();
+  const signed = await wallet.signTx(tx.txHex);
+  const txHash = await wallet.submitTx(signed);
+  console.log(`BURN ${amount} ok. tx=${txHash}`);
 }
 
-async function main() {
-  const [command, ...args] = Deno.args;
+async function runScenario() {
+  console.log("=== atomic-transaction scenario: mint+lock → collect → burn ===");
+  const wallet = makeWallet(MeshWallet.brew(false) as string[]);
+  await fundFromFunder(await wallet.getChangeAddress(), 50_000_000n);
 
-  if (command !== 'run' || args.length !== 1) {
-    printUsage();
-    return;
-  }
-
-  await atomicTransaction(args[0]);
+  const scriptAddress = await mintAndLock(wallet);
+  await new Promise((r) => setTimeout(r, 2000));
+  await collect(wallet, scriptAddress);
+  await new Promise((r) => setTimeout(r, 2000));
+  await burn(wallet, 2);
+  console.log("=== Scenario complete ===");
 }
 
 if (import.meta.main) {
-  main().catch(err => {
-    console.error('❌ Error:', err);
-    Deno.exit(1);
-  });
+  await runScenario();
 }

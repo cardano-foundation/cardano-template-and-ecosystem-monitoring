@@ -6,6 +6,11 @@ use cocktail/vodka_mints.{token_minted}
 use cocktail/vodka_outputs.{outputs_with}
 use intent.{PaymentIntent}
 
+// Wallet minting policy. Mints/burns the INTENT_MARKER NFT that ties a
+// PaymentIntent UTxO at the intent script to this owner. Burn is unrestricted
+// in shape (any single-token burn) so funds.ak can call it as part of
+// ExecuteTx without naming the intent here.
+
 pub type WalletRedeemer {
   Mint
   Burn
@@ -17,6 +22,9 @@ validator wallet(owner: VerificationKeyHash, intent_script_hash: ScriptHash) {
     let creator_signed = key_signed(tx.extra_signatories, owner)
 
     when redeemer is {
+      // Mint — owner attaches a new intent. Marker must land at the intent
+      // script with a well-formed PaymentIntent datum, otherwise the intent
+      // would dangle (token exists but no readable payload).
       Mint -> {
         let intent_token_minted =
           token_minted(mint, policy_id, "INTENT_MARKER", 1)
@@ -31,6 +39,8 @@ validator wallet(owner: VerificationKeyHash, intent_script_hash: ScriptHash) {
         creator_signed && intent_token_minted
       }
 
+      // Burn — owner-signed marker destruction. Called by ExecuteTx (to retire
+      // a fulfilled intent) and by direct cancellation flows.
       Burn -> {
         let intent_token_burned =
           token_minted(mint, policy_id, "INTENT_MARKER", -1)

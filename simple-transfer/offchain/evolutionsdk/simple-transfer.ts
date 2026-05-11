@@ -1,9 +1,8 @@
-import { 
-  Lucid, 
-  Koios, 
-  Data, 
-  generateSeedPhrase, 
-  LucidEvolution, 
+import {
+  Blockfrost,
+  Data,
+  Lucid,
+  LucidEvolution,
   applyParamsToScript,
   SpendingValidator,
   getAddressDetails,
@@ -11,174 +10,125 @@ import {
 } from "@evolution-sdk/lucid";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
-// Helper to select wallet from file
-function selectWallet(lucid: LucidEvolution, index: string | number) {
-    const fileName = `wallet_${index}.txt`;
+// ----------------------------------------------------------------------------
+// Simple transfer. Parameterised PlutusV3 spend validator that hard-codes
+// the recipient VKH; only that key's signature can unlock the locked UTxO.
+// ----------------------------------------------------------------------------
+
+const YACI_URL = "http://localhost:8080/api/v1";
+const NETWORK = "Preprod" as const;
+const TEST_MNEMONIC =
+  "test test test test test test test test test test test test test test test test test test test test test test test sauce";
+
+async function lucidAt(accountIndex: number): Promise<LucidEvolution> {
+  const lucid = await Lucid(new Blockfrost(YACI_URL, "Dummy Key"), NETWORK);
+  lucid.selectWallet.fromSeed(TEST_MNEMONIC, { accountIndex });
+  return lucid;
+}
+
+async function waitForUtxosAt(
+  lucid: LucidEvolution,
+  address: string,
+  minCount: number,
+  timeoutSec = 60,
+): Promise<void> {
+  for (let i = 0; i < timeoutSec; i++) {
     try {
-        const mnemonic = Deno.readTextFileSync(fileName).trim();
-        lucid.selectWallet.fromSeed(mnemonic);
-    } catch {
-        console.error(`Error reading ${fileName}. Run 'prepare' first.`);
-        Deno.exit(1);
-    }
+      const u = await lucid.utxosAt(address);
+      if (u.length >= minCount) return;
+    } catch {}
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${address}`);
 }
 
-async function prepare(amount: number) {
-    for (let i = 0; i < amount; i++) {
-        const fileName = `wallet_${i}.txt`;
-        try {
-            await Deno.stat(fileName);
-            console.log(`${fileName} already exists, skipping.`);
-        } catch {
-            const mnemonic = generateSeedPhrase();
-            await Deno.writeTextFile(fileName, mnemonic);
-            const lucid = await Lucid(new Koios("https://preprod.koios.rest/api/v1"), "Preprod");
-            lucid.selectWallet.fromSeed(mnemonic);
-            console.log(`Generated ${fileName}. Address: ${await lucid.wallet().address()}`);
-        }
-    }
+function buildScript(receiverVkh: string): SpendingValidator {
+  const validator = blueprint.validators.find(
+    (v) => v.title === "simple_transfer.simpleTransfer.spend",
+  );
+  if (!validator) throw new Error("Validator not found in plutus.json");
+  return {
+    type: "PlutusV3",
+    script: applyParamsToScript(validator.compiledCode, [receiverVkh]),
+  };
 }
 
-async function balance(walletOrAddress: string | number = 0) {
-    const lucid = await Lucid(new Koios("https://preprod.koios.rest/api/v1"), "Preprod");
-    let address: string;
-    if (typeof walletOrAddress === "number" || (!isNaN(Number(walletOrAddress)) && walletOrAddress.toString().length < 5)) {
-        selectWallet(lucid, walletOrAddress);
-        address = await lucid.wallet().address();
-    } else {
-        address = walletOrAddress.toString();
-    }
-    const utxos = await lucid.utxosAt(address);
-    const totalLovelace = utxos.reduce((acc, utxo) => acc + utxo.assets.lovelace, 0n);
-    console.log(`Address: ${address}`);
-    console.log(`Balance: ${totalLovelace} lovelace (${Number(totalLovelace) / 1000000} ADA)`);
+async function fundFromIndex0(targetAddress: string, lovelace: bigint) {
+  const lucid = await lucidAt(0);
+  const tx = await lucid
+    .newTx()
+    .pay.ToAddress(targetAddress, { lovelace })
+    .complete();
+  const signed = await tx.sign.withWallet().complete();
+  const txHash = await signed.submit();
+  console.log(`Funded ${targetAddress} with ${lovelace} lovelace. tx=${txHash}`);
+  await waitForUtxosAt(lucid, targetAddress, 1, 60);
+  // Funder is the next caller — wait for its own new change UTxO so lucid
+  // doesn't re-select the spent input.
+  const funderAddr = await lucid.wallet().address();
+  for (let i = 0; i < 60; i++) {
+    const u = await lucid.utxosAt(funderAddr);
+    if (u.some((x) => x.txHash === txHash)) return;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
 }
 
-async function transfer(amountStr: string, toAddress: string, walletIndex: string | number = 0) {
-    const lucid = await Lucid(new Koios("https://preprod.koios.rest/api/v1"), "Preprod");
-    selectWallet(lucid, walletIndex);
-    try {
-        const tx = await lucid.newTx()
-            .pay.ToAddress(toAddress, { lovelace: BigInt(amountStr) })
-            .complete();
-        const signedTx = await tx.sign.withWallet().complete();
-        const txHash = await signedTx.submit();
-        console.log(`Transferred ${amountStr} lovelace to ${toAddress}. Tx Hash: ${txHash}`);
-    } catch (e) {
-        console.error("Transfer failed:", e);
-    }
+async function lock(senderAccount: number, receiverAddress: string, lovelace: bigint) {
+  const lucid = await lucidAt(senderAccount);
+  const receiverVkh = getAddressDetails(receiverAddress).paymentCredential?.hash;
+  if (!receiverVkh) throw new Error("Invalid receiver address");
+
+  const script = buildScript(receiverVkh);
+  const scriptAddress = validatorToAddress(NETWORK, script);
+
+  const tx = await lucid
+    .newTx()
+    .pay.ToAddress(scriptAddress, { lovelace })
+    .complete();
+  const signed = await tx.sign.withWallet().complete();
+  const txHash = await signed.submit();
+  console.log(`LOCK ok. ${lovelace} lovelace to ${scriptAddress}. tx=${txHash}`);
+  return scriptAddress;
 }
 
-async function lock(amountStr: string, receiverAddress: string, walletIndex: string | number = 0) {
-    const lucid = await Lucid(new Koios("https://preprod.koios.rest/api/v1"), "Preprod");
-    selectWallet(lucid, walletIndex);
+async function claim(receiverAccount: number) {
+  const lucid = await lucidAt(receiverAccount);
+  const address = await lucid.wallet().address();
+  const pkh = getAddressDetails(address).paymentCredential?.hash;
+  if (!pkh) throw new Error("Could not get receiver PKH");
 
-    const validator = blueprint.validators.find(v => v.title === "simple_transfer.simpleTransfer.spend");
-    if (!validator) throw new Error("Validator not found");
+  const script = buildScript(pkh);
+  const scriptAddress = validatorToAddress(NETWORK, script);
+  await waitForUtxosAt(lucid, scriptAddress, 1, 60);
 
-    const receiverPKH = getAddressDetails(receiverAddress).paymentCredential?.hash;
-    if (!receiverPKH) throw new Error("Invalid receiver address");
+  const utxos = await lucid.utxosAt(scriptAddress);
+  if (utxos.length === 0) throw new Error("No UTxOs to claim");
 
-    const script = {
-        type: "PlutusV3",
-        script: applyParamsToScript(validator.compiledCode, [receiverPKH])
-    };
-
-    const scriptAddress = validatorToAddress("Preprod", script as SpendingValidator);
-    
-    try {
-        const tx = await lucid.newTx()
-            .pay.ToAddress(scriptAddress, { lovelace: BigInt(amountStr) })
-            .complete();
-
-        const signedTx = await tx.sign.withWallet().complete();
-        const txHash = await signedTx.submit();
-        console.log(`Locked ${amountStr} lovelace for ${receiverAddress}. Tx Hash: ${txHash}`);
-        console.log(`Script Address: ${scriptAddress}`);
-    } catch (e) {
-        console.error("Locking failed:", e);
-    }
+  const tx = await lucid
+    .newTx()
+    .collectFrom(utxos, Data.void())
+    .attach.SpendingValidator(script)
+    .addSigner(address)
+    .complete();
+  const signed = await tx.sign.withWallet().complete();
+  const txHash = await signed.submit();
+  console.log(`CLAIM ok. ${utxos.length} UTxO(s). tx=${txHash}`);
 }
 
-async function claim(walletIndex: string | number = 0) {
-    const lucid = await Lucid(new Koios("https://preprod.koios.rest/api/v1"), "Preprod");
-    selectWallet(lucid, walletIndex);
+async function runScenario() {
+  console.log("=== simple-transfer scenario: lock → claim ===");
 
-    const address = await lucid.wallet().address();
-    const pkh = getAddressDetails(address).paymentCredential?.hash;
-    if (!pkh) throw new Error("Could not get PKH");
-    
-    const validator = blueprint.validators.find(v => v.title === "simple_transfer.simpleTransfer.spend");
-    if (!validator) throw new Error("Validator not found");
+  // account 0 = sender / funder ; 1 = recipient
+  const recipientLucid = await lucidAt(1);
+  const recipientAddress = await recipientLucid.wallet().address();
+  await fundFromIndex0(recipientAddress, 25_000_000n);
 
-    const script = {
-        type: "PlutusV3",
-        script: applyParamsToScript(validator.compiledCode, [pkh])
-    };
+  await lock(0, recipientAddress, 10_000_000n);
+  await claim(1);
 
-    const scriptAddress = validatorToAddress("Preprod", script as SpendingValidator);
-    console.log(`Checking for UTXOs at ${scriptAddress}...`);
-    const utxos = await lucid.utxosAt(scriptAddress);
-
-    if (utxos.length === 0) {
-        console.log("No UTXOs to claim.");
-        return;
-    }
-
-    try {
-        const walletUtxos = await lucid.wallet().getUtxos();
-        const collateralUtxo = walletUtxos.find(u => u.assets.lovelace >= 5000000n);
-        if (!collateralUtxo) throw new Error("No UTXO >= 5 ADA found in wallet for collateral");
-
-        const tx = await lucid.newTx()
-            .collectFrom(utxos, Data.void())
-            .attach.SpendingValidator(script as SpendingValidator)
-            .addSigner(address)
-            .complete();
-
-        const signedTx = await tx.sign.withWallet().complete();
-        const txHash = await signedTx.submit();
-        console.log(`Claimed ${utxos.length} UTXOs. Tx Hash: ${txHash}`);
-    } catch (e) {
-        console.error("Claiming failed:", e);
-    }
+  console.log("=== Scenario complete ===");
 }
-
 
 if (import.meta.main) {
-  const args = Deno.args;
-  if (args.length === 0) {
-      console.log("Commands:");
-      console.log("  lock <amount_lovelace> <receiver_address> [walletIndex]");
-      console.log("  claim [walletIndex]");
-      console.log("  balance [walletIndex]");
-      console.log("  transfer <amount_lovelace> <to_address> [walletIndex]");
-      console.log("  prepare <count>");
-  } else {
-
-  const cmd = args[0];
-
-  if (cmd === 'lock') {
-      if (!args[1] || !args[2]) {
-          console.log("Usage: lock <amount> <receiver_address> [walletIndex]");
-          Deno.exit(1);
-      }
-      await lock(args[1], args[2], args[3] || 0);
-  } else if (cmd === 'claim') {
-      await claim(args[1] || 0);
-  } else if (cmd === 'balance') {
-      await balance(args[1] || 0);
-  } else if (cmd === 'transfer') {
-      if (!args[1] || !args[2]) {
-          console.log("Usage: transfer <amount> <to_address> [walletIndex]");
-          Deno.exit(1);
-      }
-      await transfer(args[1], args[2], args[3] || 0);
-  } else if (cmd === 'prepare') {
-      if (args[1]) await prepare(parseInt(args[1]));
-      else console.log("Provide count");
-  } else {
-      console.log("Unknown command");
-  }
-  } // end else (args.length > 0)
+  await runScenario();
 }

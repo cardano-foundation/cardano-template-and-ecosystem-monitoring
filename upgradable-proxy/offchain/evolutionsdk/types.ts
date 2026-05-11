@@ -1,3 +1,5 @@
+// Plutus data schemas for the upgradable proxy datum + its v1/v2 logic
+// withdrawal redeemers.
 import { Data } from '@evolution-sdk/lucid';
 
 const ProxyDatumSchema = Data.Object({
