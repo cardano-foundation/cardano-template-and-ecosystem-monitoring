@@ -1,11 +1,11 @@
 {
-  "lastUpdated": "2026-05-08T09:25:14Z",
+  "lastUpdated": "2026-05-11T06:21:25Z",
   "testSummary": {
-    "total": 76,
-    "passed": 76,
+    "total": 0,
+    "passed": 0,
     "failed": 0,
     "skipped": 0,
-    "successRate": 1.00
+    "successRate": 0
   },
   "frameworks": [
     {
@@ -29,141 +29,7 @@
       "kind": "offchain"
     }
   ],
-  "useCases": [
-    {
-      "name": "anonymous-data",
-      "aiken": "passed",
-      "ccl-java": "passed",
-      "meshjs": "passed",
-      "evolutionsdk": "passed"
-    },
-    {
-      "name": "atomic-transaction",
-      "aiken": "passed",
-      "ccl-java": "passed",
-      "meshjs": "passed",
-      "evolutionsdk": "passed"
-    },
-    {
-      "name": "auction",
-      "aiken": "passed",
-      "ccl-java": "passed",
-      "meshjs": "passed",
-      "evolutionsdk": "passed"
-    },
-    {
-      "name": "bet",
-      "aiken": "passed",
-      "ccl-java": "passed",
-      "meshjs": "passed",
-      "evolutionsdk": "passed"
-    },
-    {
-      "name": "crowdfund",
-      "aiken": "passed",
-      "ccl-java": "passed",
-      "meshjs": "passed",
-      "evolutionsdk": "passed"
-    },
-    {
-      "name": "decentralized-identity",
-      "aiken": "passed",
-      "ccl-java": "passed",
-      "meshjs": "passed",
-      "evolutionsdk": "passed"
-    },
-    {
-      "name": "escrow",
-      "aiken": "passed",
-      "ccl-java": "passed",
-      "meshjs": "passed",
-      "evolutionsdk": "passed"
-    },
-    {
-      "name": "factory",
-      "aiken": "passed",
-      "ccl-java": "passed",
-      "meshjs": "passed",
-      "evolutionsdk": "passed"
-    },
-    {
-      "name": "htlc",
-      "aiken": "passed",
-      "ccl-java": "passed",
-      "meshjs": "passed",
-      "evolutionsdk": "passed"
-    },
-    {
-      "name": "lottery",
-      "aiken": "passed",
-      "ccl-java": "passed",
-      "meshjs": "passed",
-      "evolutionsdk": "passed"
-    },
-    {
-      "name": "payment-splitter",
-      "aiken": "passed",
-      "ccl-java": "passed",
-      "meshjs": "passed",
-      "evolutionsdk": "passed"
-    },
-    {
-      "name": "pricebet",
-      "aiken": "passed",
-      "ccl-java": "passed",
-      "meshjs": "passed",
-      "evolutionsdk": "passed"
-    },
-    {
-      "name": "simple-transfer",
-      "aiken": "passed",
-      "ccl-java": "passed",
-      "meshjs": "passed",
-      "evolutionsdk": "passed"
-    },
-    {
-      "name": "simple-wallet",
-      "aiken": "passed",
-      "ccl-java": "passed",
-      "meshjs": "passed",
-      "evolutionsdk": "passed"
-    },
-    {
-      "name": "storage",
-      "aiken": "passed",
-      "ccl-java": "passed",
-      "meshjs": "passed",
-      "evolutionsdk": "passed"
-    },
-    {
-      "name": "token-transfer",
-      "aiken": "passed",
-      "ccl-java": "passed",
-      "meshjs": "passed",
-      "evolutionsdk": "passed"
-    },
-    {
-      "name": "upgradable-proxy",
-      "aiken": "passed",
-      "ccl-java": "passed",
-      "meshjs": "passed",
-      "evolutionsdk": "passed"
-    },
-    {
-      "name": "vault",
-      "aiken": "passed",
-      "ccl-java": "passed",
-      "meshjs": "passed",
-      "evolutionsdk": "passed"
-    },
-    {
-      "name": "vesting",
-      "aiken": "passed",
-      "ccl-java": "passed",
-      "meshjs": "passed",
-      "evolutionsdk": "passed"
-    }
-  ],
+  "useCases": [],
   "versions": {
     "current": {
       "aiken-compiler": "v1.1.21",
