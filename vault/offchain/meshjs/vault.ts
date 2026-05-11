@@ -1,395 +1,281 @@
 import {
-  MeshWallet,
+  BlockfrostProvider,
   MeshTxBuilder,
-  KoiosProvider,
-  deserializeAddress,
+  MeshWallet,
+  builtinByteString,
+  deserializeDatum,
+  integer,
   mConStr0,
   mConStr1,
   mConStr2,
-  resolvePlutusScriptAddress,
-  deserializeDatum,
-  mConStr,
+  resolvePaymentKeyHash,
+  serializePlutusScript,
+  type UTxO,
 } from "@meshsdk/core";
-import { applyParamsToScript } from "@meshsdk/core-cst";
+import { applyParamsToScript } from "@meshsdk/core-csl";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
-const PREPROD_SYSTEM_START = 1655683200000; // ms
-const SLOT_LENGTH = 1000; // ms
+// ----------------------------------------------------------------------------
+// Vault — Mesh.js targeting yaci-devkit.
+// Validator params (owner_vkh, wait_time_ms).
+// Spend redeemers: WITHDRAW | FINALIZE | CANCEL. Scenario exercises ALL three.
+// ----------------------------------------------------------------------------
 
-function getSlotFromTime(timeVal: number): number {
-    return Math.floor((timeVal - PREPROD_SYSTEM_START) / SLOT_LENGTH);
+const YACI_URL = "http://localhost:8080/api/v1";
+const NETWORK = "preprod";
+const NETWORK_ID = 0;
+const WAIT_TIME_MS = 10_000;
+const FUNDER_MNEMONIC =
+  "test test test test test test test test test test test test test test test test test test test test test test test sauce";
+
+function provider(): BlockfrostProvider {
+  return new BlockfrostProvider(YACI_URL);
+}
+function makeWallet(words: string[]): MeshWallet {
+  const p = provider();
+  return new MeshWallet({
+    networkId: NETWORK_ID,
+    fetcher: p,
+    submitter: p,
+    key: { type: "mnemonic", words },
+  });
+}
+function funderWallet(): MeshWallet {
+  return makeWallet(FUNDER_MNEMONIC.split(/\s+/));
 }
 
-function getTimeFromSlot(slot: number): number {
-    return (slot * SLOT_LENGTH) + PREPROD_SYSTEM_START;
+async function yaciTipSlot(): Promise<number> {
+  return (await fetch(`${YACI_URL}/blocks/latest`).then((r) => r.json())).slot;
+}
+async function yaciSystemStartSec(): Promise<number> {
+  const block = await fetch(`${YACI_URL}/blocks/latest`).then((r) => r.json());
+  return block.time - block.slot + 600;
+}
+function slotToMs(slot: number, systemStartSec: number): number {
+  return (systemStartSec + slot) * 1000;
 }
 
-export const setup = async (walletName: string | number = 0) => {
-  const provider = new KoiosProvider("preprod");
-  
-  let prefix = "";
-  try {
-    await Deno.stat("vault/offchain/meshjs");
-    prefix = "vault/offchain/meshjs/";
-  } catch {
-    prefix = "";
+async function waitForUtxoAt(addr: string, minCount = 1, timeoutSec = 60) {
+  const p = provider();
+  for (let i = 0; i < timeoutSec; i++) {
+    try {
+      const u = await p.fetchAddressUTxOs(addr);
+      if (u.length >= minCount) return;
+    } catch { /* transient */ }
+    await new Promise((r) => setTimeout(r, 1000));
   }
-
-  const fileName = typeof walletName === 'number' 
-      ? `${prefix}wallet_${walletName}.txt`
-      : `${prefix}${walletName}`;
-  let wallet;
-  try {
-    const mnemonic = await Deno.readTextFile(fileName);
-    wallet = new MeshWallet({
-      networkId: 0,
-      fetcher: provider,
-      submitter: provider,
-      key: {
-        type: "mnemonic",
-        words: mnemonic.trim().split(" "),
-      },
-    });
-  } catch (_e) {
-    console.log("No wallet found, generating new one...");
-    const mnemonic = MeshWallet.brew();
-    await Deno.writeTextFile(fileName, Array.isArray(mnemonic) ? mnemonic.join(" ") : mnemonic);
-    wallet = new MeshWallet({
-    networkId: 0,
-    fetcher: provider,
-    submitter: provider,
-    key: {
-        type: "mnemonic",
-        words: Array.isArray(mnemonic) ? mnemonic : mnemonic.split(" "),
-    },
-    });
-    console.log(`Generated ${fileName}. Send some tADA to: ` + (await wallet.getUnusedAddresses())[0]);
-  }
-  return { provider, wallet };
-};
-
-export class MeshVaultContract {
-  provider: KoiosProvider;
-  wallet: MeshWallet;
-  scriptCbor!: string;
-  scriptAddress!: string;
-  waitTime: number;
-
-  constructor(provider: KoiosProvider, wallet: MeshWallet, waitTime: number = 60000) { // Default 60s
-    this.provider = provider;
-    this.wallet = wallet;
-    this.waitTime = waitTime;
-  }
-
-  async initContract() {
-     const address = (await this.wallet.getUnusedAddresses())[0];
-     const { pubKeyHash } = deserializeAddress(address);
-     
-     this.scriptCbor = applyParamsToScript(blueprint.validators[0].compiledCode, [
-        pubKeyHash,
-        BigInt(this.waitTime)
-     ]);
-     
-     this.scriptAddress = resolvePlutusScriptAddress({
-        code: this.scriptCbor,
-        version: "V3"
-     }, 0);
-  }
-
-  async getUtxos() {
-    return await this.provider.fetchAddressUTxOs(this.scriptAddress);
-  }
-
-  async getNetworkSlot(): Promise<number> {
-      try {
-        const res = await fetch('https://preprod.koios.rest/api/v1/tip');
-        const data = await res.json();
-        return Number(data[0].abs_slot);
-      } catch (e) {
-          console.error("Failed to fetch tip:", e);
-          // Fallback to time-based (risky if time skewed)
-          return getSlotFromTime(Date.now());
-      }
-  }
-
-  async lock(amount: string, infinite = true) {
-    const utxos = await this.wallet.getUtxos();
-    console.log("LOCK DEBUG: Available UTxOs:", utxos.length);
-    utxos.forEach(u => console.log(`- ${u.input.txHash}#${u.input.outputIndex} : ${u.output.amount[0].quantity}`));
-
-    await this.initContract();
-    const address = (await this.wallet.getUnusedAddresses())[0];
-    const txBuilder = new MeshTxBuilder({ fetcher: this.provider, submitter: this.provider });
-    
-    // If infinite, set to 100 years. If not, set to NOW (Chain Time)
-    let lockTime;
-    if (infinite) {
-        lockTime = Date.now() + 3153600000000;
-    } else {
-        const slot = await this.getNetworkSlot();
-        console.log("DEBUG: Network Slot:", slot);
-        lockTime = getTimeFromSlot(slot) - 100000; // 100s in past
-        console.log("DEBUG: Calculated LockTime:", lockTime);
-    }
-    const datum = mConStr0([lockTime]);
-
-    await txBuilder
-      .txOut(this.scriptAddress, [{ unit: "lovelace", quantity: amount }])
-      .txOutInlineDatumValue(datum)
-      .changeAddress(address)
-      .selectUtxosFrom(await this.wallet.getUtxos())
-      .complete();
-      
-    const signedTx = await this.wallet.signTx(txBuilder.txHex);
-    const txHash = await this.wallet.submitTx(signedTx);
-    return txHash;
-  }
-
-  async withdraw(utxoHash: string) {
-    await this.initContract();
-    const address = (await this.wallet.getUnusedAddresses())[0];
-    const txBuilder = new MeshTxBuilder({ fetcher: this.provider, submitter: this.provider });
-    
-    const utxos = await this.getUtxos();
-    console.log("Available UTxOs in withdraw:", utxos.map(u => u.input.txHash));
-    const utxoToSpend = utxos.find(u => u.input.txHash === utxoHash);
-    if (!utxoToSpend) throw new Error("UTxO not found");
-
-    // Calculate slot from current time
-    // Use network slot to align time
-    const networkSlot = await this.getNetworkSlot();
-    const slot = networkSlot - 1000; // Buffer for node lag
-    const lockTime = getTimeFromSlot(slot - 200); // Lock time slightly in past to pass valid_after check
-
-    // const lockTime = 1000; // Fixed old time
-    const datum = mConStr0([lockTime]);
-    
-    // Auto-setup collateral
-    const collateral = (await this.wallet.getCollateral())[0];
-    if (collateral) {
-        txBuilder.txInCollateral(
-            collateral.input.txHash,
-            collateral.input.outputIndex,
-            collateral.output.amount,
-            collateral.output.address
-        );
-    }
-    
-    txBuilder
-      .spendingPlutusScript("V3")
-      .txIn(
-         utxoToSpend.input.txHash,
-         utxoToSpend.input.outputIndex,
-         utxoToSpend.output.amount,
-         this.scriptAddress
-      );
-
-    if (utxoToSpend.output.plutusData) {
-        txBuilder.txInInlineDatumPresent();
-    }
-
-    await txBuilder
-      // Removed txInInlineDatumPresent because input from Cancel has NoDatum
-      .txInScript(this.scriptCbor)
-      .txInRedeemerValue(mConStr0([])) // redeemer: Action.WITHDRAW (Index 0)
-      
-      .txOut(this.scriptAddress, utxoToSpend.output.amount) // Send back value
-      .txOutInlineDatumValue(datum)
-      
-      .requiredSignerHash(deserializeAddress(address).pubKeyHash)
-      .changeAddress(address)
-      .selectUtxosFrom(await this.wallet.getUtxos())
-      .invalidBefore(slot) 
-      .complete();
-
-    const signedTx = await this.wallet.signTx(txBuilder.txHex);
-    const txHash = await this.wallet.submitTx(signedTx);
-    return txHash;
-  }
-
-  async finalize(utxoHash: string) {
-    await this.initContract();
-    const address = (await this.wallet.getUnusedAddresses())[0];
-    const txBuilder = new MeshTxBuilder({ fetcher: this.provider, submitter: this.provider });
-    
-    const utxos = await this.getUtxos();
-    const utxoToSpend = utxos.find(u => u.input.txHash === utxoHash);
-    if (!utxoToSpend) throw new Error("UTxO not found");
-
-    // We can only spend if valid_after(range, waitTime + lock_time)
-    const datum = deserializeDatum(utxoToSpend.output.plutusData!);
-    const lockTime = Number(datum.fields[0].int);
-    
-    const validAfter = lockTime + this.waitTime;
-    const validAfterSlot = getSlotFromTime(validAfter);
-    
-    console.log("DEBUG: LockTime from Datum:", lockTime);
-    console.log("DEBUG: ValidAfter Time:", validAfter);
-    console.log("DEBUG: ValidAfter Slot:", validAfterSlot);
-    const currentSlot = await this.getNetworkSlot();
-    const currentTime = getTimeFromSlot(currentSlot);
-
-    if (currentTime < validAfter) {
-         const diff = validAfter - currentTime;
-         console.log(`Too early! Waiting ${(diff/1000).toFixed(1)}s until ${new Date(validAfter).toISOString()}...`);
-         await new Promise(r => setTimeout(r, diff + 1000));
-         console.log("Resuming...");
-    }
-
-    const collateral = (await this.wallet.getCollateral())[0];
-    if (collateral) {
-        txBuilder.txInCollateral(
-            collateral.input.txHash,
-            collateral.input.outputIndex,
-            collateral.output.amount,
-            collateral.output.address
-        );
-    }
-
-    await txBuilder
-      .spendingPlutusScript("V3")
-      .txIn(
-         utxoToSpend.input.txHash,
-         utxoToSpend.input.outputIndex,
-         utxoToSpend.output.amount,
-         this.scriptAddress
-      )
-      .txInInlineDatumPresent()
-      .txInScript(this.scriptCbor)
-      .txInRedeemerValue(mConStr1([])) // redeemer: Action.FINALIZE (Index 1)
-      
-      .requiredSignerHash(deserializeAddress(address).pubKeyHash)
-      .changeAddress(address)
-      .selectUtxosFrom(await this.wallet.getUtxos())
-      .invalidBefore(validAfterSlot + 1)
-      .complete();
-
-    const signedTx = await this.wallet.signTx(txBuilder.txHex);
-    const txHash = await this.wallet.submitTx(signedTx);
-    return txHash;
-  }
-
-  async cancel(utxoHash: string) {
-    await this.initContract();
-    const address = (await this.wallet.getUnusedAddresses())[0];
-    const txBuilder = new MeshTxBuilder({ fetcher: this.provider, submitter: this.provider });
-    
-    const utxos = await this.getUtxos();
-    const utxoToSpend = utxos.find(u => u.input.txHash === utxoHash);
-    if (!utxoToSpend) throw new Error("UTxO not found");
-
-    const collateral = (await this.wallet.getCollateral())[0];
-    if (collateral) {
-        txBuilder.txInCollateral(
-            collateral.input.txHash,
-            collateral.input.outputIndex,
-            collateral.output.amount,
-            collateral.output.address
-        );
-    }
-
-    txBuilder
-      .spendingPlutusScript("V3")
-      .txIn(
-         utxoToSpend.input.txHash,
-         utxoToSpend.input.outputIndex,
-         utxoToSpend.output.amount,
-         this.scriptAddress
-      );
-
-    if (utxoToSpend.output.plutusData) {
-        txBuilder.txInInlineDatumPresent();
-    }
-
-    await txBuilder
-      .txInScript(this.scriptCbor)
-      .txInRedeemerValue(mConStr2([])) // redeemer: Action.CANCEL (Index 2)
-      
-      .txOut(this.scriptAddress, utxoToSpend.output.amount)
-      // No datum (reset)
-      
-      .requiredSignerHash(deserializeAddress(address).pubKeyHash)
-      .changeAddress(address)
-      .selectUtxosFrom(await this.wallet.getUtxos())
-      .complete();
-
-    const signedTx = await this.wallet.signTx(txBuilder.txHex);
-    const txHash = await this.wallet.submitTx(signedTx);
-    return txHash;
-  }
+  throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${addr}`);
 }
 
-const isPositiveNumber = (s: string) => Number.isInteger(Number(s)) && Number(s) > 0;
+async function findScriptUtxo(scriptAddr: string, initTxHash: string): Promise<UTxO> {
+  for (let i = 0; i < 60; i++) {
+    const utxos = await provider().fetchAddressUTxOs(scriptAddr);
+    const u = utxos.find((x) => x.input.txHash === initTxHash);
+    if (u) return u;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  throw new Error(`UTxO ${initTxHash} not found at ${scriptAddr}`);
+}
+
+async function fundFromFunder(targetAddr: string, lovelace: bigint) {
+  const wallet = funderWallet();
+  const myAddr = await wallet.getChangeAddress();
+  const myUtxos = await provider().fetchAddressUTxOs(myAddr);
+  const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
+    .setNetwork(NETWORK);
+  await tx
+    .txOut(targetAddr, [{ unit: "lovelace", quantity: lovelace.toString() }])
+    .changeAddress(myAddr)
+    .selectUtxosFrom(myUtxos)
+    .complete();
+  const signed = await wallet.signTx(tx.txHex);
+  const txHash = await wallet.submitTx(signed);
+  console.log(`Funded ${targetAddr.slice(0, 20)}… with ${lovelace} lovelace. tx=${txHash}`);
+  await waitForUtxoAt(targetAddr, 1);
+}
+
+function loadScript(ownerVkh: string) {
+  const compiled = blueprint.validators[0].compiledCode;
+  const script = applyParamsToScript(
+    compiled,
+    [builtinByteString(ownerVkh), integer(WAIT_TIME_MS)],
+    "JSON",
+  );
+  const { address: scriptAddress } = serializePlutusScript(
+    { code: script, version: "V3" },
+    undefined,
+    NETWORK_ID,
+  );
+  return { script, scriptAddress };
+}
+
+async function lock(owner: MeshWallet, ownerVkh: string, amount: bigint, infinite: boolean): Promise<string> {
+  const ownerAddr = await owner.getChangeAddress();
+  const { scriptAddress } = loadScript(ownerVkh);
+  const lockTimeMs = infinite ? Date.now() + 365 * 24 * 60 * 60 * 1000 : Date.now() - 60_000;
+  const datum = mConStr0([lockTimeMs]);
+  const utxos = await provider().fetchAddressUTxOs(ownerAddr);
+  const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
+    .setNetwork(NETWORK);
+  await tx
+    .txOut(scriptAddress, [{ unit: "lovelace", quantity: amount.toString() }])
+    .txOutInlineDatumValue(datum)
+    .changeAddress(ownerAddr)
+    .selectUtxosFrom(utxos)
+    .complete();
+  const signed = await owner.signTx(tx.txHex);
+  const txHash = await owner.submitTx(signed);
+  console.log(`LOCK${infinite ? " (infinite)" : " (withdrawable)"} ok. tx=${txHash}`);
+  return txHash;
+}
+
+async function withdraw(owner: MeshWallet, ownerVkh: string, initTx: string): Promise<string> {
+  const ownerAddr = await owner.getChangeAddress();
+  const { script, scriptAddress } = loadScript(ownerVkh);
+  const utxo = await findScriptUtxo(scriptAddress, initTx);
+
+  const systemStartSec = await yaciSystemStartSec();
+  const tipSlot = await yaciTipSlot();
+  const validFromSlot = tipSlot - 5;
+  const lockTimeMs = slotToMs(validFromSlot - 5, systemStartSec);
+  const newDatum = mConStr0([lockTimeMs]);
+  const lovelaceAmount = utxo.output.amount.find((a) => a.unit === "lovelace")!.quantity;
+  const ownUtxos = await provider().fetchAddressUTxOs(ownerAddr);
+  const collateral: UTxO[] = await owner.getCollateral();
+
+  const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
+    .setNetwork(NETWORK);
+  await tx
+    .spendingPlutusScriptV3()
+    .txIn(utxo.input.txHash, utxo.input.outputIndex, utxo.output.amount, scriptAddress)
+    .txInScript(script)
+    .txInRedeemerValue(mConStr0([]))
+    .txInInlineDatumPresent()
+    .txOut(scriptAddress, [{ unit: "lovelace", quantity: lovelaceAmount }])
+    .txOutInlineDatumValue(newDatum)
+    .txInCollateral(
+      collateral[0].input.txHash,
+      collateral[0].input.outputIndex,
+      collateral[0].output.amount,
+      collateral[0].output.address,
+    )
+    .requiredSignerHash(ownerVkh)
+    .invalidBefore(validFromSlot)
+    .invalidHereafter(tipSlot + 60)
+    .changeAddress(ownerAddr)
+    .selectUtxosFrom(ownUtxos)
+    .complete();
+  const signed = await owner.signTx(tx.txHex);
+  const txHash = await owner.submitTx(signed);
+  console.log(`WITHDRAW ok. new lockTime=${lockTimeMs} tx=${txHash}`);
+  return txHash;
+}
+
+async function finalize(owner: MeshWallet, ownerVkh: string, withdrawTx: string): Promise<string> {
+  const ownerAddr = await owner.getChangeAddress();
+  const { script, scriptAddress } = loadScript(ownerVkh);
+  const utxo = await findScriptUtxo(scriptAddress, withdrawTx);
+  if (!utxo.output.plutusData) throw new Error("No datum");
+  const datum = deserializeDatum(utxo.output.plutusData);
+  const lockTimeMs = Number(datum.fields[0].int);
+  const validAfterMs = lockTimeMs + WAIT_TIME_MS;
+
+  const systemStartSec = await yaciSystemStartSec();
+  const validAfterSlot = Math.floor(validAfterMs / 1000) - systemStartSec;
+  for (let i = 0; i < 300; i++) {
+    const tip = await yaciTipSlot();
+    if (tip > validAfterSlot) break;
+    if (i % 10 === 0) console.log(`Waiting for chain slot ${tip} → ${validAfterSlot}…`);
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  const tipSlot = await yaciTipSlot();
+  const validFromSlot = Math.max(validAfterSlot + 1, tipSlot - 5);
+
+  const ownUtxos = await provider().fetchAddressUTxOs(ownerAddr);
+  const collateral: UTxO[] = await owner.getCollateral();
+  const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
+    .setNetwork(NETWORK);
+  await tx
+    .spendingPlutusScriptV3()
+    .txIn(utxo.input.txHash, utxo.input.outputIndex, utxo.output.amount, scriptAddress)
+    .txInScript(script)
+    .txInRedeemerValue(mConStr1([]))
+    .txInInlineDatumPresent()
+    .txInCollateral(
+      collateral[0].input.txHash,
+      collateral[0].input.outputIndex,
+      collateral[0].output.amount,
+      collateral[0].output.address,
+    )
+    .requiredSignerHash(ownerVkh)
+    .invalidBefore(validFromSlot)
+    .invalidHereafter(validFromSlot + 60)
+    .changeAddress(ownerAddr)
+    .selectUtxosFrom(ownUtxos)
+    .complete();
+  const signed = await owner.signTx(tx.txHex);
+  const txHash = await owner.submitTx(signed);
+  console.log(`FINALIZE ok. tx=${txHash}`);
+  return txHash;
+}
+
+async function cancel(owner: MeshWallet, ownerVkh: string, withdrawTx: string): Promise<string> {
+  const ownerAddr = await owner.getChangeAddress();
+  const { script, scriptAddress } = loadScript(ownerVkh);
+  const utxo = await findScriptUtxo(scriptAddress, withdrawTx);
+  const lovelaceAmount = utxo.output.amount.find((a) => a.unit === "lovelace")!.quantity;
+  const ownUtxos = await provider().fetchAddressUTxOs(ownerAddr);
+  const collateral: UTxO[] = await owner.getCollateral();
+  const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
+    .setNetwork(NETWORK);
+  await tx
+    .spendingPlutusScriptV3()
+    .txIn(utxo.input.txHash, utxo.input.outputIndex, utxo.output.amount, scriptAddress)
+    .txInScript(script)
+    .txInRedeemerValue(mConStr2([]))
+    .txInInlineDatumPresent()
+    // CANCEL: output back to script without a datum.
+    .txOut(scriptAddress, [{ unit: "lovelace", quantity: lovelaceAmount }])
+    .txInCollateral(
+      collateral[0].input.txHash,
+      collateral[0].input.outputIndex,
+      collateral[0].output.amount,
+      collateral[0].output.address,
+    )
+    .requiredSignerHash(ownerVkh)
+    .changeAddress(ownerAddr)
+    .selectUtxosFrom(ownUtxos)
+    .complete();
+  const signed = await owner.signTx(tx.txHex);
+  const txHash = await owner.submitTx(signed);
+  console.log(`CANCEL ok. tx=${txHash}`);
+  return txHash;
+}
+
+async function runScenario() {
+  console.log("=== vault scenario: lock×2 → withdraw → cancel ; withdraw → finalize ===");
+  const owner = makeWallet(MeshWallet.brew(false) as string[]);
+  const ownerAddr = await owner.getChangeAddress();
+  await fundFromFunder(ownerAddr, 50_000_000n);
+  const ownerVkh = resolvePaymentKeyHash(ownerAddr);
+
+  const txA = await lock(owner, ownerVkh, 8_000_000n, true);
+  await new Promise((r) => setTimeout(r, 2000));
+  const txB = await lock(owner, ownerVkh, 6_000_000n, true);
+  await new Promise((r) => setTimeout(r, 2000));
+
+  const txA2 = await withdraw(owner, ownerVkh, txA);
+  await new Promise((r) => setTimeout(r, 2000));
+  await cancel(owner, ownerVkh, txA2);
+  await new Promise((r) => setTimeout(r, 2000));
+
+  const txB2 = await withdraw(owner, ownerVkh, txB);
+  await new Promise((r) => setTimeout(r, 2000));
+  await finalize(owner, ownerVkh, txB2);
+
+  console.log("=== Scenario complete ===");
+}
 
 if (import.meta.main) {
-  if (Deno.args.length > 0) {
-    if (Deno.args[0] === 'init') {
-        const { provider, wallet } = await setup();
-        const contract = new MeshVaultContract(provider, wallet);
-        await contract.initContract();
-        console.log(`Vault Script Address: ${contract.scriptAddress}`);
-    } else
-    if (Deno.args[0] === 'lock') {
-      if (Deno.args.length > 1 && isPositiveNumber(Deno.args[1])) {
-        const { provider, wallet } = await setup();
-        const contract = new MeshVaultContract(provider, wallet);
-        const tx = await contract.lock(Deno.args[1], true);
-        console.log(`Locked ${Deno.args[1]} lovelace (Infinite). Tx: ${tx}`);
-      } else {
-        console.log('Expected a positive number (lovelace amount) as the second argument.');
-      } 
-    } else
-    if (Deno.args[0] === 'lock-withdrawable') {
-      if (Deno.args.length > 1 && isPositiveNumber(Deno.args[1])) {
-        const { provider, wallet } = await setup();
-        const contract = new MeshVaultContract(provider, wallet);
-        const tx = await contract.lock(Deno.args[1], false);
-        console.log(`Locked ${Deno.args[1]} lovelace (Withdrawable). Tx: ${tx}`);
-      } else {
-        console.log('Expected a positive number (lovelace amount) as the second argument.');
-      } 
-    } else if (Deno.args[0] === 'withdraw') {
-      if (Deno.args.length > 1) {
-        const { provider, wallet } = await setup();
-        const contract = new MeshVaultContract(provider, wallet);
-        const tx = await contract.withdraw(Deno.args[1]);
-        console.log(`Withdraw requested. Tx: ${tx}`);
-      } else {
-        console.log('Expected transaction hash/id as the second argument.');
-      }
-    } else if (Deno.args[0] === 'finalize') {
-         if (Deno.args.length > 1) {
-            const { provider, wallet } = await setup();
-            const contract = new MeshVaultContract(provider, wallet);
-            const tx = await contract.finalize(Deno.args[1]);
-            if (tx) console.log(`Withdraw finalized! Tx: ${tx}`);
-          } else {
-            console.log('Expected transaction hash/id as the second argument.');
-          }
-    } else if (Deno.args[0] === 'cancel') {
-          if (Deno.args.length > 1) {
-            const { provider, wallet } = await setup();
-            const contract = new MeshVaultContract(provider, wallet);
-            const tx = await contract.cancel(Deno.args[1]);
-            console.log(`Canceled. Tx: ${tx}`);
-          } else {
-            console.log('Expected transaction hash/id as the second argument.');
-          }
-    } else if (Deno.args[0] === 'prepare') {
-      if (Deno.args.length > 1 && isPositiveNumber(Deno.args[1])) {
-        const amount = parseInt(Deno.args[1]);
-        for (let i = 0; i < amount; i++) {
-           await setup(i); // This handles generation
-        }
-        console.log(`Prepared ${amount} wallets.`);
-      } else {
-        console.log('Expected a positive number (of seed phrases to prepare) as the second argument.');
-      }    
-    } else {
-      console.log('Invalid argument. Allowed arguments: init, lock, withdraw, finalize, cancel, prepare.');
-    }
-  } else {
-    console.log('Expected an argument. Allowed arguments: init, lock, withdraw, finalize, cancel, prepare.');
-  }
+  await runScenario();
 }
-

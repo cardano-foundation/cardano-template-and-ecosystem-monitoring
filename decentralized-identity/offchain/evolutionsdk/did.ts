@@ -1,316 +1,254 @@
 import {
+  Lucid,
+  Blockfrost,
   Constr,
   Data,
-  getAddressDetails,
-  Koios,
-  Lucid,
-  LucidEvolution,
-  validatorToAddress,
-  Validator,
   generateSeedPhrase,
+  getAddressDetails,
+  validatorToAddress,
+  type LucidEvolution,
+  type Validator,
 } from "@evolution-sdk/lucid";
-
+import { SLOT_CONFIG_NETWORK } from "@evolution-sdk/plutus";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
+
+// ----------------------------------------------------------------------------
+// DID — Evolution SDK targeting yaci-devkit.
+// Scenario: init → AddDelegate → RemoveDelegate → TransferOwner.
+// ----------------------------------------------------------------------------
+
+const YACI_URL = "http://localhost:8080/api/v1";
+const NETWORK = "Preview" as const;
+const TEST_MNEMONIC =
+  "test test test test test test test test test test test test test test test test test test test test test test test sauce";
+const ERA_OFFSET_SECONDS = 600;
 
 const DelegateSchema = Data.Object({
   key: Data.Bytes(),
   expires: Data.Integer(),
 });
-
-type Delegate = Data.Static<typeof DelegateSchema>;
-const Delegate = DelegateSchema as unknown as Delegate;
-
 const IdentityDatumSchema = Data.Object({
   owner: Data.Bytes(),
   delegates: Data.Array(DelegateSchema),
 });
-
 type IdentityDatum = Data.Static<typeof IdentityDatumSchema>;
 const IdentityDatum = IdentityDatumSchema as unknown as IdentityDatum;
 
-const NETWORK = "Preprod" as const;
-const KOIOS_URL = "https://preprod.koios.rest/api/v1";
-
-function selectWallet(lucid: LucidEvolution, filename: string) {
-  const mnemonic = Deno.readTextFileSync(filename);
-  lucid.selectWallet.fromSeed(mnemonic);
+async function alignSlotConfig() {
+  const block = await fetch(`${YACI_URL}/blocks/latest`).then((r) => r.json());
+  const zeroTime = (block.time - block.slot + ERA_OFFSET_SECONDS) * 1000;
+  SLOT_CONFIG_NETWORK.Preview.zeroTime = zeroTime;
+  SLOT_CONFIG_NETWORK.Preview.zeroSlot = 0;
+  SLOT_CONFIG_NETWORK.Preview.slotLength = 1000;
 }
 
-function getPaymentKeyHash(address: string) {
-  const details = getAddressDetails(address);
-  if (!details.paymentCredential) {
-    throw new Error("Address has no payment credential.");
+async function lucidAt(accountIndex: number): Promise<LucidEvolution> {
+  const lucid = await Lucid(new Blockfrost(YACI_URL, "Dummy Key"), NETWORK);
+  lucid.selectWallet.fromSeed(TEST_MNEMONIC, { accountIndex });
+  return lucid;
+}
+async function lucidFromSeed(seed: string): Promise<LucidEvolution> {
+  const lucid = await Lucid(new Blockfrost(YACI_URL, "Dummy Key"), NETWORK);
+  lucid.selectWallet.fromSeed(seed);
+  return lucid;
+}
+
+async function yaciTipSlot(): Promise<number> {
+  return (await fetch(`${YACI_URL}/blocks/latest`).then((r) => r.json())).slot;
+}
+function slotToMs(slot: number): number {
+  const cfg = SLOT_CONFIG_NETWORK.Preview;
+  return cfg.zeroTime + (slot - cfg.zeroSlot) * cfg.slotLength;
+}
+
+async function waitForUtxosAt(
+  lucid: LucidEvolution,
+  address: string,
+  minCount: number,
+  timeoutSec = 60,
+) {
+  for (let i = 0; i < timeoutSec; i++) {
+    try {
+      const u = await lucid.utxosAt(address);
+      if (u.length >= minCount) return;
+    } catch { /* transient */ }
+    await new Promise((r) => setTimeout(r, 1000));
   }
-  return details.paymentCredential.hash;
+  throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${address}`);
 }
 
-async function setup() {
-  const lucid = await Lucid(new Koios(KOIOS_URL), NETWORK);
-  const validatorEntry = blueprint.validators.find((v) => v.title === "identity");
-  if (!validatorEntry) {
-    throw new Error("Could not find identity validator in plutus.json.");
-  }
-
-  const validator: Validator = {
-    type: "PlutusV3",
-    script: validatorEntry.compiledCode,
-  };
-
-  const scriptAddress = validatorToAddress(NETWORK, validator);
-
-  return { lucid, validator, scriptAddress };
+async function fundFromIndex0(targetAddress: string, lovelace: bigint) {
+  const lucid = await lucidAt(0);
+  const tx = await lucid.newTx().pay.ToAddress(targetAddress, { lovelace }).complete();
+  const signed = await tx.sign.withWallet().complete();
+  const txHash = await signed.submit();
+  console.log(`Funded ${targetAddress.slice(0, 20)}… with ${lovelace} lovelace. tx=${txHash}`);
+  await waitForUtxosAt(lucid, targetAddress, 1, 60);
+  await new Promise((r) => setTimeout(r, 2000));
 }
 
-async function prepare() {
-  const lucid = await Lucid(new Koios(KOIOS_URL), NETWORK);
-
-  const ownerMnemonic = generateSeedPhrase();
-  lucid.selectWallet.fromSeed(ownerMnemonic);
-  const ownerAddress = await lucid.wallet().address();
-  Deno.writeTextFileSync("wallet_owner.txt", ownerMnemonic);
-
-  const delegateMnemonic = generateSeedPhrase();
-  lucid.selectWallet.fromSeed(delegateMnemonic);
-  const delegateAddress = await lucid.wallet().address();
-  Deno.writeTextFileSync("wallet_delegate.txt", delegateMnemonic);
-
-  console.log("Created owner and delegate wallets.");
-  console.log(`Owner address: ${ownerAddress}`);
-  console.log(`Delegate address: ${delegateAddress}`);
-  console.log("Fund the owner address with tADA before running init.");
+function setup() {
+  const v = blueprint.validators.find((x) => x.title === "identity.identity.spend");
+  if (!v) throw new Error("Validator not found");
+  const validator: Validator = { type: "PlutusV3", script: v.compiledCode };
+  return { validator, scriptAddress: validatorToAddress(NETWORK, validator) };
 }
 
-async function initIdentity(lovelaceAmount: string) {
-  const { lucid, scriptAddress } = await setup();
-  selectWallet(lucid, "wallet_owner.txt");
+async function init(owner: LucidEvolution, lovelace: bigint): Promise<string> {
+  const { scriptAddress } = setup();
+  const ownerAddr = await owner.wallet().address();
+  const ownerVkh = getAddressDetails(ownerAddr).paymentCredential!.hash;
+  const datum = Data.to({ owner: ownerVkh, delegates: [] }, IdentityDatum);
 
-  const ownerAddress = await lucid.wallet().address();
-  const ownerKeyHash = getPaymentKeyHash(ownerAddress);
-
-  const datum = Data.to(
-    {
-      owner: ownerKeyHash,
-      delegates: [],
-    },
-    IdentityDatum,
-  );
-
-  const tx = await lucid
+  const tx = await owner
     .newTx()
-    .pay.ToContract(
-      scriptAddress,
-      { kind: "inline", value: datum },
-      { lovelace: BigInt(lovelaceAmount) },
-    )
-    .addSigner(ownerAddress);
-
-  const unsignedTx = await tx.complete();
-  const signedTx = await unsignedTx.sign.withWallet();
-  const txHash = await (await signedTx.complete()).submit();
-
-  console.log(`Identity created at ${scriptAddress}`);
-  console.log(`Tx: ${txHash}`);
+    .pay.ToContract(scriptAddress, { kind: "inline", value: datum }, { lovelace })
+    .complete();
+  const signed = await tx.sign.withWallet().complete();
+  const txHash = await signed.submit();
+  console.log(`INIT ok. tx=${txHash}`);
+  return txHash;
 }
 
-async function loadIdentity(txHash: string, outputIndex: number) {
-  const { lucid, validator, scriptAddress } = await setup();
-  const utxos = await lucid.utxosByOutRef([{ txHash, outputIndex }]);
-  if (utxos.length === 0) {
-    throw new Error("No UTxO found for the provided reference.");
+async function loadIdentity(lucid: LucidEvolution, txHash: string) {
+  for (let i = 0; i < 60; i++) {
+    try {
+      const utxos = await lucid.utxosByOutRef([{ txHash, outputIndex: 0 }]);
+      if (utxos.length > 0 && utxos[0].datum) {
+        const state = Data.from(utxos[0].datum, IdentityDatum) as unknown as IdentityDatum;
+        return { utxo: utxos[0], state };
+      }
+    } catch { /* transient */ }
+    await new Promise((r) => setTimeout(r, 1000));
   }
-
-  const utxo = utxos[0];
-  if (!utxo.datum) {
-    throw new Error("UTxO has no datum.");
-  }
-
-  const state = Data.from(utxo.datum, IdentityDatum);
-  return { lucid, validator, scriptAddress, utxo, state };
+  throw new Error(`Identity UTxO ${txHash}#0 not found`);
 }
 
-async function addDelegate(txHash: string, outputIndex: number, expiresMs: string) {
-  const { lucid, validator, scriptAddress, utxo, state } = await loadIdentity(
-    txHash,
-    outputIndex,
-  );
-
-  selectWallet(lucid, "wallet_owner.txt");
-  const ownerAddress = await lucid.wallet().address();
-
-  selectWallet(lucid, "wallet_delegate.txt");
-  const delegateAddress = await lucid.wallet().address();
-  const delegateKeyHash = getPaymentKeyHash(delegateAddress);
-
-  selectWallet(lucid, "wallet_owner.txt");
-  const expires = BigInt(expiresMs);
-  if (expires <= BigInt(Date.now())) {
-    throw new Error("Expiry must be a future unix timestamp in milliseconds.");
-  }
-
-  if (state.delegates.some((d) => d.key === delegateKeyHash)) {
-    throw new Error("Delegate already exists in the datum.");
-  }
-
-  const updated: IdentityDatum = {
+async function addDelegate(
+  owner: LucidEvolution,
+  delegateVkh: string,
+  expiresMs: bigint,
+  prevTxHash: string,
+): Promise<string> {
+  const { validator, scriptAddress } = setup();
+  const { utxo, state } = await loadIdentity(owner, prevTxHash);
+  const updated = {
     owner: state.owner,
-    delegates: [...state.delegates, { key: delegateKeyHash, expires }],
+    delegates: [...state.delegates, { key: delegateVkh, expires: expiresMs }],
   };
+  const redeemer = Data.to(new Constr(1, [delegateVkh, expiresMs]));
 
-  const redeemer = Data.to(new Constr(1, [delegateKeyHash, expires]));
+  const cfg = SLOT_CONFIG_NETWORK.Preview;
+  const expiresSlot = Math.floor((Number(expiresMs) - cfg.zeroTime) / cfg.slotLength) + cfg.zeroSlot;
+  const tipSlot = await yaciTipSlot();
+  const validToSlot = Math.min(tipSlot + 10, expiresSlot - 5);
 
-  const tx = await lucid
+  const tx = await owner
     .newTx()
-    .attachSpendingValidator(validator)
+    .attach.SpendingValidator(validator)
     .collectFrom([utxo], redeemer)
     .pay.ToContract(
       scriptAddress,
       { kind: "inline", value: Data.to(updated, IdentityDatum) },
       utxo.assets,
     )
-    .addSigner(ownerAddress)
-    .validTo(Number(expires - 1_000n));
-
-  const unsignedTx = await tx.complete();
-  const signedTx = await unsignedTx.sign.withWallet();
-  const submitHash = await (await signedTx.complete()).submit();
-
-  console.log(`Delegate added. Tx: ${submitHash}`);
+    .addSigner(await owner.wallet().address())
+    .validFrom(slotToMs(tipSlot - 5))
+    .validTo(slotToMs(validToSlot))
+    .complete();
+  const signed = await tx.sign.withWallet().complete();
+  const txHash = await signed.submit();
+  console.log(`ADD_DELEGATE ok. tx=${txHash}`);
+  return txHash;
 }
 
-async function removeDelegate(txHash: string, outputIndex: number) {
-  const { lucid, validator, scriptAddress, utxo, state } = await loadIdentity(
-    txHash,
-    outputIndex,
-  );
-
-  selectWallet(lucid, "wallet_owner.txt");
-  const ownerAddress = await lucid.wallet().address();
-
-  selectWallet(lucid, "wallet_delegate.txt");
-  const delegateAddress = await lucid.wallet().address();
-  const delegateKeyHash = getPaymentKeyHash(delegateAddress);
-
-  selectWallet(lucid, "wallet_owner.txt");
-
-  if (!state.delegates.some((d) => d.key === delegateKeyHash)) {
-    throw new Error("Delegate not present in the datum.");
-  }
-
-  const updated: IdentityDatum = {
+async function removeDelegate(
+  owner: LucidEvolution,
+  delegateVkh: string,
+  prevTxHash: string,
+): Promise<string> {
+  const { validator, scriptAddress } = setup();
+  const { utxo, state } = await loadIdentity(owner, prevTxHash);
+  const updated = {
     owner: state.owner,
-    delegates: state.delegates.filter((d) => d.key !== delegateKeyHash),
+    delegates: state.delegates.filter((d) => d.key !== delegateVkh),
   };
+  const redeemer = Data.to(new Constr(2, [delegateVkh]));
 
-  const redeemer = Data.to(new Constr(2, [delegateKeyHash]));
-
-  const tx = await lucid
+  const tx = await owner
     .newTx()
-    .attachSpendingValidator(validator)
+    .attach.SpendingValidator(validator)
     .collectFrom([utxo], redeemer)
     .pay.ToContract(
       scriptAddress,
       { kind: "inline", value: Data.to(updated, IdentityDatum) },
       utxo.assets,
     )
-    .addSigner(ownerAddress);
-
-  const unsignedTx = await tx.complete();
-  const signedTx = await unsignedTx.sign.withWallet();
-  const submitHash = await (await signedTx.complete()).submit();
-
-  console.log(`Delegate removed. Tx: ${submitHash}`);
+    .addSigner(await owner.wallet().address())
+    .complete();
+  const signed = await tx.sign.withWallet().complete();
+  const txHash = await signed.submit();
+  console.log(`REMOVE_DELEGATE ok. tx=${txHash}`);
+  return txHash;
 }
 
 async function transferOwner(
-  txHash: string,
-  outputIndex: number,
-  newOwnerAddress: string,
-) {
-  const { lucid, validator, scriptAddress, utxo, state } = await loadIdentity(
-    txHash,
-    outputIndex,
-  );
+  currentOwner: LucidEvolution,
+  newOwnerVkh: string,
+  prevTxHash: string,
+): Promise<string> {
+  const { validator, scriptAddress } = setup();
+  const { utxo, state } = await loadIdentity(currentOwner, prevTxHash);
+  const updated = { owner: newOwnerVkh, delegates: state.delegates };
+  const redeemer = Data.to(new Constr(0, [newOwnerVkh]));
 
-  selectWallet(lucid, "wallet_owner.txt");
-  const ownerAddress = await lucid.wallet().address();
-
-  const newOwnerKeyHash = getPaymentKeyHash(newOwnerAddress);
-
-  const updated: IdentityDatum = {
-    owner: newOwnerKeyHash,
-    delegates: state.delegates,
-  };
-
-  const redeemer = Data.to(new Constr(0, [newOwnerKeyHash]));
-
-  const tx = await lucid
+  const tx = await currentOwner
     .newTx()
-    .attachSpendingValidator(validator)
+    .attach.SpendingValidator(validator)
     .collectFrom([utxo], redeemer)
     .pay.ToContract(
       scriptAddress,
       { kind: "inline", value: Data.to(updated, IdentityDatum) },
       utxo.assets,
     )
-    .addSigner(ownerAddress);
-
-  const unsignedTx = await tx.complete();
-  const signedTx = await unsignedTx.sign.withWallet();
-  const submitHash = await (await signedTx.complete()).submit();
-
-  console.log(`Owner transferred. Tx: ${submitHash}`);
+    .addSigner(await currentOwner.wallet().address())
+    .complete();
+  const signed = await tx.sign.withWallet().complete();
+  const txHash = await signed.submit();
+  console.log(`TRANSFER_OWNER ok. tx=${txHash}`);
+  return txHash;
 }
 
-async function showIdentity(txHash: string, outputIndex: number) {
-  const { state } = await loadIdentity(txHash, outputIndex);
-  console.log(JSON.stringify(state, null, 2));
+async function runScenario() {
+  console.log("=== did scenario: init → add-delegate → remove-delegate → transfer-owner ===");
+  await alignSlotConfig();
+
+  // Fresh owner & delegate & new-owner wallets.
+  const ownerSeed = generateSeedPhrase();
+  const owner = await lucidFromSeed(ownerSeed);
+  const ownerAddr = await owner.wallet().address();
+  await fundFromIndex0(ownerAddr, 30_000_000n);
+
+  const delegate = await lucidAt(1);
+  const delegateVkh = getAddressDetails(await delegate.wallet().address()).paymentCredential!.hash;
+  const newOwner = await lucidAt(2);
+  const newOwnerVkh = getAddressDetails(await newOwner.wallet().address()).paymentCredential!.hash;
+
+  const initTx = await init(owner, 3_000_000n);
+  await new Promise((r) => setTimeout(r, 2000));
+
+  const expiresMs = BigInt(Date.now() + 24 * 60 * 60 * 1000);
+  const addTx = await addDelegate(owner, delegateVkh, expiresMs, initTx);
+  await new Promise((r) => setTimeout(r, 2000));
+
+  const remTx = await removeDelegate(owner, delegateVkh, addTx);
+  await new Promise((r) => setTimeout(r, 2000));
+
+  await transferOwner(owner, newOwnerVkh, remTx);
+
+  console.log("=== Scenario complete ===");
 }
 
-const [command, ...args] = Deno.args;
-
-try {
-  if (command === "prepare") {
-    await prepare();
-  } else if (command === "init") {
-    const [lovelaceAmount] = args;
-    if (!lovelaceAmount) throw new Error("Provide lovelace amount.");
-    await initIdentity(lovelaceAmount);
-  } else if (command === "add-delegate") {
-    const [txHash, outputIndex, expiresMs] = args;
-    if (!txHash || !outputIndex || !expiresMs) {
-      throw new Error("Usage: add-delegate <txHash> <outputIndex> <expiresMs>");
-    }
-    await addDelegate(txHash, Number(outputIndex), expiresMs);
-  } else if (command === "remove-delegate") {
-    const [txHash, outputIndex] = args;
-    if (!txHash || !outputIndex) {
-      throw new Error("Usage: remove-delegate <txHash> <outputIndex>");
-    }
-    await removeDelegate(txHash, Number(outputIndex));
-  } else if (command === "transfer-owner") {
-    const [txHash, outputIndex, newOwnerAddress] = args;
-    if (!txHash || !outputIndex || !newOwnerAddress) {
-      throw new Error(
-        "Usage: transfer-owner <txHash> <outputIndex> <newOwnerAddress>",
-      );
-    }
-    await transferOwner(txHash, Number(outputIndex), newOwnerAddress);
-  } else if (command === "show") {
-    const [txHash, outputIndex] = args;
-    if (!txHash || !outputIndex) {
-      throw new Error("Usage: show <txHash> <outputIndex>");
-    }
-    await showIdentity(txHash, Number(outputIndex));
-  } else {
-    console.log("Commands:");
-    console.log("  prepare");
-    console.log("  init <lovelaceAmount>");
-    console.log("  add-delegate <txHash> <outputIndex> <expiresMs>");
-    console.log("  remove-delegate <txHash> <outputIndex>");
-    console.log("  transfer-owner <txHash> <outputIndex> <newOwnerAddress>");
-    console.log("  show <txHash> <outputIndex>");
-  }
-} catch (error) {
-  console.error(error instanceof Error ? error.message : error);
-  Deno.exit(1);
+if (import.meta.main) {
+  await runScenario();
 }

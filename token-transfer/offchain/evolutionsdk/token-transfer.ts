@@ -1,8 +1,7 @@
 import {
   Lucid,
-  Koios,
+  Blockfrost,
   applyParamsToScript,
-  Constr,
   Data,
   fromText,
   generateSeedPhrase,
@@ -16,96 +15,95 @@ import {
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
 // ----------------------------------------------------------------------------
-// Token-transfer — Evolution SDK port.
-//
-// Validator parameters: (receiver: VKH, policy: PolicyId, assetName: ByteArray)
-// Spend rule: spending a UTxO with assets under `policy` and name `assetName`
-//             succeeds iff (a) outputs sent to *other* addresses contain only
-//             that exact asset, and (b) `receiver` is in extra_signatories.
-// Mint policy: an always-true PlutusV3 script (cborHex 46450101002499).
-//
-// Happy path: prepare wallet → mint TestAsset → lock at script with unit datum
-//             → unlock back to receiver.
+// Token-transfer — Evolution SDK targeting yaci-devkit.
+// Mint TestAsset → lock at script → unlock back to receiver.
 // ----------------------------------------------------------------------------
 
-const KOIOS_URL = "https://preprod.koios.rest/api/v1";
+const YACI_URL = "http://localhost:8080/api/v1";
+const NETWORK = "Preprod" as const;
+const TEST_MNEMONIC =
+  "test test test test test test test test test test test test test test test test test test test test test test test sauce";
 const ASSET_NAME = "TestAsset";
+const ALWAYS_TRUE_SCRIPT: Script = { type: "PlutusV3", script: "46450101002499" };
 
-// Always-succeeds PlutusV3 minting policy (matches the CCL Java reference).
-const ALWAYS_TRUE_SCRIPT: Script = {
-  type: "PlutusV3",
-  script: "46450101002499",
-};
-
-function selectWallet(lucid: LucidEvolution, fileName = "wallet.txt") {
-  const mnemonic = Deno.readTextFileSync(fileName).trim();
-  lucid.selectWallet.fromSeed(mnemonic);
+async function lucidAt(accountIndex: number): Promise<LucidEvolution> {
+  const lucid = await Lucid(new Blockfrost(YACI_URL, "Dummy Key"), NETWORK);
+  lucid.selectWallet.fromSeed(TEST_MNEMONIC, { accountIndex });
+  return lucid;
 }
 
-async function prepare() {
-  const fileName = "wallet.txt";
-  try {
-    await Deno.stat(fileName);
-    console.log(`${fileName} already exists, skipping.`);
-    return;
-  } catch { /* not found, generate */ }
-
-  const mnemonic = generateSeedPhrase();
-  await Deno.writeTextFile(fileName, mnemonic);
-  const lucid = await Lucid(new Koios(KOIOS_URL), "Preprod");
-  lucid.selectWallet.fromSeed(mnemonic);
-  console.log(`Generated ${fileName}. Address: ${await lucid.wallet().address()}`);
+async function lucidFromSeed(seed: string): Promise<LucidEvolution> {
+  const lucid = await Lucid(new Blockfrost(YACI_URL, "Dummy Key"), NETWORK);
+  lucid.selectWallet.fromSeed(seed);
+  return lucid;
 }
 
-function loadValidator(receiverVkh: string, policyId: string): {
-  validator: Script;
-  scriptAddress: string;
-} {
-  const compiledCode = blueprint.validators[0].compiledCode;
-  const script = applyParamsToScript(compiledCode, [
+async function waitForUtxosAt(
+  lucid: LucidEvolution,
+  address: string,
+  minCount: number,
+  timeoutSec = 60,
+) {
+  for (let i = 0; i < timeoutSec; i++) {
+    try {
+      const u = await lucid.utxosAt(address);
+      if (u.length >= minCount) return;
+    } catch { /* transient */ }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${address}`);
+}
+
+async function fundFromIndex0(targetAddress: string, lovelace: bigint) {
+  const lucid = await lucidAt(0);
+  const tx = await lucid.newTx().pay.ToAddress(targetAddress, { lovelace }).complete();
+  const signed = await tx.sign.withWallet().complete();
+  const txHash = await signed.submit();
+  console.log(`Funded ${targetAddress.slice(0, 20)}… with ${lovelace} lovelace. tx=${txHash}`);
+  await waitForUtxosAt(lucid, targetAddress, 1, 60);
+}
+
+function loadValidator(receiverVkh: string, policyId: string) {
+  const script = applyParamsToScript(blueprint.validators[0].compiledCode, [
     receiverVkh,
     policyId,
     fromText(ASSET_NAME),
   ]);
   const validator: Script = { type: "PlutusV3", script };
-  const scriptAddress = validatorToAddress("Preprod", validator);
-  return { validator, scriptAddress };
+  return { validator, scriptAddress: validatorToAddress(NETWORK, validator) };
 }
 
-async function mint() {
-  const lucid = await Lucid(new Koios(KOIOS_URL), "Preprod");
-  selectWallet(lucid);
+async function mint(lucid: LucidEvolution): Promise<string> {
   const myAddr = await lucid.wallet().address();
   const policyId = mintingPolicyToId(ALWAYS_TRUE_SCRIPT);
   const unit = policyId + fromText(ASSET_NAME);
-
   const tx = await lucid
     .newTx()
     .mintAssets({ [unit]: 10n }, Data.void())
     .attach.MintingPolicy(ALWAYS_TRUE_SCRIPT)
     .pay.ToAddress(myAddr, { [unit]: 10n })
     .complete();
-
   const signed = await tx.sign.withWallet().complete();
   const txHash = await signed.submit();
-  console.log(`Mint submitted. Tx: ${txHash}`);
-  console.log(`Asset unit: ${unit}`);
+  console.log(`MINT ok. unit=${unit.slice(0, 24)}… tx=${txHash}`);
+  return unit;
 }
 
-async function lock() {
-  const lucid = await Lucid(new Koios(KOIOS_URL), "Preprod");
-  selectWallet(lucid);
+async function lock(lucid: LucidEvolution, unit: string): Promise<string> {
   const myAddr = await lucid.wallet().address();
   const myVkh = getAddressDetails(myAddr).paymentCredential!.hash;
   const policyId = validatorToScriptHash(ALWAYS_TRUE_SCRIPT);
-  const unit = policyId + fromText(ASSET_NAME);
-
   const { scriptAddress } = loadValidator(myVkh, policyId);
 
-  const utxos = await lucid.utxosAtWithUnit(myAddr, unit);
-  if (utxos.length === 0) throw new Error("No UTxO with the minted asset found in wallet");
-  const tokenUtxo = utxos[0];
-  const tokenAmount = tokenUtxo.assets[unit];
+  // Wait for the mint UTxO to appear in the wallet.
+  let tokenUtxos: Awaited<ReturnType<LucidEvolution["utxosAtWithUnit"]>> = [];
+  for (let i = 0; i < 60; i++) {
+    tokenUtxos = await lucid.utxosAtWithUnit(myAddr, unit);
+    if (tokenUtxos.length > 0) break;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  if (tokenUtxos.length === 0) throw new Error("No UTxO with the minted asset found");
+  const tokenAmount = tokenUtxos[0].assets[unit];
 
   const tx = await lucid
     .newTx()
@@ -115,62 +113,59 @@ async function lock() {
       { [unit]: tokenAmount },
     )
     .complete();
-
   const signed = await tx.sign.withWallet().complete();
   const txHash = await signed.submit();
-  console.log(`Lock submitted. Tx: ${txHash}`);
-  console.log(`Script address: ${scriptAddress}`);
+  console.log(`LOCK ok. amount=${tokenAmount} → ${scriptAddress.slice(0, 20)}… tx=${txHash}`);
+  return scriptAddress;
 }
 
-async function unlock() {
-  const lucid = await Lucid(new Koios(KOIOS_URL), "Preprod");
-  selectWallet(lucid);
+async function unlock(lucid: LucidEvolution) {
   const myAddr = await lucid.wallet().address();
   const myVkh = getAddressDetails(myAddr).paymentCredential!.hash;
   const policyId = validatorToScriptHash(ALWAYS_TRUE_SCRIPT);
   const unit = policyId + fromText(ASSET_NAME);
-
   const { validator, scriptAddress } = loadValidator(myVkh, policyId);
 
-  const scriptUtxos = await lucid.utxosAt(scriptAddress);
-  const utxo = scriptUtxos.find((u) => u.assets[unit] !== undefined);
-  if (!utxo) throw new Error("No script UTxO holding the asset found");
-
-  // Send the locked asset back to the receiver. ADA flows to change.
+  // Wait for the locked UTxO to appear at the script.
+  let utxo: { assets: Record<string, bigint> } | undefined;
+  for (let i = 0; i < 60; i++) {
+    const utxos = await lucid.utxosAt(scriptAddress);
+    utxo = utxos.find((u) => u.assets[unit] !== undefined) as never;
+    if (utxo) break;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  if (!utxo) throw new Error("No script UTxO holding the asset");
   const tokenAmount = utxo.assets[unit];
 
   const tx = await lucid
     .newTx()
-    .collectFrom([utxo], Data.void())
+    .collectFrom([utxo as never], Data.void())
     .attach.SpendingValidator(validator)
     .pay.ToAddress(myAddr, { [unit]: tokenAmount })
     .addSigner(myAddr)
     .complete();
-
   const signed = await tx.sign.withWallet().complete();
   const txHash = await signed.submit();
-  console.log(`Unlock submitted. Tx: ${txHash}`);
+  console.log(`UNLOCK ok. tx=${txHash}`);
+}
+
+async function runScenario() {
+  console.log("=== token-transfer scenario: mint → lock → unlock ===");
+  // Fresh wallet — funder (account 0) may have stale tokens from previous test
+  // runs, which would taint the unlock change output and violate the validator.
+  const seed = generateSeedPhrase();
+  const lucid = await lucidFromSeed(seed);
+  const addr = await lucid.wallet().address();
+  await fundFromIndex0(addr, 30_000_000n);
+
+  const unit = await mint(lucid);
+  await new Promise((r) => setTimeout(r, 2000));
+  await lock(lucid, unit);
+  await new Promise((r) => setTimeout(r, 2000));
+  await unlock(lucid);
+  console.log("=== Scenario complete ===");
 }
 
 if (import.meta.main) {
-  const [cmd] = Deno.args;
-  if (!cmd) {
-    console.log(
-      "Usage:\n" +
-        "  prepare              # generate wallet.txt seed phrase\n" +
-        "  mint                 # mint 10 TestAsset to your wallet\n" +
-        "  lock                 # lock the minted asset at the script\n" +
-        "  unlock               # unlock the asset back to your wallet\n",
-    );
-  } else if (cmd === "prepare") {
-    await prepare();
-  } else if (cmd === "mint") {
-    await mint();
-  } else if (cmd === "lock") {
-    await lock();
-  } else if (cmd === "unlock") {
-    await unlock();
-  } else {
-    console.log("Unknown command");
-  }
+  await runScenario();
 }

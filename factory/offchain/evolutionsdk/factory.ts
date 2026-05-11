@@ -1,13 +1,13 @@
 import {
   Lucid,
-  Koios,
-  applyParamsToScript,
+  Blockfrost,
   Constr,
   Data,
+  applyParamsToScript,
   fromText,
-  toText,
   generateSeedPhrase,
   paymentCredentialOf,
+  toText,
   validatorToAddress,
   validatorToScriptHash,
   type LucidEvolution,
@@ -17,46 +17,53 @@ import {
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
 // ----------------------------------------------------------------------------
-// Factory — Evolution SDK port.
-//
-// 3 validators with chained parameters:
-//   factory_marker (mint)   params: (owner_pkh, seed_outref)
-//   factory        (spend)  params: (owner_pkh, factory_marker_policy_id)
-//   product        (mint+spend) params: (owner_pkh, factory_marker_policy_id, product_id)
-//
-// Operations:
-//   prepare         generate wallet.json
-//   create-factory  one-shot: mint FACTORY_MARKER, lock at factory script with empty registry
-//   create-product  spend factory UTxO, mint product NFT, append policy to registry,
-//                   create product UTxO at product address with tag datum
-//   get-factory     show factory state
-//   get-products    list registered product policies
-//   get-tag         read a product's tag
+// Factory — Evolution SDK targeting yaci-devkit.
+// 3 validators (factory_marker mint, factory spend, product mint+spend).
+// Scenario: create-factory → create-product (twice with different IDs).
 // ----------------------------------------------------------------------------
 
-const KOIOS_URL = "https://preprod.koios.rest/api/v1";
+const YACI_URL = "http://localhost:8080/api/v1";
+const NETWORK = "Preprod" as const;
+const TEST_MNEMONIC =
+  "test test test test test test test test test test test test test test test test test test test test test test test sauce";
 const FACTORY_MARKER_NAME = "FACTORY_MARKER";
 
-function selectWallet(lucid: LucidEvolution, fileName = "wallet.json") {
-  const mnemonic = JSON.parse(Deno.readTextFileSync(fileName));
-  lucid.selectWallet.fromSeed(
-    Array.isArray(mnemonic) ? mnemonic.join(" ") : mnemonic,
-  );
+async function lucidAt(accountIndex: number): Promise<LucidEvolution> {
+  const lucid = await Lucid(new Blockfrost(YACI_URL, "Dummy Key"), NETWORK);
+  lucid.selectWallet.fromSeed(TEST_MNEMONIC, { accountIndex });
+  return lucid;
 }
 
-async function prepare() {
-  const fileName = "wallet.json";
-  try {
-    await Deno.stat(fileName);
-    console.log(`${fileName} already exists, skipping.`);
-    return;
-  } catch { /* not found */ }
+async function lucidFromSeed(seed: string): Promise<LucidEvolution> {
+  const lucid = await Lucid(new Blockfrost(YACI_URL, "Dummy Key"), NETWORK);
+  lucid.selectWallet.fromSeed(seed);
+  return lucid;
+}
 
-  const mnemonic = generateSeedPhrase();
-  await Deno.writeTextFile(fileName, JSON.stringify(mnemonic.split(" ")));
-  const lucid = await Lucid(new Koios(KOIOS_URL), "Preprod");
-  lucid.selectWallet.fromSeed(mnemonic);
-  console.log(`Generated ${fileName}. Address: ${await lucid.wallet().address()}`);
+async function waitForUtxosAt(
+  lucid: LucidEvolution,
+  address: string,
+  minCount: number,
+  timeoutSec = 60,
+) {
+  for (let i = 0; i < timeoutSec; i++) {
+    try {
+      const u = await lucid.utxosAt(address);
+      if (u.length >= minCount) return;
+    } catch { /* transient */ }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${address}`);
+}
+
+async function fundFromIndex0(targetAddress: string, lovelace: bigint) {
+  const lucid = await lucidAt(0);
+  const tx = await lucid.newTx().pay.ToAddress(targetAddress, { lovelace }).complete();
+  const signed = await tx.sign.withWallet().complete();
+  const txHash = await signed.submit();
+  console.log(`Funded ${targetAddress.slice(0, 20)}… with ${lovelace} lovelace. tx=${txHash}`);
+  await waitForUtxosAt(lucid, targetAddress, 1, 60);
+  await new Promise((r) => setTimeout(r, 2000));
 }
 
 function getValidator(prefix: string): string {
@@ -66,7 +73,6 @@ function getValidator(prefix: string): string {
 }
 
 function buildOutputReference(txHash: string, idx: number): Constr<Data> {
-  // Aiken OutputReference is `Constr 0 [tx_hash_bytes, idx]`.
   return new Constr(0, [txHash, BigInt(idx)]);
 }
 
@@ -79,15 +85,17 @@ function getFactoryMarkerScript(ownerPkh: string, seedUtxo: UTxO): Script {
     ]),
   };
 }
-
 function getFactoryScript(ownerPkh: string, markerPolicyId: string): Script {
   return {
     type: "PlutusV3",
     script: applyParamsToScript(getValidator("factory."), [ownerPkh, markerPolicyId]),
   };
 }
-
-function getProductScript(ownerPkh: string, markerPolicyId: string, productId: string): Script {
+function getProductScript(
+  ownerPkh: string,
+  markerPolicyId: string,
+  productId: string,
+): Script {
   return {
     type: "PlutusV3",
     script: applyParamsToScript(getValidator("product"), [
@@ -98,12 +106,9 @@ function getProductScript(ownerPkh: string, markerPolicyId: string, productId: s
   };
 }
 
-export async function createFactory() {
-  const lucid = await Lucid(new Koios(KOIOS_URL), "Preprod");
-  selectWallet(lucid);
+async function createFactory(lucid: LucidEvolution): Promise<string> {
   const ownerAddr = await lucid.wallet().address();
   const ownerPkh = paymentCredentialOf(ownerAddr).hash;
-
   const utxos = await lucid.utxosAt(ownerAddr);
   if (utxos.length === 0) throw new Error("No wallet UTxOs");
   const seedUtxo = utxos[0];
@@ -111,16 +116,13 @@ export async function createFactory() {
   const markerScript = getFactoryMarkerScript(ownerPkh, seedUtxo);
   const markerPolicyId = validatorToScriptHash(markerScript);
   const factoryScript = getFactoryScript(ownerPkh, markerPolicyId);
-  const factoryAddr = validatorToAddress("Preprod", factoryScript);
-
+  const factoryAddr = validatorToAddress(NETWORK, factoryScript);
   const markerUnit = markerPolicyId + fromText(FACTORY_MARKER_NAME);
-  // FactoryDatum = Constr 0 [ List<PolicyId> ] starting empty.
   const initialDatum = Data.to(new Constr(0, [[]]));
 
   const tx = await lucid
     .newTx()
     .collectFrom([seedUtxo])
-    // Mint redeemer is unused by validator; supply unit.
     .mintAssets({ [markerUnit]: 1n }, Data.void())
     .attach.MintingPolicy(markerScript)
     .pay.ToContract(
@@ -130,31 +132,24 @@ export async function createFactory() {
     )
     .addSigner(ownerAddr)
     .complete();
-
   const signed = await tx.sign.withWallet().complete();
   const txHash = await signed.submit();
-
-  console.log("Factory created");
-  console.log("Owner PKH:", ownerPkh);
-  console.log("Factory address:", factoryAddr);
-  console.log("Factory marker policy:", markerPolicyId);
-  console.log("Tx:", txHash);
+  console.log(`CREATE_FACTORY ok. policy=${markerPolicyId.slice(0, 16)}… tx=${txHash}`);
+  return markerPolicyId;
 }
 
-export async function createProduct(
+async function createProduct(
+  lucid: LucidEvolution,
   markerPolicyId: string,
   productId: string,
   tag: string,
 ) {
-  const lucid = await Lucid(new Koios(KOIOS_URL), "Preprod");
-  selectWallet(lucid);
   const ownerAddr = await lucid.wallet().address();
   const ownerPkh = paymentCredentialOf(ownerAddr).hash;
-
   const factoryScript = getFactoryScript(ownerPkh, markerPolicyId);
-  const factoryAddr = validatorToAddress("Preprod", factoryScript);
+  const factoryAddr = validatorToAddress(NETWORK, factoryScript);
   const productScript = getProductScript(ownerPkh, markerPolicyId, productId);
-  const productAddr = validatorToAddress("Preprod", productScript);
+  const productAddr = validatorToAddress(NETWORK, productScript);
   const productPolicyId = validatorToScriptHash(productScript);
 
   const factoryUtxos = await lucid.utxosAt(factoryAddr);
@@ -163,19 +158,14 @@ export async function createProduct(
 
   const markerUnit = markerPolicyId + fromText(FACTORY_MARKER_NAME);
   const productUnit = productPolicyId + fromText(productId);
-
-  // Updated factory datum: append the new product policy to the registry.
   const existingDatum = Data.from(factoryUtxo.datum!) as Constr<Data>;
   const existingPolicies = (existingDatum.fields[0] as Data[]) ?? [];
-  const newRegistry = [...existingPolicies, productPolicyId];
-  const updatedFactoryDatum = Data.to(new Constr(0, [newRegistry]));
-
-  // Spend redeemer for factory: Constr 0 [productPolicyId, productId].
+  const updatedFactoryDatum = Data.to(
+    new Constr(0, [[...existingPolicies, productPolicyId]]),
+  );
   const spendRedeemer = Data.to(
     new Constr(0, [productPolicyId, fromText(productId)]),
   );
-
-  // Product datum: Constr 0 [tag].
   const productDatum = Data.to(new Constr(0, [fromText(tag)]));
 
   const tx = await lucid
@@ -196,123 +186,46 @@ export async function createProduct(
     )
     .addSigner(ownerAddr)
     .complete();
-
   const signed = await tx.sign.withWallet().complete();
   const txHash = await signed.submit();
-
-  console.log("Product created");
-  console.log("Product address:", productAddr);
-  console.log("Product policy:", productPolicyId);
-  console.log("Tx:", txHash);
+  console.log(`CREATE_PRODUCT ok. id=${productId} tx=${txHash}`);
 }
 
-export async function getFactory(markerPolicyId: string) {
-  const lucid = await Lucid(new Koios(KOIOS_URL), "Preprod");
-  selectWallet(lucid);
-  const ownerPkh = paymentCredentialOf(await lucid.wallet().address()).hash;
-
-  const factoryScript = getFactoryScript(ownerPkh, markerPolicyId);
-  const factoryAddr = validatorToAddress("Preprod", factoryScript);
-  const factoryHash = validatorToScriptHash(factoryScript);
-
-  const utxos = await lucid.utxosAt(factoryAddr);
-
-  console.log("--- Factory status ---");
-  console.log("Owner PKH:", ownerPkh);
-  console.log("Factory marker policy:", markerPolicyId);
-  console.log("Factory script hash:", factoryHash);
-  console.log("Factory address:", factoryAddr);
-  console.log("Factory created:", utxos.length > 0);
-}
-
-export async function getProducts(markerPolicyId: string) {
-  const lucid = await Lucid(new Koios(KOIOS_URL), "Preprod");
-  selectWallet(lucid);
-  const ownerPkh = paymentCredentialOf(await lucid.wallet().address()).hash;
-  const factoryScript = getFactoryScript(ownerPkh, markerPolicyId);
-  const factoryAddr = validatorToAddress("Preprod", factoryScript);
-
-  const utxos = await lucid.utxosAt(factoryAddr);
-  const stateUtxo = utxos.find((u) => u.datum);
-  if (!stateUtxo) throw new Error("Factory state UTxO not found");
-
-  const decoded = Data.from(stateUtxo.datum!) as Constr<Data>;
-  const policies = decoded.fields[0] as string[];
-  console.log("Factory product policy IDs:", policies);
-
-  // For each policy, query Koios for assets minted under it.
-  const allProducts: Array<{ productId: string; policyId: string; fingerprint: string }> = [];
-  for (const policyId of policies) {
-    const url = `${KOIOS_URL}/policy_asset_list?_asset_policy=${policyId}`;
-    const response = await fetch(url, { headers: { accept: "application/json" } });
-    if (!response.ok) throw new Error(`Koios error: ${response.statusText}`);
-    const assets = await response.json();
-    for (const asset of assets) {
-      allProducts.push({
-        productId: toText(asset.asset_name),
-        policyId,
-        fingerprint: asset.fingerprint,
-      });
-    }
-  }
-  console.log("Products fetched:", allProducts);
-  return allProducts;
-}
-
-export async function getTag(markerPolicyId: string, productId: string) {
-  const lucid = await Lucid(new Koios(KOIOS_URL), "Preprod");
-  selectWallet(lucid);
+async function getProductTag(
+  lucid: LucidEvolution,
+  markerPolicyId: string,
+  productId: string,
+) {
   const ownerPkh = paymentCredentialOf(await lucid.wallet().address()).hash;
   const productScript = getProductScript(ownerPkh, markerPolicyId, productId);
-  const productAddr = validatorToAddress("Preprod", productScript);
-
+  const productAddr = validatorToAddress(NETWORK, productScript);
   const utxos = await lucid.utxosAt(productAddr);
   const stateUtxo = utxos.find((u) => u.datum);
   if (!stateUtxo) throw new Error("Product UTxO not found");
-
   const decoded = Data.from(stateUtxo.datum!) as Constr<Data>;
   const tag = toText(decoded.fields[0] as string);
-  console.log("--- Product details ---");
-  console.log("Product ID:", productId);
-  console.log("Product policy:", validatorToScriptHash(productScript));
-  console.log("Product address:", productAddr);
-  console.log("Tag:", tag);
+  console.log(`Product ${productId} tag: ${tag}`);
+  return tag;
+}
+
+async function runScenario() {
+  console.log("=== factory scenario: create-factory → create-product × 2 → read tag ===");
+  // Use a fresh wallet so the seed UTxO is clean.
+  const seed = generateSeedPhrase();
+  const lucid = await lucidFromSeed(seed);
+  const ownerAddr = await lucid.wallet().address();
+  await fundFromIndex0(ownerAddr, 200_000_000n);
+
+  const markerPolicyId = await createFactory(lucid);
+  await new Promise((r) => setTimeout(r, 2000));
+  await createProduct(lucid, markerPolicyId, "widget-001", "blue");
+  await new Promise((r) => setTimeout(r, 2000));
+  await createProduct(lucid, markerPolicyId, "widget-002", "red");
+  await new Promise((r) => setTimeout(r, 2000));
+  await getProductTag(lucid, markerPolicyId, "widget-001");
+  console.log("=== Scenario complete ===");
 }
 
 if (import.meta.main) {
-  const [cmd, ...args] = Deno.args;
-  try {
-    if (cmd === "prepare") {
-      await prepare();
-    } else if (cmd === "create-factory") {
-      await createFactory();
-    } else if (cmd === "create-product") {
-      if (args.length !== 3) {
-        throw new Error("Usage: create-product <marker_policy_id> <product_id> <tag>");
-      }
-      await createProduct(args[0], args[1], args[2]);
-    } else if (cmd === "get-factory") {
-      if (args.length !== 1) throw new Error("Usage: get-factory <marker_policy_id>");
-      await getFactory(args[0]);
-    } else if (cmd === "get-products") {
-      if (args.length !== 1) throw new Error("Usage: get-products <marker_policy_id>");
-      await getProducts(args[0]);
-    } else if (cmd === "get-tag") {
-      if (args.length !== 2) throw new Error("Usage: get-tag <marker_policy_id> <product_id>");
-      await getTag(args[0], args[1]);
-    } else {
-      console.log(
-        "Usage:\n" +
-          "  prepare\n" +
-          "  create-factory\n" +
-          "  create-product <marker_policy_id> <product_id> <tag>\n" +
-          "  get-factory <marker_policy_id>\n" +
-          "  get-products <marker_policy_id>\n" +
-          "  get-tag <marker_policy_id> <product_id>\n",
-      );
-    }
-  } catch (error) {
-    console.error(error instanceof Error ? error.message : error);
-    Deno.exit(1);
-  }
+  await runScenario();
 }

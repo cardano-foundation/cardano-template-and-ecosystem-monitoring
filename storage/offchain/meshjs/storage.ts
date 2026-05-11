@@ -1,7 +1,8 @@
 import {
-  KoiosProvider,
+  BlockfrostProvider,
   MeshTxBuilder,
   MeshWallet,
+  builtinByteString,
   mConStr,
   mConStr0,
   outputReference,
@@ -14,28 +15,28 @@ import { applyParamsToScript } from "@meshsdk/core-csl";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
 // ----------------------------------------------------------------------------
-// Storage — Mesh.js port.
-//
-// Two validators:
-//   storage (spend): no parameters, ALWAYS FAILS — script UTxOs are immutable.
-//   mint    (mint):  params (seed_utxo: OutputReference, storage_validator_hash: ByteArray)
-//                    one-shot policy: requires consuming `seed_utxo`, mints exactly 1
-//                    token whose asset name = sha2_256(snapshot_id), output to storage
-//                    validator with RegistryDatum.
-//
-// Operation: publish (one-shot mint + lock).
+// Storage — Mesh.js targeting yaci-devkit.
+// One-shot mint + lock to an always-fail spend validator. Scenario publishes
+// both Daily and Monthly snapshot variants end-to-end.
 // ----------------------------------------------------------------------------
 
+const YACI_URL = "http://localhost:8080/api/v1";
 const NETWORK = "preprod";
 const NETWORK_ID = 0;
+const FUNDER_MNEMONIC =
+  "test test test test test test test test test test test test test test test test test test test test test test test sauce";
 
-function loadWallet(walletFile: string): MeshWallet {
-  const mnemonic = JSON.parse(Deno.readTextFileSync(walletFile));
+function provider(): BlockfrostProvider {
+  return new BlockfrostProvider(YACI_URL);
+}
+
+function funderWallet(): MeshWallet {
+  const p = provider();
   return new MeshWallet({
     networkId: NETWORK_ID,
-    fetcher: new KoiosProvider(NETWORK),
-    submitter: new KoiosProvider(NETWORK),
-    key: { type: "mnemonic", words: mnemonic },
+    fetcher: p,
+    submitter: p,
+    key: { type: "mnemonic", words: FUNDER_MNEMONIC.split(/\s+/) },
   });
 }
 
@@ -61,63 +62,56 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-export async function publish(
-  walletFile: string,
+async function waitForUtxoAt(addr: string, minCount = 1, timeoutSec = 60) {
+  const p = provider();
+  for (let i = 0; i < timeoutSec; i++) {
+    try {
+      const u = await p.fetchAddressUTxOs(addr);
+      if (u.length >= minCount) return;
+    } catch { /* transient */ }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${addr}`);
+}
+
+async function publish(
+  wallet: MeshWallet,
   snapshotId: string,
   kind: "daily" | "monthly",
   commitmentHexHash: string,
 ) {
-  if (commitmentHexHash.length !== 64) {
-    throw new Error("commitmentHexHash must be 32 bytes (64 hex chars)");
-  }
-
-  const wallet = loadWallet(walletFile);
-  const provider = new KoiosProvider(NETWORK);
-
   const ownerAddr = await wallet.getChangeAddress();
-  const utxos = await provider.fetchAddressUTxOs(ownerAddr);
+  const utxos = await provider().fetchAddressUTxOs(ownerAddr);
   if (utxos.length === 0) throw new Error("No wallet UTxOs available");
   const seedUtxo = utxos[0];
 
   const { storageAddress, storageHash } = getStorageInfo();
-
   const mintScript = applyParamsToScript(
     getValidator("mint."),
     [
       outputReference(seedUtxo.input.txHash, seedUtxo.input.outputIndex),
-      storageHash,
+      builtinByteString(storageHash),
     ],
     "JSON",
   );
   const policyId = resolveScriptHash(mintScript, "V3");
-
   const snapshotIdHex = stringToHex(snapshotId);
   const assetNameHex = await sha256Hex(new TextEncoder().encode(snapshotId));
   const tokenUnit = policyId + assetNameHex;
   const publishedAt = Date.now();
 
-  // SnapshotType: Constr 0 [] (Daily) | Constr 1 [] (Monthly)
   const snapshotTypeData = mConStr(kind === "daily" ? 0 : 1, []);
-
-  // RegistryDatum = Constr 0 [snapshot_id, snapshot_type, commitment_hash, published_at]
   const registryDatum = mConStr0([
     snapshotIdHex,
     snapshotTypeData,
     commitmentHexHash,
     publishedAt,
   ]);
-
-  // MintRedeemer = Constr 0 [snapshot_id, snapshot_type, commitment_hash]
   const mintRedeemer = mConStr0([snapshotIdHex, snapshotTypeData, commitmentHexHash]);
-
   const collateral: UTxO[] = await wallet.getCollateral();
 
-  const tx = new MeshTxBuilder({
-    fetcher: provider,
-    submitter: provider,
-    evaluator: provider,
-  }).setNetwork(NETWORK);
-
+  const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
+    .setNetwork(NETWORK);
   await tx
     .txIn(
       seedUtxo.input.txHash,
@@ -128,9 +122,9 @@ export async function publish(
     .mintPlutusScriptV3()
     .mint("1", policyId, assetNameHex)
     .mintingScript(mintScript)
-    .mintRedeemerValue(mintRedeemer, "JSON")
+    .mintRedeemerValue(mintRedeemer)
     .txOut(storageAddress, [{ unit: tokenUnit, quantity: "1" }])
-    .txOutInlineDatumValue(registryDatum, "JSON")
+    .txOutInlineDatumValue(registryDatum)
     .txInCollateral(
       collateral[0].input.txHash,
       collateral[0].input.outputIndex,
@@ -143,36 +137,20 @@ export async function publish(
 
   const signed = await wallet.signTx(tx.txHex);
   const txHash = await wallet.submitTx(signed);
+  console.log(`PUBLISH ${kind} ok. snapshot_id=${snapshotId} asset=${assetNameHex.slice(0, 16)}… tx=${txHash}`);
+}
 
-  console.log("Snapshot published");
-  console.log("Storage address:", storageAddress);
-  console.log("Mint policy:", policyId);
-  console.log("Asset (sha256(id)):", assetNameHex);
-  console.log("Tx:", txHash);
+async function runScenario() {
+  console.log("=== storage scenario: publish daily → publish monthly ===");
+  const wallet = funderWallet();
+  const addr = await wallet.getChangeAddress();
+  await publish(wallet, `snap-${Date.now()}-daily`, "daily", "a".repeat(64));
+  await waitForUtxoAt(addr, 1, 60);
+  await new Promise((r) => setTimeout(r, 2000));
+  await publish(wallet, `snap-${Date.now()}-monthly`, "monthly", "b".repeat(64));
+  console.log("=== Scenario complete ===");
 }
 
 if (import.meta.main) {
-  const [cmd, ...args] = Deno.args;
-  try {
-    if (cmd === "publish") {
-      if (args.length !== 4) {
-        throw new Error(
-          "Usage: publish <wallet.json> <snapshot_id> <daily|monthly> <commitment_sha256_hex>",
-        );
-      }
-      const kind = args[2] as "daily" | "monthly";
-      if (kind !== "daily" && kind !== "monthly") {
-        throw new Error('snapshot_type must be "daily" or "monthly"');
-      }
-      await publish(args[0], args[1], kind, args[3]);
-    } else {
-      console.log(
-        "Usage:\n" +
-          "  publish <wallet.json> <snapshot_id> <daily|monthly> <commitment_sha256_hex>\n",
-      );
-    }
-  } catch (error) {
-    console.error(error instanceof Error ? error.message : error);
-    Deno.exit(1);
-  }
+  await runScenario();
 }

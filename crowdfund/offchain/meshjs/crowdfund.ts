@@ -1,8 +1,10 @@
 import {
-  KoiosProvider,
+  BlockfrostProvider,
   MeshTxBuilder,
   MeshWallet,
+  builtinByteString,
   deserializeDatum,
+  integer,
   mConStr,
   mConStr0,
   resolvePaymentKeyHash,
@@ -13,31 +15,83 @@ import { applyParamsToScript } from "@meshsdk/core-csl";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
 // ----------------------------------------------------------------------------
-// Crowdfund — Mesh.js port.
-//
-// Validator parameters: (beneficiary: VKH, goal: Int, deadline: Int)
-// Datum: CrowdfundDatum { wallets: Pairs<VKH, Int> } → Constr 0 [Map<bytes, int>]
-// Redeemers: 0 DONATE, 1 WITHDRAW, 2 RECLAIM.
+// Crowdfund — Mesh.js targeting yaci-devkit.
+// Params (beneficiary_vkh, goal, deadline_ms). Datum carries a wallets map
+// (donor_vkh → lovelace contributed). Redeemers DONATE | WITHDRAW | RECLAIM
+// all exercised end-to-end.
 // ----------------------------------------------------------------------------
 
+const YACI_URL = "http://localhost:8080/api/v1";
 const NETWORK = "preprod";
 const NETWORK_ID = 0;
+const FUNDER_MNEMONIC =
+  "test test test test test test test test test test test test test test test test test test test test test test test sauce";
 
-function loadWallet(walletFile: string): MeshWallet {
-  const mnemonic = JSON.parse(Deno.readTextFileSync(walletFile));
+function provider(): BlockfrostProvider {
+  return new BlockfrostProvider(YACI_URL);
+}
+function makeWallet(words: string[]): MeshWallet {
+  const p = provider();
   return new MeshWallet({
     networkId: NETWORK_ID,
-    fetcher: new KoiosProvider(NETWORK),
-    submitter: new KoiosProvider(NETWORK),
-    key: { type: "mnemonic", words: mnemonic },
+    fetcher: p,
+    submitter: p,
+    key: { type: "mnemonic", words },
   });
+}
+function funderWallet(): MeshWallet {
+  return makeWallet(FUNDER_MNEMONIC.split(/\s+/));
+}
+
+async function yaciTipSlot(): Promise<number> {
+  return (await fetch(`${YACI_URL}/blocks/latest`).then((r) => r.json())).slot;
+}
+async function yaciSystemStartSec(): Promise<number> {
+  const block = await fetch(`${YACI_URL}/blocks/latest`).then((r) => r.json());
+  return block.time - block.slot + 600;
+}
+function slotToMs(slot: number, systemStartSec: number): number {
+  return (systemStartSec + slot) * 1000;
+}
+
+async function waitForUtxoAt(addr: string, minCount = 1, timeoutSec = 60) {
+  const p = provider();
+  for (let i = 0; i < timeoutSec; i++) {
+    try {
+      const u = await p.fetchAddressUTxOs(addr);
+      if (u.length >= minCount) return;
+    } catch { /* transient */ }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${addr}`);
+}
+
+async function fundFromFunder(targetAddr: string, lovelace: bigint) {
+  const wallet = funderWallet();
+  const myAddr = await wallet.getChangeAddress();
+  const myUtxos = await provider().fetchAddressUTxOs(myAddr);
+  const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
+    .setNetwork(NETWORK);
+  await tx
+    .txOut(targetAddr, [{ unit: "lovelace", quantity: lovelace.toString() }])
+    .changeAddress(myAddr)
+    .selectUtxosFrom(myUtxos)
+    .complete();
+  const signed = await wallet.signTx(tx.txHex);
+  const txHash = await wallet.submitTx(signed);
+  console.log(`Funded ${targetAddr.slice(0, 20)}… with ${lovelace} lovelace. tx=${txHash}`);
+  await waitForUtxoAt(targetAddr, 1);
 }
 
 function loadValidator(beneficiaryVkh: string, goal: bigint, deadlineMs: bigint) {
   const compiled = blueprint.validators[0].compiledCode;
   const script = applyParamsToScript(
     compiled,
-    [{ bytes: beneficiaryVkh }, { int: goal.toString() }, { int: deadlineMs.toString() }],
+    [
+      builtinByteString(beneficiaryVkh),
+      integer(Number(goal)),
+      integer(Number(deadlineMs)),
+    ],
     "JSON",
   );
   const { address: scriptAddress } = serializePlutusScript(
@@ -48,311 +102,271 @@ function loadValidator(beneficiaryVkh: string, goal: bigint, deadlineMs: bigint)
   return { script, scriptAddress };
 }
 
-// JSON-Data representation of Constr 0 [Map<bytes, int>]:
-//   { constructor: 0, fields: [{ map: [{ k: { bytes }, v: { int } }, ...] }] }
-function encodeDatum(wallets: Map<string, bigint>): Record<string, unknown> {
+// JSON-shape plutus data: Constr 0 [Map<bytes, int>].
+function buildDatum(wallets: Map<string, bigint>): unknown {
   return {
     constructor: 0,
     fields: [
-      {
-        map: [...wallets.entries()].map(([k, v]) => ({
-          k: { bytes: k },
-          v: { int: v.toString() },
-        })),
-      },
+      { map: [...wallets].map(([k, v]) => ({ k: { bytes: k }, v: { int: Number(v) } })) },
     ],
   };
 }
-
-function decodeDatum(datumHex: string): Map<string, bigint> {
-  const decoded = deserializeDatum(datumHex) as {
-    fields: Array<{ map?: Array<{ k: { bytes: string }; v: { int: bigint | string | number } }> }>;
+// RECLAIM continuing datum is wrapped in Some(...) by the validator's pattern.
+function buildSomeDatum(wallets: Map<string, bigint>): unknown {
+  return {
+    constructor: 0,
+    fields: [buildDatum(wallets)],
   };
-  const out = new Map<string, bigint>();
-  const entries = decoded.fields[0]?.map ?? [];
-  for (const entry of entries) {
-    out.set(entry.k.bytes, BigInt(entry.v.int));
-  }
-  return out;
 }
 
-export async function init(
-  walletFile: string,
+function decodeWallets(datumHex: string): Map<string, bigint> {
+  const d = deserializeDatum(datumHex) as {
+    fields: Array<{ map?: Array<{ k: { bytes: string }; v: { int: string | number | bigint } }> }>;
+  };
+  const map = new Map<string, bigint>();
+  for (const e of d.fields[0].map ?? []) {
+    map.set(e.k.bytes, BigInt(e.v.int));
+  }
+  return map;
+}
+
+async function findScriptUtxo(scriptAddress: string): Promise<UTxO> {
+  for (let i = 0; i < 60; i++) {
+    const utxos = await provider().fetchAddressUTxOs(scriptAddress);
+    const u = utxos.find((x) => x.output.plutusData);
+    if (u) return u;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  throw new Error("No script UTxO with datum found");
+}
+
+async function initCampaign(
+  owner: MeshWallet,
+  ownerVkh: string,
   beneficiaryVkh: string,
-  goal: number,
-  deadlineMs: number,
-  contributionLovelace: number,
+  goal: bigint,
+  deadlineMs: bigint,
+  contribution: bigint,
 ) {
-  const wallet = loadWallet(walletFile);
-  const provider = new KoiosProvider(NETWORK);
-  const myAddr = await wallet.getChangeAddress();
-  const myVkh = resolvePaymentKeyHash(myAddr);
-
-  const { scriptAddress } = loadValidator(
-    beneficiaryVkh,
-    BigInt(goal),
-    BigInt(deadlineMs),
-  );
-
+  const ownerAddr = await owner.getChangeAddress();
+  const { scriptAddress } = loadValidator(beneficiaryVkh, goal, deadlineMs);
   const wallets = new Map<string, bigint>();
-  wallets.set(myVkh, BigInt(contributionLovelace));
-  const datum = encodeDatum(wallets);
+  wallets.set(ownerVkh, contribution);
+  const utxos = await provider().fetchAddressUTxOs(ownerAddr);
 
-  const utxos = await provider.fetchAddressUTxOs(myAddr);
-
-  const tx = new MeshTxBuilder({
-    fetcher: provider,
-    submitter: provider,
-    evaluator: provider,
-  }).setNetwork(NETWORK);
-
+  const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
+    .setNetwork(NETWORK);
   await tx
-    .txOut(scriptAddress, [{ unit: "lovelace", quantity: contributionLovelace.toString() }])
-    .txOutInlineDatumValue(datum, "JSON")
-    .changeAddress(myAddr)
+    .txOut(scriptAddress, [{ unit: "lovelace", quantity: contribution.toString() }])
+    .txOutInlineDatumValue(buildDatum(wallets), "JSON")
+    .changeAddress(ownerAddr)
     .selectUtxosFrom(utxos)
     .complete();
-
-  const signed = await wallet.signTx(tx.txHex);
-  const txHash = await wallet.submitTx(signed);
-  console.log("Crowdfund initialised");
-  console.log("Script address:", scriptAddress);
-  console.log("Tx:", txHash);
+  const signed = await owner.signTx(tx.txHex);
+  const txHash = await owner.submitTx(signed);
+  console.log(`INIT ok. ${contribution} lovelace tx=${txHash}`);
 }
 
-async function findScriptUtxo(provider: KoiosProvider, scriptAddress: string): Promise<UTxO> {
-  const utxos = await provider.fetchAddressUTxOs(scriptAddress);
-  const utxo = utxos.find((u) => u.output.plutusData);
-  if (!utxo) throw new Error("No script UTxO with datum found");
-  return utxo;
-}
-
-function lovelaceOf(amounts: Array<{ unit: string; quantity: string }>): bigint {
-  const a = amounts.find((x) => x.unit === "lovelace");
-  return a ? BigInt(a.quantity) : 0n;
-}
-
-export async function donate(
-  walletFile: string,
+async function donate(
+  donor: MeshWallet,
+  donorVkh: string,
   beneficiaryVkh: string,
-  goal: number,
-  deadlineMs: number,
-  amountLovelace: number,
+  goal: bigint,
+  deadlineMs: bigint,
+  amount: bigint,
 ) {
-  const wallet = loadWallet(walletFile);
-  const provider = new KoiosProvider(NETWORK);
-  const myAddr = await wallet.getChangeAddress();
-  const myVkh = resolvePaymentKeyHash(myAddr);
-
-  const { script, scriptAddress } = loadValidator(
-    beneficiaryVkh,
-    BigInt(goal),
-    BigInt(deadlineMs),
+  const donorAddr = await donor.getChangeAddress();
+  const { script, scriptAddress } = loadValidator(beneficiaryVkh, goal, deadlineMs);
+  const utxo = await findScriptUtxo(scriptAddress);
+  if (!utxo.output.plutusData) throw new Error("No datum on script UTxO");
+  const wallets = decodeWallets(utxo.output.plutusData);
+  wallets.set(donorVkh, (wallets.get(donorVkh) ?? 0n) + amount);
+  const lovelaceIn = BigInt(
+    utxo.output.amount.find((a) => a.unit === "lovelace")!.quantity,
   );
+  const newLovelace = lovelaceIn + amount;
 
-  const utxo = await findScriptUtxo(provider, scriptAddress);
-  const wallets = decodeDatum(utxo.output.plutusData!);
-  const prev = wallets.get(myVkh) ?? 0n;
-  wallets.set(myVkh, prev + BigInt(amountLovelace));
+  const ownUtxos = await provider().fetchAddressUTxOs(donorAddr);
+  const collateral: UTxO[] = await donor.getCollateral();
 
-  const newLovelace = lovelaceOf(utxo.output.amount) + BigInt(amountLovelace);
-
-  const ownUtxos = await provider.fetchAddressUTxOs(myAddr);
-  const collateral: UTxO[] = await wallet.getCollateral();
-
-  const tx = new MeshTxBuilder({
-    fetcher: provider,
-    submitter: provider,
-    evaluator: provider,
-  }).setNetwork(NETWORK);
-
+  const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
+    .setNetwork(NETWORK);
   await tx
     .spendingPlutusScriptV3()
-    .txIn(utxo.input.txHash, utxo.input.outputIndex, utxo.output.amount, utxo.output.address)
+    .txIn(utxo.input.txHash, utxo.input.outputIndex, utxo.output.amount, scriptAddress)
     .txInScript(script)
-    .txInRedeemerValue(mConStr0([]), "JSON") // DONATE
+    .txInRedeemerValue(mConStr(0, []))
     .txInInlineDatumPresent()
     .txOut(scriptAddress, [{ unit: "lovelace", quantity: newLovelace.toString() }])
-    .txOutInlineDatumValue(encodeDatum(wallets), "JSON")
+    .txOutInlineDatumValue(buildDatum(wallets), "JSON")
     .txInCollateral(
       collateral[0].input.txHash,
       collateral[0].input.outputIndex,
       collateral[0].output.amount,
       collateral[0].output.address,
     )
-    .requiredSignerHash(myVkh)
-    .changeAddress(myAddr)
+    .requiredSignerHash(donorVkh)
+    .changeAddress(donorAddr)
     .selectUtxosFrom(ownUtxos)
     .complete();
-
-  const signed = await wallet.signTx(tx.txHex);
-  const txHash = await wallet.submitTx(signed);
-  console.log("Donation submitted. Tx:", txHash);
+  const signed = await donor.signTx(tx.txHex);
+  const txHash = await donor.submitTx(signed);
+  console.log(`DONATE ok. +${amount} tx=${txHash}`);
 }
 
-export async function withdraw(
-  walletFile: string,
+async function withdraw(
+  beneficiary: MeshWallet,
   beneficiaryVkh: string,
-  goal: number,
-  deadlineMs: number,
+  goal: bigint,
+  deadlineMs: bigint,
+  validFromSlot: number,
 ) {
-  const wallet = loadWallet(walletFile);
-  const provider = new KoiosProvider(NETWORK);
-  const myAddr = await wallet.getChangeAddress();
-  const myVkh = resolvePaymentKeyHash(myAddr);
-  if (myVkh !== beneficiaryVkh) {
-    throw new Error("Withdraw must be signed by the beneficiary's wallet");
-  }
+  const benAddr = await beneficiary.getChangeAddress();
+  const { script, scriptAddress } = loadValidator(beneficiaryVkh, goal, deadlineMs);
+  const utxo = await findScriptUtxo(scriptAddress);
+  const ownUtxos = await provider().fetchAddressUTxOs(benAddr);
+  const collateral: UTxO[] = await beneficiary.getCollateral();
 
-  const { script, scriptAddress } = loadValidator(
-    beneficiaryVkh,
-    BigInt(goal),
-    BigInt(deadlineMs),
-  );
-
-  const utxo = await findScriptUtxo(provider, scriptAddress);
-  const lovelaceIn = lovelaceOf(utxo.output.amount);
-
-  const ownUtxos = await provider.fetchAddressUTxOs(myAddr);
-  const collateral: UTxO[] = await wallet.getCollateral();
-  const validFromMs = Math.max(deadlineMs, Date.now());
-
-  const tx = new MeshTxBuilder({
-    fetcher: provider,
-    submitter: provider,
-    evaluator: provider,
-  }).setNetwork(NETWORK);
-
+  const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
+    .setNetwork(NETWORK);
   await tx
     .spendingPlutusScriptV3()
-    .txIn(utxo.input.txHash, utxo.input.outputIndex, utxo.output.amount, utxo.output.address)
+    .txIn(utxo.input.txHash, utxo.input.outputIndex, utxo.output.amount, scriptAddress)
     .txInScript(script)
-    .txInRedeemerValue(mConStr(1, []), "JSON") // WITHDRAW
+    .txInRedeemerValue(mConStr(1, []))
     .txInInlineDatumPresent()
-    .txOut(myAddr, [{ unit: "lovelace", quantity: lovelaceIn.toString() }])
     .txInCollateral(
       collateral[0].input.txHash,
       collateral[0].input.outputIndex,
       collateral[0].output.amount,
       collateral[0].output.address,
     )
-    .requiredSignerHash(myVkh)
-    .invalidBefore(Math.floor(validFromMs / 1000))
-    .invalidHereafter(Math.floor(validFromMs / 1000) + 60)
-    .changeAddress(myAddr)
+    .requiredSignerHash(beneficiaryVkh)
+    .invalidBefore(validFromSlot)
+    .invalidHereafter(validFromSlot + 120)
+    .changeAddress(benAddr)
     .selectUtxosFrom(ownUtxos)
     .complete();
-
-  const signed = await wallet.signTx(tx.txHex);
-  const txHash = await wallet.submitTx(signed);
-  console.log("Withdraw submitted. Tx:", txHash);
+  const signed = await beneficiary.signTx(tx.txHex);
+  const txHash = await beneficiary.submitTx(signed);
+  console.log(`WITHDRAW ok. tx=${txHash}`);
 }
 
-export async function reclaim(
-  walletFile: string,
+async function reclaim(
+  donor: MeshWallet,
+  donorVkh: string,
   beneficiaryVkh: string,
-  goal: number,
-  deadlineMs: number,
+  goal: bigint,
+  deadlineMs: bigint,
+  validFromSlot: number,
 ) {
-  const wallet = loadWallet(walletFile);
-  const provider = new KoiosProvider(NETWORK);
-  const myAddr = await wallet.getChangeAddress();
-  const myVkh = resolvePaymentKeyHash(myAddr);
+  const donorAddr = await donor.getChangeAddress();
+  const { script, scriptAddress } = loadValidator(beneficiaryVkh, goal, deadlineMs);
+  const utxo = await findScriptUtxo(scriptAddress);
+  if (!utxo.output.plutusData) throw new Error("No datum");
+  const wallets = decodeWallets(utxo.output.plutusData);
+  const myDonation = wallets.get(donorVkh);
+  if (!myDonation) throw new Error("No donation recorded");
 
-  const { script, scriptAddress } = loadValidator(
-    beneficiaryVkh,
-    BigInt(goal),
-    BigInt(deadlineMs),
+  const lovelaceIn = BigInt(
+    utxo.output.amount.find((a) => a.unit === "lovelace")!.quantity,
   );
-
-  const utxo = await findScriptUtxo(provider, scriptAddress);
-  const wallets = decodeDatum(utxo.output.plutusData!);
-  const myDonation = wallets.get(myVkh);
-  if (!myDonation) throw new Error("No donation recorded for this wallet");
-
-  const lovelaceIn = lovelaceOf(utxo.output.amount);
   const remaining = lovelaceIn - myDonation;
-
   const newWallets = new Map<string, bigint>();
-  for (const [k, v] of wallets) if (k !== myVkh) newWallets.set(k, v);
+  for (const [k, v] of wallets) if (k !== donorVkh) newWallets.set(k, v);
 
-  const ownUtxos = await provider.fetchAddressUTxOs(myAddr);
-  const collateral: UTxO[] = await wallet.getCollateral();
-  const validFromMs = Math.max(deadlineMs, Date.now());
-
-  const tx = new MeshTxBuilder({
-    fetcher: provider,
-    submitter: provider,
-    evaluator: provider,
-  }).setNetwork(NETWORK);
-
-  let chain = tx
+  const ownUtxos = await provider().fetchAddressUTxOs(donorAddr);
+  const collateral: UTxO[] = await donor.getCollateral();
+  const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
+    .setNetwork(NETWORK);
+  let b = tx
     .spendingPlutusScriptV3()
-    .txIn(utxo.input.txHash, utxo.input.outputIndex, utxo.output.amount, utxo.output.address)
+    .txIn(utxo.input.txHash, utxo.input.outputIndex, utxo.output.amount, scriptAddress)
     .txInScript(script)
-    .txInRedeemerValue(mConStr(2, []), "JSON") // RECLAIM
-    .txInInlineDatumPresent()
-    .txOut(myAddr, [{ unit: "lovelace", quantity: myDonation.toString() }]);
-
+    .txInRedeemerValue(mConStr(2, []))
+    .txInInlineDatumPresent();
   if (remaining > 0n) {
-    chain = chain
+    b = b
       .txOut(scriptAddress, [{ unit: "lovelace", quantity: remaining.toString() }])
-      .txOutInlineDatumValue(encodeDatum(newWallets), "JSON");
+      .txOutInlineDatumValue(buildSomeDatum(newWallets), "JSON");
   }
-
-  await chain
+  await b
     .txInCollateral(
       collateral[0].input.txHash,
       collateral[0].input.outputIndex,
       collateral[0].output.amount,
       collateral[0].output.address,
     )
-    .requiredSignerHash(myVkh)
-    .invalidBefore(Math.floor(validFromMs / 1000))
-    .invalidHereafter(Math.floor(validFromMs / 1000) + 60)
-    .changeAddress(myAddr)
+    .requiredSignerHash(donorVkh)
+    .invalidBefore(validFromSlot)
+    .invalidHereafter(validFromSlot + 120)
+    .changeAddress(donorAddr)
     .selectUtxosFrom(ownUtxos)
     .complete();
+  const signed = await donor.signTx(tx.txHex);
+  const txHash = await donor.submitTx(signed);
+  console.log(`RECLAIM ok. tx=${txHash}`);
+}
 
-  const signed = await wallet.signTx(tx.txHex);
-  const txHash = await wallet.submitTx(signed);
-  console.log("Reclaim submitted. Tx:", txHash);
+async function runScenario() {
+  console.log("=== crowdfund scenario: init → donate → withdraw ; init → donate → reclaim ===");
+  const owner = makeWallet(MeshWallet.brew(false) as string[]);
+  const beneficiary = makeWallet(MeshWallet.brew(false) as string[]);
+  const donor = makeWallet(MeshWallet.brew(false) as string[]);
+  const ownerAddr = await owner.getChangeAddress();
+  const benAddr = await beneficiary.getChangeAddress();
+  const donorAddr = await donor.getChangeAddress();
+  await fundFromFunder(ownerAddr, 30_000_000n);
+  await fundFromFunder(benAddr, 30_000_000n);
+  await fundFromFunder(donorAddr, 30_000_000n);
+
+  const ownerVkh = resolvePaymentKeyHash(ownerAddr);
+  const benVkh = resolvePaymentKeyHash(benAddr);
+  const donorVkh = resolvePaymentKeyHash(donorAddr);
+
+  const systemStartSec = await yaciSystemStartSec();
+
+  // Campaign 1: goal=10M, achieved via owner+donor; beneficiary withdraws.
+  const goal1 = 10_000_000n;
+  const deadline1Slot = (await yaciTipSlot()) + 15;
+  const deadline1Ms = BigInt(slotToMs(deadline1Slot, systemStartSec));
+  await initCampaign(owner, ownerVkh, benVkh, goal1, deadline1Ms, 6_000_000n);
+  await new Promise((r) => setTimeout(r, 2000));
+  await donate(donor, donorVkh, benVkh, goal1, deadline1Ms, 5_000_000n);
+  await new Promise((r) => setTimeout(r, 2000));
+  for (let i = 0; i < 300; i++) {
+    const tip = await yaciTipSlot();
+    if (tip > deadline1Slot) {
+      console.log(`tipSlot ${tip} > deadline1Slot ${deadline1Slot}, proceeding`);
+      break;
+    }
+    if (i % 10 === 0) console.log(`Waiting for chain slot ${tip} → ${deadline1Slot}…`);
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  await withdraw(beneficiary, benVkh, goal1, deadline1Ms, deadline1Slot + 1);
+
+  // Campaign 2: goal unreachable; donor reclaims contribution.
+  const goal2 = 100_000_000n;
+  const deadline2Slot = (await yaciTipSlot()) + 15;
+  const deadline2Ms = BigInt(slotToMs(deadline2Slot, systemStartSec));
+  await initCampaign(owner, ownerVkh, benVkh, goal2, deadline2Ms, 5_000_000n);
+  await new Promise((r) => setTimeout(r, 2000));
+  await donate(donor, donorVkh, benVkh, goal2, deadline2Ms, 4_000_000n);
+  await new Promise((r) => setTimeout(r, 2000));
+  for (let i = 0; i < 300; i++) {
+    const tip = await yaciTipSlot();
+    if (tip > deadline2Slot) {
+      console.log(`tipSlot ${tip} > deadline2Slot ${deadline2Slot}, proceeding`);
+      break;
+    }
+    if (i % 10 === 0) console.log(`Waiting for chain slot ${tip} → ${deadline2Slot}…`);
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  await reclaim(donor, donorVkh, benVkh, goal2, deadline2Ms, deadline2Slot + 1);
+
+  console.log("=== Scenario complete ===");
 }
 
 if (import.meta.main) {
-  const [cmd, ...args] = Deno.args;
-  try {
-    if (cmd === "init") {
-      if (args.length !== 5) {
-        throw new Error("Usage: init <wallet> <beneficiary_vkh> <goal_lovelace> <deadline_ms> <amount_lovelace>");
-      }
-      await init(args[0], args[1], Number(args[2]), Number(args[3]), Number(args[4]));
-    } else if (cmd === "donate") {
-      if (args.length !== 5) {
-        throw new Error("Usage: donate <wallet> <beneficiary_vkh> <goal_lovelace> <deadline_ms> <amount_lovelace>");
-      }
-      await donate(args[0], args[1], Number(args[2]), Number(args[3]), Number(args[4]));
-    } else if (cmd === "withdraw") {
-      if (args.length !== 4) {
-        throw new Error("Usage: withdraw <wallet> <beneficiary_vkh> <goal_lovelace> <deadline_ms>");
-      }
-      await withdraw(args[0], args[1], Number(args[2]), Number(args[3]));
-    } else if (cmd === "reclaim") {
-      if (args.length !== 4) {
-        throw new Error("Usage: reclaim <wallet> <beneficiary_vkh> <goal_lovelace> <deadline_ms>");
-      }
-      await reclaim(args[0], args[1], Number(args[2]), Number(args[3]));
-    } else {
-      console.log(
-        "Usage:\n" +
-          "  init <wallet> <beneficiary_vkh> <goal_lovelace> <deadline_ms> <amount_lovelace>\n" +
-          "  donate <wallet> <beneficiary_vkh> <goal_lovelace> <deadline_ms> <amount_lovelace>\n" +
-          "  withdraw <wallet> <beneficiary_vkh> <goal_lovelace> <deadline_ms>\n" +
-          "  reclaim <wallet> <beneficiary_vkh> <goal_lovelace> <deadline_ms>\n",
-      );
-    }
-  } catch (error) {
-    console.error(error instanceof Error ? error.message : error);
-    Deno.exit(1);
-  }
+  await runScenario();
 }

@@ -1,7 +1,8 @@
 import {
-  KoiosProvider,
+  BlockfrostProvider,
   MeshTxBuilder,
   MeshWallet,
+  builtinByteString,
   mConStr0,
   resolvePaymentKeyHash,
   resolveScriptHash,
@@ -13,42 +14,63 @@ import { applyParamsToScript } from "@meshsdk/core-csl";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
 // ----------------------------------------------------------------------------
-// Token-transfer — Mesh.js port.
-//
-// Validator parameters: (receiver: VKH, policy: PolicyId, assetName: ByteArray)
-// Spend rule: outputs sent to *other* addresses must contain only the policy's
-//             expected asset, and `receiver` must be in extra_signatories.
-// Mint policy: an always-true PlutusV3 script (cborHex 46450101002499).
-//
-// Operations: prepare → mint → lock → unlock.
+// Token-transfer — Mesh.js targeting yaci-devkit.
+// Mint TestAsset → lock at script → unlock back to receiver.
 // ----------------------------------------------------------------------------
 
+const YACI_URL = "http://localhost:8080/api/v1";
 const NETWORK = "preprod";
 const NETWORK_ID = 0;
 const ASSET_NAME = "TestAsset";
 const ALWAYS_TRUE_SCRIPT_CBOR = "46450101002499";
+const FUNDER_MNEMONIC =
+  "test test test test test test test test test test test test test test test test test test test test test test test sauce";
 
-function loadWallet(walletFile: string): MeshWallet {
-  const mnemonic = JSON.parse(Deno.readTextFileSync(walletFile));
+function provider(): BlockfrostProvider {
+  return new BlockfrostProvider(YACI_URL);
+}
+
+function makeWallet(words: string[]): MeshWallet {
+  const p = provider();
   return new MeshWallet({
     networkId: NETWORK_ID,
-    fetcher: new KoiosProvider(NETWORK),
-    submitter: new KoiosProvider(NETWORK),
-    key: { type: "mnemonic", words: mnemonic },
+    fetcher: p,
+    submitter: p,
+    key: { type: "mnemonic", words },
   });
 }
 
-async function prepare(walletFile: string) {
-  try {
-    await Deno.stat(walletFile);
-    console.log(`${walletFile} already exists, skipping.`);
-    return;
-  } catch { /* not found */ }
+function funderWallet(): MeshWallet {
+  return makeWallet(FUNDER_MNEMONIC.split(/\s+/));
+}
 
-  // Reuse Mesh's mnemonic generator.
-  const w = MeshWallet.brew(false) as string[];
-  await Deno.writeTextFile(walletFile, JSON.stringify(w));
-  console.log(`Generated ${walletFile}.`);
+async function waitForUtxoAt(addr: string, minCount = 1, timeoutSec = 60) {
+  const p = provider();
+  for (let i = 0; i < timeoutSec; i++) {
+    try {
+      const u = await p.fetchAddressUTxOs(addr);
+      if (u.length >= minCount) return;
+    } catch { /* transient */ }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${addr}`);
+}
+
+async function fundFromFunder(targetAddr: string, lovelace: bigint) {
+  const wallet = funderWallet();
+  const myAddr = await wallet.getChangeAddress();
+  const myUtxos = await provider().fetchAddressUTxOs(myAddr);
+  const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
+    .setNetwork(NETWORK);
+  await tx
+    .txOut(targetAddr, [{ unit: "lovelace", quantity: lovelace.toString() }])
+    .changeAddress(myAddr)
+    .selectUtxosFrom(myUtxos)
+    .complete();
+  const signed = await wallet.signTx(tx.txHex);
+  const txHash = await wallet.submitTx(signed);
+  console.log(`Funded ${targetAddr.slice(0, 20)}… with ${lovelace} lovelace. tx=${txHash}`);
+  await waitForUtxoAt(targetAddr, 1);
 }
 
 function getAlwaysTruePolicyId(): string {
@@ -59,7 +81,11 @@ function loadValidator(receiverVkh: string, policyId: string) {
   const compiled = blueprint.validators[0].compiledCode;
   const script = applyParamsToScript(
     compiled,
-    [receiverVkh, policyId, stringToHex(ASSET_NAME)],
+    [
+      builtinByteString(receiverVkh),
+      builtinByteString(policyId),
+      builtinByteString(stringToHex(ASSET_NAME)),
+    ],
     "JSON",
   );
   const { address: scriptAddress } = serializePlutusScript(
@@ -70,30 +96,20 @@ function loadValidator(receiverVkh: string, policyId: string) {
   return { script, scriptAddress };
 }
 
-export async function mint(walletFile: string) {
-  const wallet = loadWallet(walletFile);
-  const provider = new KoiosProvider(NETWORK);
-
+async function mint(wallet: MeshWallet, unit: string): Promise<void> {
   const myAddr = await wallet.getChangeAddress();
   const myVkh = resolvePaymentKeyHash(myAddr);
   const policyId = getAlwaysTruePolicyId();
-  const unit = policyId + stringToHex(ASSET_NAME);
-
-  const utxos = await provider.fetchAddressUTxOs(myAddr);
+  const utxos = await provider().fetchAddressUTxOs(myAddr);
   const collateral: UTxO[] = await wallet.getCollateral();
 
-  const tx = new MeshTxBuilder({
-    fetcher: provider,
-    submitter: provider,
-    evaluator: provider,
-  }).setNetwork(NETWORK);
-
+  const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
+    .setNetwork(NETWORK);
   await tx
     .mintPlutusScriptV3()
     .mint("10", policyId, stringToHex(ASSET_NAME))
     .mintingScript(ALWAYS_TRUE_SCRIPT_CBOR)
-    // Always-true policy ignores its redeemer; supply unit.
-    .mintRedeemerValue(mConStr0([]), "JSON")
+    .mintRedeemerValue(mConStr0([]))
     .txOut(myAddr, [{ unit, quantity: "10" }])
     .txInCollateral(
       collateral[0].input.txHash,
@@ -105,42 +121,34 @@ export async function mint(walletFile: string) {
     .changeAddress(myAddr)
     .selectUtxosFrom(utxos)
     .complete();
-
   const signed = await wallet.signTx(tx.txHex);
   const txHash = await wallet.submitTx(signed);
-  console.log(`Mint submitted. Tx: ${txHash}`);
-  console.log(`Asset unit: ${unit}`);
+  console.log(`MINT ok. unit=${unit.slice(0, 24)}… tx=${txHash}`);
 }
 
-export async function lock(walletFile: string) {
-  const wallet = loadWallet(walletFile);
-  const provider = new KoiosProvider(NETWORK);
-
+async function lock(wallet: MeshWallet, unit: string): Promise<string> {
   const myAddr = await wallet.getChangeAddress();
   const myVkh = resolvePaymentKeyHash(myAddr);
   const policyId = getAlwaysTruePolicyId();
-  const unit = policyId + stringToHex(ASSET_NAME);
-
   const { scriptAddress } = loadValidator(myVkh, policyId);
 
-  const allUtxos = await provider.fetchAddressUTxOs(myAddr);
-  const tokenUtxo = allUtxos.find((u) =>
-    u.output.amount.some((a) => a.unit === unit),
-  );
-  if (!tokenUtxo) throw new Error("No UTxO with the minted asset found in wallet");
+  let tokenUtxo: UTxO | undefined;
+  for (let i = 0; i < 60; i++) {
+    const all = await provider().fetchAddressUTxOs(myAddr);
+    tokenUtxo = all.find((u) => u.output.amount.some((a) => a.unit === unit));
+    if (tokenUtxo) break;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  if (!tokenUtxo) throw new Error("No UTxO with the minted asset");
   const tokenAmount = tokenUtxo.output.amount.find((a) => a.unit === unit)!.quantity;
-
+  const allUtxos = await provider().fetchAddressUTxOs(myAddr);
   const collateral: UTxO[] = await wallet.getCollateral();
 
-  const tx = new MeshTxBuilder({
-    fetcher: provider,
-    submitter: provider,
-    evaluator: provider,
-  }).setNetwork(NETWORK);
-
+  const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
+    .setNetwork(NETWORK);
   await tx
     .txOut(scriptAddress, [{ unit, quantity: tokenAmount }])
-    .txOutInlineDatumValue(mConStr0([]), "JSON")
+    .txOutInlineDatumValue(mConStr0([]))
     .txInCollateral(
       collateral[0].input.txHash,
       collateral[0].input.outputIndex,
@@ -151,45 +159,37 @@ export async function lock(walletFile: string) {
     .changeAddress(myAddr)
     .selectUtxosFrom(allUtxos)
     .complete();
-
   const signed = await wallet.signTx(tx.txHex);
   const txHash = await wallet.submitTx(signed);
-  console.log(`Lock submitted. Tx: ${txHash}`);
-  console.log(`Script address: ${scriptAddress}`);
+  console.log(`LOCK ok. amount=${tokenAmount} tx=${txHash}`);
+  return scriptAddress;
 }
 
-export async function unlock(walletFile: string) {
-  const wallet = loadWallet(walletFile);
-  const provider = new KoiosProvider(NETWORK);
-
+async function unlock(wallet: MeshWallet, unit: string) {
   const myAddr = await wallet.getChangeAddress();
   const myVkh = resolvePaymentKeyHash(myAddr);
   const policyId = getAlwaysTruePolicyId();
-  const unit = policyId + stringToHex(ASSET_NAME);
-
   const { script, scriptAddress } = loadValidator(myVkh, policyId);
 
-  const scriptUtxos = await provider.fetchAddressUTxOs(scriptAddress);
-  const utxo = scriptUtxos.find((u) =>
-    u.output.amount.some((a) => a.unit === unit),
-  );
-  if (!utxo) throw new Error("No script UTxO holding the asset found");
+  let utxo: UTxO | undefined;
+  for (let i = 0; i < 60; i++) {
+    const all = await provider().fetchAddressUTxOs(scriptAddress);
+    utxo = all.find((u) => u.output.amount.some((a) => a.unit === unit));
+    if (utxo) break;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  if (!utxo) throw new Error("No script UTxO holding the asset");
   const tokenAmount = utxo.output.amount.find((a) => a.unit === unit)!.quantity;
-
-  const ownUtxos = await provider.fetchAddressUTxOs(myAddr);
+  const ownUtxos = await provider().fetchAddressUTxOs(myAddr);
   const collateral: UTxO[] = await wallet.getCollateral();
 
-  const tx = new MeshTxBuilder({
-    fetcher: provider,
-    submitter: provider,
-    evaluator: provider,
-  }).setNetwork(NETWORK);
-
+  const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
+    .setNetwork(NETWORK);
   await tx
     .spendingPlutusScriptV3()
     .txIn(utxo.input.txHash, utxo.input.outputIndex, utxo.output.amount, utxo.output.address)
     .txInScript(script)
-    .txInRedeemerValue(mConStr0([]), "JSON")
+    .txInRedeemerValue(mConStr0([]))
     .txInInlineDatumPresent()
     .txOut(myAddr, [{ unit, quantity: tokenAmount }])
     .txInCollateral(
@@ -202,35 +202,27 @@ export async function unlock(walletFile: string) {
     .changeAddress(myAddr)
     .selectUtxosFrom(ownUtxos)
     .complete();
-
   const signed = await wallet.signTx(tx.txHex);
   const txHash = await wallet.submitTx(signed);
-  console.log(`Unlock submitted. Tx: ${txHash}`);
+  console.log(`UNLOCK ok. tx=${txHash}`);
+}
+
+async function runScenario() {
+  console.log("=== token-transfer scenario: mint → lock → unlock ===");
+  // Fresh wallet ensures clean pure-ADA UTxOs (no leftover tokens that would
+  // taint the unlock change output and violate the validator).
+  const wallet = makeWallet(MeshWallet.brew(false) as string[]);
+  await fundFromFunder(await wallet.getChangeAddress(), 30_000_000n);
+
+  const unit = getAlwaysTruePolicyId() + stringToHex(ASSET_NAME);
+  await mint(wallet, unit);
+  await new Promise((r) => setTimeout(r, 2000));
+  await lock(wallet, unit);
+  await new Promise((r) => setTimeout(r, 2000));
+  await unlock(wallet, unit);
+  console.log("=== Scenario complete ===");
 }
 
 if (import.meta.main) {
-  const [cmd, ...args] = Deno.args;
-  if (!cmd) {
-    console.log(
-      "Usage:\n" +
-        "  prepare <wallet.json>\n" +
-        "  mint <wallet.json>\n" +
-        "  lock <wallet.json>\n" +
-        "  unlock <wallet.json>\n",
-    );
-  } else if (cmd === "prepare") {
-    if (!args[0]) console.error("Usage: prepare <wallet.json>");
-    else await prepare(args[0]);
-  } else if (cmd === "mint") {
-    if (!args[0]) console.error("Usage: mint <wallet.json>");
-    else await mint(args[0]);
-  } else if (cmd === "lock") {
-    if (!args[0]) console.error("Usage: lock <wallet.json>");
-    else await lock(args[0]);
-  } else if (cmd === "unlock") {
-    if (!args[0]) console.error("Usage: unlock <wallet.json>");
-    else await unlock(args[0]);
-  } else {
-    console.log("Unknown command");
-  }
+  await runScenario();
 }

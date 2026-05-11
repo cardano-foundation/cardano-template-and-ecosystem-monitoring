@@ -2,6 +2,7 @@
   "version": "5",
   "specifiers": {
     "npm:@evolution-sdk/lucid@2.0.1": "2.0.1_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+cbor@1.6.6_@harmoniclabs+crypto@0.3.0_@harmoniclabs+pair@1.0.0_fast-check@3.23.2",
+    "npm:@evolution-sdk/plutus@2.0.0": "2.0.0",
     "npm:libsodium-wrappers-sumo@0.7.15": "0.7.15"
   },
   "npm": {
@@ -989,6 +990,7 @@
   "workspace": {
     "dependencies": [
       "npm:@evolution-sdk/lucid@2.0.1",
+      "npm:@evolution-sdk/plutus@2.0.0",
       "npm:libsodium-wrappers-sumo@0.7.15"
     ]
   }

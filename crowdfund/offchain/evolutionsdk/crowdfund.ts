@@ -1,297 +1,309 @@
 import {
   Lucid,
-  Koios,
-  applyParamsToScript,
+  Blockfrost,
   Constr,
   Data,
-  generateSeedPhrase,
+  applyParamsToScript,
   paymentCredentialOf,
   validatorToAddress,
   type LucidEvolution,
   type Script,
 } from "@evolution-sdk/lucid";
+import { SLOT_CONFIG_NETWORK } from "@evolution-sdk/plutus";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
 // ----------------------------------------------------------------------------
-// Crowdfund — Evolution SDK port.
-//
-// Validator parameters: (beneficiary: VKH, goal: Int (lovelace), deadline: Int (ms))
-// Datum: CrowdfundDatum { wallets: Pairs<VKH, Int> }
-//        encoded as Constr 0 [Map<bytes, int>]
-// Redeemers:
-//   DONATE   = Constr 0 []
-//   WITHDRAW = Constr 1 []
-//   RECLAIM  = Constr 2 []
-//
-// Operations:
-//   prepare    generate wallet.json
-//   init       owner seeds the campaign with first contribution
-//   donate     adds contribution from the donor wallet, updating the wallets map
-//   withdraw   beneficiary collects all funds after deadline (only if goal reached)
-//   reclaim    donor recovers their contribution after deadline (only if goal not reached)
+// Crowdfund — Evolution SDK targeting yaci-devkit.
+// Params: (beneficiary_vkh, goal, deadline_ms).
+// Redeemers: DONATE | WITHDRAW | RECLAIM. Scenario exercises ALL three.
 // ----------------------------------------------------------------------------
 
-const KOIOS_URL = "https://preprod.koios.rest/api/v1";
+const YACI_URL = "http://localhost:8080/api/v1";
+const NETWORK = "Preview" as const;
+const TEST_MNEMONIC =
+  "test test test test test test test test test test test test test test test test test test test test test test test sauce";
+const ERA_OFFSET_SECONDS = 600;
 
-function selectWallet(lucid: LucidEvolution, fileName = "wallet.json") {
-  const mnemonic = JSON.parse(Deno.readTextFileSync(fileName));
-  lucid.selectWallet.fromSeed(
-    Array.isArray(mnemonic) ? mnemonic.join(" ") : mnemonic,
-  );
+async function alignSlotConfig() {
+  const block = await fetch(`${YACI_URL}/blocks/latest`).then((r) => r.json());
+  const zeroTime = (block.time - block.slot + ERA_OFFSET_SECONDS) * 1000;
+  SLOT_CONFIG_NETWORK.Preview.zeroTime = zeroTime;
+  SLOT_CONFIG_NETWORK.Preview.zeroSlot = 0;
+  SLOT_CONFIG_NETWORK.Preview.slotLength = 1000;
 }
 
-async function prepare(fileName: string) {
-  try {
-    await Deno.stat(fileName);
-    console.log(`${fileName} already exists, skipping.`);
-    return;
-  } catch { /* not found */ }
-
-  const mnemonic = generateSeedPhrase();
-  await Deno.writeTextFile(fileName, JSON.stringify(mnemonic.split(" ")));
-  const lucid = await Lucid(new Koios(KOIOS_URL), "Preprod");
-  lucid.selectWallet.fromSeed(mnemonic);
-  console.log(`Generated ${fileName}. Address: ${await lucid.wallet().address()}`);
+async function lucidAt(accountIndex: number): Promise<LucidEvolution> {
+  const lucid = await Lucid(new Blockfrost(YACI_URL, "Dummy Key"), NETWORK);
+  lucid.selectWallet.fromSeed(TEST_MNEMONIC, { accountIndex });
+  return lucid;
 }
 
-function loadValidator(beneficiaryVkh: string, goal: bigint, deadlineMs: bigint): {
-  validator: Script;
-  scriptAddress: string;
-} {
-  const compiled = blueprint.validators[0].compiledCode;
-  const script = applyParamsToScript(compiled, [beneficiaryVkh, goal, deadlineMs]);
+async function vkhOf(accountIndex: number): Promise<string> {
+  const l = await lucidAt(accountIndex);
+  return paymentCredentialOf(await l.wallet().address()).hash;
+}
+
+async function yaciTipSlot(): Promise<number> {
+  return (await fetch(`${YACI_URL}/blocks/latest`).then((r) => r.json())).slot;
+}
+function slotToMs(slot: number): number {
+  const cfg = SLOT_CONFIG_NETWORK.Preview;
+  return cfg.zeroTime + (slot - cfg.zeroSlot) * cfg.slotLength;
+}
+
+function loadValidator(beneficiaryVkh: string, goal: bigint, deadlineMs: bigint) {
+  const script = applyParamsToScript(blueprint.validators[0].compiledCode, [
+    beneficiaryVkh,
+    goal,
+    deadlineMs,
+  ]);
   const validator: Script = { type: "PlutusV3", script };
-  return { validator, scriptAddress: validatorToAddress("Preprod", validator) };
+  return { validator, scriptAddress: validatorToAddress(NETWORK, validator) };
 }
 
-// Datum is Constr 0 [Map<bytes, int>] — represent the inner map as a JS Map.
 function encodeDatum(wallets: Map<string, bigint>): string {
   return Data.to(new Constr(0, [wallets]));
 }
-
 function decodeDatum(datumHex: string): Map<string, bigint> {
   const c = Data.from(datumHex) as Constr<Data>;
   return c.fields[0] as Map<string, bigint>;
 }
 
-export async function init(
-  walletFile: string,
-  beneficiaryVkh: string,
-  goal: number,
-  deadlineMs: number,
-  contributionLovelace: number,
+async function findScriptUtxo(lucid: LucidEvolution, scriptAddress: string) {
+  for (let i = 0; i < 60; i++) {
+    const utxos = await lucid.utxosAt(scriptAddress);
+    const u = utxos.find((x) => x.datum);
+    if (u) return u;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  throw new Error(`No script UTxO with datum at ${scriptAddress}`);
+}
+
+async function waitForUtxosAt(
+  lucid: LucidEvolution,
+  address: string,
+  minCount: number,
+  timeoutSec = 60,
 ) {
-  const lucid = await Lucid(new Koios(KOIOS_URL), "Preprod");
-  selectWallet(lucid, walletFile);
-  const myAddr = await lucid.wallet().address();
-  const myVkh = paymentCredentialOf(myAddr).hash;
+  for (let i = 0; i < timeoutSec; i++) {
+    try {
+      const u = await lucid.utxosAt(address);
+      if (u.length >= minCount) return;
+    } catch { /* transient */ }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${address}`);
+}
 
-  const { scriptAddress } = loadValidator(beneficiaryVkh, BigInt(goal), BigInt(deadlineMs));
+async function fundFromIndex0(targets: Array<{ address: string; lovelace: bigint }>) {
+  const lucid = await lucidAt(0);
+  let txb = lucid.newTx();
+  for (const t of targets) txb = txb.pay.ToAddress(t.address, { lovelace: t.lovelace });
+  const tx = await txb.complete();
+  const signed = await tx.sign.withWallet().complete();
+  const txHash = await signed.submit();
+  console.log(`Funded ${targets.length} target(s). tx=${txHash}`);
+  for (const t of targets) await waitForUtxosAt(lucid, t.address, 1, 60);
+  // Wait an extra moment so the funder's own change UTxO is indexed too.
+  await new Promise((r) => setTimeout(r, 2000));
+}
 
+async function initCampaign(
+  ownerLucid: LucidEvolution,
+  ownerVkh: string,
+  beneficiaryVkh: string,
+  goal: bigint,
+  deadlineMs: bigint,
+  contribution: bigint,
+): Promise<string> {
+  const { scriptAddress } = loadValidator(beneficiaryVkh, goal, deadlineMs);
   const wallets = new Map<string, bigint>();
-  wallets.set(myVkh, BigInt(contributionLovelace));
-  const datum = encodeDatum(wallets);
-
-  const tx = await lucid
+  wallets.set(ownerVkh, contribution);
+  const tx = await ownerLucid
     .newTx()
     .pay.ToContract(
       scriptAddress,
-      { kind: "inline", value: datum },
-      { lovelace: BigInt(contributionLovelace) },
+      { kind: "inline", value: encodeDatum(wallets) },
+      { lovelace: contribution },
     )
     .complete();
-
   const signed = await tx.sign.withWallet().complete();
   const txHash = await signed.submit();
-  console.log("Crowdfund initialised");
-  console.log("Script address:", scriptAddress);
-  console.log("Tx:", txHash);
+  console.log(`INIT ok. ${contribution} lovelace tx=${txHash}`);
+  return txHash;
 }
 
-export async function donate(
-  walletFile: string,
+async function donate(
+  donorLucid: LucidEvolution,
+  donorVkh: string,
   beneficiaryVkh: string,
-  goal: number,
-  deadlineMs: number,
-  amountLovelace: number,
+  goal: bigint,
+  deadlineMs: bigint,
+  amount: bigint,
 ) {
-  const lucid = await Lucid(new Koios(KOIOS_URL), "Preprod");
-  selectWallet(lucid, walletFile);
-  const myAddr = await lucid.wallet().address();
-  const myVkh = paymentCredentialOf(myAddr).hash;
-
-  const { validator, scriptAddress } = loadValidator(
-    beneficiaryVkh,
-    BigInt(goal),
-    BigInt(deadlineMs),
-  );
-
-  const utxos = await lucid.utxosAt(scriptAddress);
-  const utxo = utxos.find((u) => u.datum);
-  if (!utxo) throw new Error("No script UTxO with datum found");
-
+  const donorAddr = await donorLucid.wallet().address();
+  const { validator, scriptAddress } = loadValidator(beneficiaryVkh, goal, deadlineMs);
+  const utxo = await findScriptUtxo(donorLucid, scriptAddress);
   const wallets = decodeDatum(utxo.datum!);
-  const prev = wallets.get(myVkh) ?? 0n;
-  wallets.set(myVkh, prev + BigInt(amountLovelace));
-
-  const newDatum = encodeDatum(wallets);
-  const newLovelace = (utxo.assets.lovelace ?? 0n) + BigInt(amountLovelace);
-
-  const tx = await lucid
+  wallets.set(donorVkh, (wallets.get(donorVkh) ?? 0n) + amount);
+  const newLovelace = (utxo.assets.lovelace ?? 0n) + amount;
+  const tx = await donorLucid
     .newTx()
-    .collectFrom([utxo], Data.to(new Constr(0, []))) // DONATE
+    .collectFrom([utxo], Data.to(new Constr(0, [])))
     .attach.SpendingValidator(validator)
     .pay.ToContract(
       scriptAddress,
-      { kind: "inline", value: newDatum },
+      { kind: "inline", value: encodeDatum(wallets) },
       { lovelace: newLovelace },
     )
-    .addSigner(myAddr)
+    .addSigner(donorAddr)
     .complete();
-
   const signed = await tx.sign.withWallet().complete();
   const txHash = await signed.submit();
-  console.log("Donation submitted. Tx:", txHash);
+  console.log(`DONATE ok. +${amount} from donor tx=${txHash}`);
 }
 
-export async function withdraw(
-  walletFile: string,
+async function withdraw(
+  beneficiaryLucid: LucidEvolution,
   beneficiaryVkh: string,
-  goal: number,
-  deadlineMs: number,
+  goal: bigint,
+  deadlineMs: bigint,
 ) {
-  const lucid = await Lucid(new Koios(KOIOS_URL), "Preprod");
-  selectWallet(lucid, walletFile);
-  const myAddr = await lucid.wallet().address();
-  const myVkh = paymentCredentialOf(myAddr).hash;
-  if (myVkh !== beneficiaryVkh) {
-    throw new Error("Withdraw must be signed by the beneficiary's wallet");
-  }
+  const benAddr = await beneficiaryLucid.wallet().address();
+  const { validator, scriptAddress } = loadValidator(beneficiaryVkh, goal, deadlineMs);
+  const utxo = await findScriptUtxo(beneficiaryLucid, scriptAddress);
 
-  const { validator, scriptAddress } = loadValidator(
-    beneficiaryVkh,
-    BigInt(goal),
-    BigInt(deadlineMs),
-  );
+  const cfg = SLOT_CONFIG_NETWORK.Preview;
+  const deadlineSlot = Math.floor((Number(deadlineMs) - cfg.zeroTime) / cfg.slotLength) + cfg.zeroSlot;
+  const tipSlot = await yaciTipSlot();
+  const validFromSlot = Math.max(deadlineSlot + 1, tipSlot - 5);
 
-  const utxos = await lucid.utxosAt(scriptAddress);
-  const utxo = utxos.find((u) => u.datum);
-  if (!utxo) throw new Error("No script UTxO with datum found");
-
-  const lovelaceIn = utxo.assets.lovelace ?? 0n;
-  const now = Date.now();
-
-  const tx = await lucid
+  const tx = await beneficiaryLucid
     .newTx()
-    .collectFrom([utxo], Data.to(new Constr(1, []))) // WITHDRAW
+    .collectFrom([utxo], Data.to(new Constr(1, [])))
     .attach.SpendingValidator(validator)
-    .pay.ToAddress(myAddr, { lovelace: lovelaceIn })
-    .addSigner(myAddr)
-    .validFrom(Math.max(deadlineMs, now))
-    .validTo(Math.max(deadlineMs, now) + 60_000)
+    .addSigner(benAddr)
+    .validFrom(slotToMs(validFromSlot))
+    .validTo(slotToMs(validFromSlot + 120))
     .complete();
-
   const signed = await tx.sign.withWallet().complete();
   const txHash = await signed.submit();
-  console.log("Withdraw submitted. Tx:", txHash);
+  console.log(`WITHDRAW ok. tx=${txHash}`);
 }
 
-export async function reclaim(
-  walletFile: string,
+async function reclaim(
+  donorLucid: LucidEvolution,
+  donorVkh: string,
   beneficiaryVkh: string,
-  goal: number,
-  deadlineMs: number,
+  goal: bigint,
+  deadlineMs: bigint,
 ) {
-  const lucid = await Lucid(new Koios(KOIOS_URL), "Preprod");
-  selectWallet(lucid, walletFile);
-  const myAddr = await lucid.wallet().address();
-  const myVkh = paymentCredentialOf(myAddr).hash;
-
-  const { validator, scriptAddress } = loadValidator(
-    beneficiaryVkh,
-    BigInt(goal),
-    BigInt(deadlineMs),
-  );
-
-  const utxos = await lucid.utxosAt(scriptAddress);
-  const utxo = utxos.find((u) => u.datum);
-  if (!utxo) throw new Error("No script UTxO with datum found");
-
+  const donorAddr = await donorLucid.wallet().address();
+  const { validator, scriptAddress } = loadValidator(beneficiaryVkh, goal, deadlineMs);
+  const utxo = await findScriptUtxo(donorLucid, scriptAddress);
   const wallets = decodeDatum(utxo.datum!);
-  const myDonation = wallets.get(myVkh);
-  if (!myDonation) throw new Error("No donation recorded for this wallet");
+  const myDonation = wallets.get(donorVkh);
+  if (!myDonation) throw new Error("No donation recorded");
 
   const lovelaceIn = utxo.assets.lovelace ?? 0n;
   const remaining = lovelaceIn - myDonation;
-
-  // Build the updated wallets map with this donor removed.
   const newWallets = new Map<string, bigint>();
-  for (const [k, v] of wallets) {
-    if (k !== myVkh) newWallets.set(k, v);
-  }
+  for (const [k, v] of wallets) if (k !== donorVkh) newWallets.set(k, v);
 
-  const txBuilder = lucid
+  const cfg = SLOT_CONFIG_NETWORK.Preview;
+  const deadlineSlot = Math.floor((Number(deadlineMs) - cfg.zeroTime) / cfg.slotLength) + cfg.zeroSlot;
+  const tipSlot = await yaciTipSlot();
+  const validFromSlot = Math.max(deadlineSlot + 1, tipSlot - 5);
+
+  let txb = donorLucid
     .newTx()
-    .collectFrom([utxo], Data.to(new Constr(2, []))) // RECLAIM
+    .collectFrom([utxo], Data.to(new Constr(2, [])))
     .attach.SpendingValidator(validator)
-    .pay.ToAddress(myAddr, { lovelace: myDonation })
-    .addSigner(myAddr)
-    .validFrom(Math.max(deadlineMs, Date.now()))
-    .validTo(Math.max(deadlineMs, Date.now()) + 60_000);
-
-  // If donors remain, continue the script UTxO with reduced lovelace and updated map.
-  const finalTx = remaining > 0n
-    ? txBuilder.pay.ToContract(
+    .addSigner(donorAddr)
+    .validFrom(slotToMs(validFromSlot))
+    .validTo(slotToMs(validFromSlot + 120));
+  if (remaining > 0n) {
+    // The RECLAIM False branch reads the continuing datum as
+    // `Some(CrowdfundDatum)` — i.e., the on-chain destructuring wraps the
+    // datum in Option. Mirror that by emitting `Constr 0 [CrowdfundDatum]`.
+    const continuingDatum = Data.to(new Constr(0, [new Constr(0, [newWallets])]));
+    txb = txb.pay.ToContract(
       scriptAddress,
-      { kind: "inline", value: encodeDatum(newWallets) },
+      { kind: "inline", value: continuingDatum },
       { lovelace: remaining },
-    )
-    : txBuilder;
-
-  const tx = await finalTx.complete();
+    );
+  }
+  const tx = await txb.complete();
   const signed = await tx.sign.withWallet().complete();
   const txHash = await signed.submit();
-  console.log("Reclaim submitted. Tx:", txHash);
+  console.log(`RECLAIM ok. tx=${txHash}`);
+}
+
+async function runScenario() {
+  console.log("=== crowdfund scenario: init → donate → withdraw (goal-reached path); separate campaign for reclaim ===");
+  await alignSlotConfig();
+
+  const beneficiary = await lucidAt(1);
+  const beneficiaryVkh = await vkhOf(1);
+  const benAddr = await beneficiary.wallet().address();
+  const donor = await lucidAt(2);
+  const donorVkh = await vkhOf(2);
+  const donorAddr = await donor.wallet().address();
+  await fundFromIndex0([
+    { address: benAddr, lovelace: 30_000_000n },
+    { address: donorAddr, lovelace: 30_000_000n },
+  ]);
+
+  // Campaign 1: goal=10M, deadline soon, will be funded by owner + donor and beneficiary withdraws.
+  const goal1 = 10_000_000n;
+  const cfg = SLOT_CONFIG_NETWORK.Preview;
+  let tipSlot = await yaciTipSlot();
+  const deadline1Slot = tipSlot + 15;
+  const deadline1Ms = BigInt(slotToMs(deadline1Slot));
+  const owner = await lucidAt(0);
+  const ownerVkh = await vkhOf(0);
+  await initCampaign(owner, ownerVkh, beneficiaryVkh, goal1, deadline1Ms, 6_000_000n);
+  await new Promise((r) => setTimeout(r, 2000));
+  await donate(donor, donorVkh, beneficiaryVkh, goal1, deadline1Ms, 5_000_000n);
+  await new Promise((r) => setTimeout(r, 2000));
+
+  // Wait past deadline, then beneficiary withdraws (goal reached: 11M >= 10M).
+  for (let i = 0; i < 300; i++) {
+    const tip = await yaciTipSlot();
+    if (tip > deadline1Slot) {
+      console.log(`tipSlot ${tip} > deadline1Slot ${deadline1Slot}, proceeding`);
+      break;
+    }
+    if (i % 10 === 0) console.log(`Waiting for chain slot ${tip} → ${deadline1Slot}…`);
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  await withdraw(beneficiary, beneficiaryVkh, goal1, deadline1Ms);
+
+  // Campaign 2: goal much higher than possible, deadline soon, single donor reclaims.
+  const goal2 = 100_000_000n;
+  tipSlot = await yaciTipSlot();
+  const deadline2Slot = tipSlot + 15;
+  const deadline2Ms = BigInt(slotToMs(deadline2Slot));
+  await initCampaign(owner, ownerVkh, beneficiaryVkh, goal2, deadline2Ms, 5_000_000n);
+  await new Promise((r) => setTimeout(r, 2000));
+  await donate(donor, donorVkh, beneficiaryVkh, goal2, deadline2Ms, 4_000_000n);
+  await new Promise((r) => setTimeout(r, 2000));
+
+  for (let i = 0; i < 300; i++) {
+    const tip = await yaciTipSlot();
+    if (tip > deadline2Slot) {
+      console.log(`tipSlot ${tip} > deadline2Slot ${deadline2Slot}, proceeding`);
+      break;
+    }
+    if (i % 10 === 0) console.log(`Waiting for chain slot ${tip} → ${deadline2Slot}…`);
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  // Donor reclaims (partial — owner's donation stays).
+  await reclaim(donor, donorVkh, beneficiaryVkh, goal2, deadline2Ms);
+
+  console.log("=== Scenario complete ===");
 }
 
 if (import.meta.main) {
-  const [cmd, ...args] = Deno.args;
-  try {
-    if (cmd === "prepare") {
-      if (!args[0]) throw new Error("Usage: prepare <wallet.json>");
-      await prepare(args[0]);
-    } else if (cmd === "init") {
-      if (args.length !== 5) {
-        throw new Error("Usage: init <wallet> <beneficiary_vkh> <goal_lovelace> <deadline_ms> <amount_lovelace>");
-      }
-      await init(args[0], args[1], Number(args[2]), Number(args[3]), Number(args[4]));
-    } else if (cmd === "donate") {
-      if (args.length !== 5) {
-        throw new Error("Usage: donate <wallet> <beneficiary_vkh> <goal_lovelace> <deadline_ms> <amount_lovelace>");
-      }
-      await donate(args[0], args[1], Number(args[2]), Number(args[3]), Number(args[4]));
-    } else if (cmd === "withdraw") {
-      if (args.length !== 4) {
-        throw new Error("Usage: withdraw <wallet> <beneficiary_vkh> <goal_lovelace> <deadline_ms>");
-      }
-      await withdraw(args[0], args[1], Number(args[2]), Number(args[3]));
-    } else if (cmd === "reclaim") {
-      if (args.length !== 4) {
-        throw new Error("Usage: reclaim <wallet> <beneficiary_vkh> <goal_lovelace> <deadline_ms>");
-      }
-      await reclaim(args[0], args[1], Number(args[2]), Number(args[3]));
-    } else {
-      console.log(
-        "Usage:\n" +
-          "  prepare <wallet.json>\n" +
-          "  init <wallet> <beneficiary_vkh> <goal_lovelace> <deadline_ms> <amount_lovelace>\n" +
-          "  donate <wallet> <beneficiary_vkh> <goal_lovelace> <deadline_ms> <amount_lovelace>\n" +
-          "  withdraw <wallet> <beneficiary_vkh> <goal_lovelace> <deadline_ms>\n" +
-          "  reclaim <wallet> <beneficiary_vkh> <goal_lovelace> <deadline_ms>\n",
-      );
-    }
-  } catch (error) {
-    console.error(error instanceof Error ? error.message : error);
-    Deno.exit(1);
-  }
+  await runScenario();
 }

@@ -1,5 +1,5 @@
 import {
-  KoiosProvider,
+  BlockfrostProvider,
   MeshTxBuilder,
   MeshWallet,
   deserializeDatum,
@@ -9,34 +9,93 @@ import {
   serializePlutusScript,
   type UTxO,
 } from "@meshsdk/core";
+import { applyParamsToScript } from "@meshsdk/core-csl";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
 // ----------------------------------------------------------------------------
-// Decentralized identity — Mesh.js port.
-//
-// Validator: no parameters.
-// Datum: IdentityDatum { owner: VKH, delegates: List<{ key: VKH, expires: Int }> }
-// Redeemer:
-//   TransferOwner   = Constr 0 [new_owner: VKH]
-//   AddDelegate     = Constr 1 [key: VKH, expires: Int]
-//   RemoveDelegate  = Constr 2 [key: VKH]
+// DID — Mesh.js targeting yaci-devkit.
+// Scenario: init → add-delegate → remove-delegate → transfer-owner.
 // ----------------------------------------------------------------------------
 
+const YACI_URL = "http://localhost:8080/api/v1";
 const NETWORK = "preprod";
 const NETWORK_ID = 0;
+const FUNDER_MNEMONIC =
+  "test test test test test test test test test test test test test test test test test test test test test test test sauce";
 
-function loadWallet(walletFile: string): MeshWallet {
-  const mnemonic = Deno.readTextFileSync(walletFile).trim();
+function provider(): BlockfrostProvider {
+  return new BlockfrostProvider(YACI_URL);
+}
+function makeWallet(words: string[]): MeshWallet {
+  const p = provider();
   return new MeshWallet({
     networkId: NETWORK_ID,
-    fetcher: new KoiosProvider(NETWORK),
-    submitter: new KoiosProvider(NETWORK),
-    key: { type: "mnemonic", words: mnemonic.split(" ") },
+    fetcher: p,
+    submitter: p,
+    key: { type: "mnemonic", words },
   });
+}
+function funderWallet(): MeshWallet {
+  return makeWallet(FUNDER_MNEMONIC.split(/\s+/));
+}
+
+async function yaciTipSlot(): Promise<number> {
+  return (await fetch(`${YACI_URL}/blocks/latest`).then((r) => r.json())).slot;
+}
+async function yaciSystemStartSec(): Promise<number> {
+  const block = await fetch(`${YACI_URL}/blocks/latest`).then((r) => r.json());
+  return block.time - block.slot + 600;
+}
+function slotToMs(slot: number, systemStartSec: number): number {
+  return (systemStartSec + slot) * 1000;
+}
+
+async function waitForUtxoAt(addr: string, minCount = 1, timeoutSec = 60) {
+  const p = provider();
+  for (let i = 0; i < timeoutSec; i++) {
+    try {
+      const u = await p.fetchAddressUTxOs(addr);
+      if (u.length >= minCount) return;
+    } catch { /* transient */ }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${addr}`);
+}
+
+async function waitForTx(txHash: string, outputIndex = 0, timeoutSec = 60): Promise<UTxO> {
+  const p = provider();
+  for (let i = 0; i < timeoutSec; i++) {
+    try {
+      const utxos = await p.fetchUTxOs(txHash);
+      const u = utxos.find((x) => x.input.outputIndex === outputIndex);
+      if (u) return u;
+    } catch { /* transient */ }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  throw new Error(`Timed out waiting for ${txHash}#${outputIndex}`);
+}
+
+async function fundFromFunder(targetAddr: string, lovelace: bigint) {
+  const wallet = funderWallet();
+  const myAddr = await wallet.getChangeAddress();
+  const myUtxos = await provider().fetchAddressUTxOs(myAddr);
+  const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
+    .setNetwork(NETWORK);
+  await tx
+    .txOut(targetAddr, [{ unit: "lovelace", quantity: lovelace.toString() }])
+    .changeAddress(myAddr)
+    .selectUtxosFrom(myUtxos)
+    .complete();
+  const signed = await wallet.signTx(tx.txHex);
+  const txHash = await wallet.submitTx(signed);
+  console.log(`Funded ${targetAddr.slice(0, 20)}… with ${lovelace} lovelace. tx=${txHash}`);
+  await waitForUtxoAt(targetAddr, 1);
 }
 
 function getScriptInfo() {
-  const compiled = blueprint.validators[0].compiledCode;
+  const v = blueprint.validators.find((x) => x.title === "identity.identity.spend");
+  if (!v) throw new Error("Validator not found");
+  const compiled = applyParamsToScript(v.compiledCode, [], "JSON");
   const { address: scriptAddress } = serializePlutusScript(
     { code: compiled, version: "V3" },
     undefined,
@@ -45,281 +104,145 @@ function getScriptInfo() {
   return { script: compiled, scriptAddress };
 }
 
-interface DelegateEntry {
-  key: string; // VKH hex
-  expires: bigint;
-}
-interface IdentityState {
-  owner: string;
-  delegates: DelegateEntry[];
-}
+interface DelegateEntry { key: string; expires: number }
+interface IdentityState { owner: string; delegates: DelegateEntry[] }
 
 function decodeDatum(datumHex: string): IdentityState {
-  // Constr 0 [bytes, list[Constr 0 [bytes, int]]]
-  const decoded = deserializeDatum(datumHex) as {
+  const d = deserializeDatum(datumHex) as {
     fields: Array<
       | { bytes?: string }
-      | { list?: Array<{ fields: Array<{ bytes?: string; int?: bigint }> }> }
+      | { list?: Array<{ fields: Array<{ bytes?: string; int?: string | number | bigint }> }> }
     >;
   };
-  const owner = (decoded.fields[0] as { bytes: string }).bytes;
-  const list = (decoded.fields[1] as { list: Array<{ fields: Array<{ bytes?: string; int?: bigint }> }> }).list ?? [];
-  const delegates: DelegateEntry[] = list.map((entry) => ({
-    key: (entry.fields[0].bytes ?? ""),
-    expires: BigInt(entry.fields[1].int ?? 0),
-  }));
-  return { owner, delegates };
+  const owner = (d.fields[0] as { bytes: string }).bytes;
+  const list = (d.fields[1] as { list?: Array<{ fields: Array<{ bytes?: string; int?: string | number | bigint }> }> }).list ?? [];
+  return {
+    owner,
+    delegates: list.map((e) => ({
+      key: e.fields[0].bytes ?? "",
+      expires: Number(e.fields[1].int ?? 0),
+    })),
+  };
 }
-
 function encodeDatum(state: IdentityState): unknown {
-  // Mesh: build a Constr-shaped JSON-Data object via mConStr0([...]).
-  const delegateList = state.delegates.map((d) =>
-    mConStr0([d.key, d.expires]),
-  );
+  const delegateList = state.delegates.map((d) => mConStr0([d.key, d.expires]));
   return mConStr0([state.owner, delegateList]);
 }
 
-async function findIdentityUtxo(walletFile: string, txHash: string, outputIndex: number) {
-  const provider = new KoiosProvider(NETWORK);
-  void walletFile;
-  const utxos = await provider.fetchUTxOs(txHash);
-  const utxo = utxos.find((u) => u.input.outputIndex === outputIndex);
-  if (!utxo) throw new Error(`No UTxO at ${txHash}#${outputIndex}`);
-  if (!utxo.output.plutusData) throw new Error("UTxO has no inline datum");
-  return utxo;
-}
-
-export async function init(ownerWalletFile: string, lovelace: string) {
-  const wallet = loadWallet(ownerWalletFile);
-  const provider = new KoiosProvider(NETWORK);
-  const { scriptAddress } = getScriptInfo();
-  const ownerAddr = await wallet.getChangeAddress();
+async function init(owner: MeshWallet, lovelace: bigint): Promise<string> {
+  const ownerAddr = await owner.getChangeAddress();
   const ownerVkh = resolvePaymentKeyHash(ownerAddr);
-
+  const { scriptAddress } = getScriptInfo();
   const datum = encodeDatum({ owner: ownerVkh, delegates: [] });
-
-  const utxos = await provider.fetchAddressUTxOs(ownerAddr);
-  const collateral: UTxO[] = await wallet.getCollateral();
-
-  const tx = new MeshTxBuilder({
-    fetcher: provider,
-    submitter: provider,
-    evaluator: provider,
-  }).setNetwork(NETWORK);
-
+  const utxos = await provider().fetchAddressUTxOs(ownerAddr);
+  const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
+    .setNetwork(NETWORK);
   await tx
-    .txOut(scriptAddress, [{ unit: "lovelace", quantity: lovelace }])
-    .txOutInlineDatumValue(datum, "JSON")
-    .txInCollateral(
-      collateral[0].input.txHash,
-      collateral[0].input.outputIndex,
-      collateral[0].output.amount,
-      collateral[0].output.address,
-    )
-    .requiredSignerHash(ownerVkh)
+    .txOut(scriptAddress, [{ unit: "lovelace", quantity: lovelace.toString() }])
+    .txOutInlineDatumValue(datum)
     .changeAddress(ownerAddr)
     .selectUtxosFrom(utxos)
     .complete();
-
-  const signed = await wallet.signTx(tx.txHex);
-  const txHash = await wallet.submitTx(signed);
-  console.log(`Identity created at ${scriptAddress}`);
-  console.log(`Tx: ${txHash}`);
+  const signed = await owner.signTx(tx.txHex);
+  const txHash = await owner.submitTx(signed);
+  console.log(`INIT ok. tx=${txHash}`);
+  return txHash;
 }
 
-async function rebuildAtScript(
-  walletFile: string,
-  txHash: string,
-  outputIndex: number,
+async function performAction(
+  owner: MeshWallet,
+  prevTxHash: string,
   redeemer: unknown,
-  newState: IdentityState,
-  validToMs?: number,
-) {
-  const wallet = loadWallet(walletFile);
-  const provider = new KoiosProvider(NETWORK);
-  const { script, scriptAddress } = getScriptInfo();
-  const ownerAddr = await wallet.getChangeAddress();
+  updateState: (state: IdentityState) => IdentityState,
+  options: { expiresMs?: number } = {},
+): Promise<string> {
+  const ownerAddr = await owner.getChangeAddress();
   const ownerVkh = resolvePaymentKeyHash(ownerAddr);
+  const { script, scriptAddress } = getScriptInfo();
+  const utxo = await waitForTx(prevTxHash, 0);
+  if (!utxo.output.plutusData) throw new Error("No datum");
+  const state = decodeDatum(utxo.output.plutusData);
+  const updated = updateState(state);
 
-  const utxo = await findIdentityUtxo(walletFile, txHash, outputIndex);
+  const ownUtxos = await provider().fetchAddressUTxOs(ownerAddr);
+  const collateral: UTxO[] = await owner.getCollateral();
 
-  const ownUtxos = await provider.fetchAddressUTxOs(ownerAddr);
-  const collateral: UTxO[] = await wallet.getCollateral();
-
-  const tx = new MeshTxBuilder({
-    fetcher: provider,
-    submitter: provider,
-    evaluator: provider,
-  }).setNetwork(NETWORK);
-
-  let chain = tx
+  const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
+    .setNetwork(NETWORK);
+  let b = tx
     .spendingPlutusScriptV3()
-    .txIn(utxo.input.txHash, utxo.input.outputIndex, utxo.output.amount, utxo.output.address)
+    .txIn(utxo.input.txHash, utxo.input.outputIndex, utxo.output.amount, scriptAddress)
     .txInScript(script)
-    .txInRedeemerValue(redeemer, "JSON")
+    .txInRedeemerValue(redeemer)
     .txInInlineDatumPresent()
-    .txOut(scriptAddress, utxo.output.amount)
-    .txOutInlineDatumValue(encodeDatum(newState), "JSON")
+    .txOut(scriptAddress, utxo.output.amount.map((a) => ({ unit: a.unit, quantity: a.quantity })))
+    .txOutInlineDatumValue(encodeDatum(updated))
     .txInCollateral(
       collateral[0].input.txHash,
       collateral[0].input.outputIndex,
       collateral[0].output.amount,
       collateral[0].output.address,
     )
-    .requiredSignerHash(ownerVkh)
+    .requiredSignerHash(ownerVkh);
+  if (options.expiresMs !== undefined) {
+    const systemStartSec = await yaciSystemStartSec();
+    const expiresSlot = Math.floor(options.expiresMs / 1000) - systemStartSec;
+    const tipSlot = await yaciTipSlot();
+    const validToSlot = Math.min(tipSlot + 10, expiresSlot - 5);
+    b = b.invalidBefore(tipSlot - 5).invalidHereafter(validToSlot);
+  }
+  await b
     .changeAddress(ownerAddr)
-    .selectUtxosFrom(ownUtxos);
-
-  if (validToMs !== undefined) {
-    chain = chain.invalidHereafter(Math.floor(validToMs / 1000));
-  }
-
-  await chain.complete();
-
-  const signed = await wallet.signTx(tx.txHex);
-  const submitted = await wallet.submitTx(signed);
-  return submitted;
+    .selectUtxosFrom(ownUtxos)
+    .complete();
+  const signed = await owner.signTx(tx.txHex);
+  const txHash = await owner.submitTx(signed);
+  return txHash;
 }
 
-export async function addDelegate(
-  ownerWalletFile: string,
-  delegateWalletFile: string,
-  txHash: string,
-  outputIndex: number,
-  expiresMs: string,
-) {
-  const utxo = await findIdentityUtxo(ownerWalletFile, txHash, outputIndex);
-  const state = decodeDatum(utxo.output.plutusData!);
+async function runScenario() {
+  console.log("=== did scenario: init → add-delegate → remove-delegate → transfer-owner ===");
+  const owner = makeWallet(MeshWallet.brew(false) as string[]);
+  const delegate = makeWallet(MeshWallet.brew(false) as string[]);
+  const newOwner = makeWallet(MeshWallet.brew(false) as string[]);
+  await fundFromFunder(await owner.getChangeAddress(), 30_000_000n);
+  const delegateVkh = resolvePaymentKeyHash(await delegate.getChangeAddress());
+  const newOwnerVkh = resolvePaymentKeyHash(await newOwner.getChangeAddress());
 
-  // Read delegate VKH from the delegate wallet file.
-  const delegateWallet = loadWallet(delegateWalletFile);
-  const delegateVkh = resolvePaymentKeyHash(await delegateWallet.getChangeAddress());
+  const initTx = await init(owner, 3_000_000n);
+  await new Promise((r) => setTimeout(r, 2000));
 
-  if (state.delegates.some((d) => d.key === delegateVkh)) {
-    throw new Error("Delegate already exists in the datum.");
-  }
-
-  const expires = BigInt(expiresMs);
-  if (expires <= BigInt(Date.now())) {
-    throw new Error("Expiry must be a future unix timestamp in milliseconds.");
-  }
-
-  const newState: IdentityState = {
-    owner: state.owner,
-    delegates: [...state.delegates, { key: delegateVkh, expires }],
-  };
-  // AddDelegate = Constr 1 [key, expires]
-  const redeemer = mConStr(1, [delegateVkh, expires]);
-
-  const tx = await rebuildAtScript(
-    ownerWalletFile,
-    txHash,
-    outputIndex,
-    redeemer,
-    newState,
-    Number(expires - 1_000n),
+  const expiresMs = Date.now() + 24 * 60 * 60 * 1000;
+  const addTx = await performAction(
+    owner,
+    initTx,
+    mConStr(1, [delegateVkh, expiresMs]),
+    (s) => ({ owner: s.owner, delegates: [...s.delegates, { key: delegateVkh, expires: expiresMs }] }),
+    { expiresMs },
   );
-  console.log(`Delegate added. Tx: ${tx}`);
-}
+  console.log(`ADD_DELEGATE ok. tx=${addTx}`);
+  await new Promise((r) => setTimeout(r, 2000));
 
-export async function removeDelegate(
-  ownerWalletFile: string,
-  delegateWalletFile: string,
-  txHash: string,
-  outputIndex: number,
-) {
-  const utxo = await findIdentityUtxo(ownerWalletFile, txHash, outputIndex);
-  const state = decodeDatum(utxo.output.plutusData!);
+  const remTx = await performAction(
+    owner,
+    addTx,
+    mConStr(2, [delegateVkh]),
+    (s) => ({ owner: s.owner, delegates: s.delegates.filter((d) => d.key !== delegateVkh) }),
+  );
+  console.log(`REMOVE_DELEGATE ok. tx=${remTx}`);
+  await new Promise((r) => setTimeout(r, 2000));
 
-  const delegateWallet = loadWallet(delegateWalletFile);
-  const delegateVkh = resolvePaymentKeyHash(await delegateWallet.getChangeAddress());
+  const transferTx = await performAction(
+    owner,
+    remTx,
+    mConStr(0, [newOwnerVkh]),
+    (s) => ({ owner: newOwnerVkh, delegates: s.delegates }),
+  );
+  console.log(`TRANSFER_OWNER ok. tx=${transferTx}`);
 
-  if (!state.delegates.some((d) => d.key === delegateVkh)) {
-    throw new Error("Delegate not present in the datum.");
-  }
-
-  const newState: IdentityState = {
-    owner: state.owner,
-    delegates: state.delegates.filter((d) => d.key !== delegateVkh),
-  };
-  // RemoveDelegate = Constr 2 [key]
-  const redeemer = mConStr(2, [delegateVkh]);
-
-  const tx = await rebuildAtScript(ownerWalletFile, txHash, outputIndex, redeemer, newState);
-  console.log(`Delegate removed. Tx: ${tx}`);
-}
-
-export async function transferOwner(
-  ownerWalletFile: string,
-  txHash: string,
-  outputIndex: number,
-  newOwnerAddress: string,
-) {
-  const utxo = await findIdentityUtxo(ownerWalletFile, txHash, outputIndex);
-  const state = decodeDatum(utxo.output.plutusData!);
-
-  const newOwnerVkh = resolvePaymentKeyHash(newOwnerAddress);
-  const newState: IdentityState = { owner: newOwnerVkh, delegates: state.delegates };
-  // TransferOwner = Constr 0 [new_owner]
-  const redeemer = mConStr0([newOwnerVkh]);
-
-  const tx = await rebuildAtScript(ownerWalletFile, txHash, outputIndex, redeemer, newState);
-  console.log(`Owner transferred. Tx: ${tx}`);
-}
-
-export async function show(txHash: string, outputIndex: number) {
-  const provider = new KoiosProvider(NETWORK);
-  const utxos = await provider.fetchUTxOs(txHash);
-  const utxo = utxos.find((u) => u.input.outputIndex === outputIndex);
-  if (!utxo?.output.plutusData) throw new Error("No datum at provided UTxO");
-  const state = decodeDatum(utxo.output.plutusData);
-  console.log(JSON.stringify(
-    { owner: state.owner, delegates: state.delegates.map((d) => ({ key: d.key, expires: d.expires.toString() })) },
-    null,
-    2,
-  ));
+  console.log("=== Scenario complete ===");
 }
 
 if (import.meta.main) {
-  const [cmd, ...args] = Deno.args;
-  try {
-    if (cmd === "init") {
-      if (args.length !== 2) throw new Error("Usage: init <owner_wallet> <lovelace>");
-      await init(args[0], args[1]);
-    } else if (cmd === "add-delegate") {
-      if (args.length !== 5) {
-        throw new Error(
-          "Usage: add-delegate <owner_wallet> <delegate_wallet> <txHash> <outputIndex> <expiresMs>",
-        );
-      }
-      await addDelegate(args[0], args[1], args[2], Number(args[3]), args[4]);
-    } else if (cmd === "remove-delegate") {
-      if (args.length !== 4) {
-        throw new Error(
-          "Usage: remove-delegate <owner_wallet> <delegate_wallet> <txHash> <outputIndex>",
-        );
-      }
-      await removeDelegate(args[0], args[1], args[2], Number(args[3]));
-    } else if (cmd === "transfer-owner") {
-      if (args.length !== 4) {
-        throw new Error(
-          "Usage: transfer-owner <owner_wallet> <txHash> <outputIndex> <newOwnerAddress>",
-        );
-      }
-      await transferOwner(args[0], args[1], Number(args[2]), args[3]);
-    } else if (cmd === "show") {
-      if (args.length !== 2) throw new Error("Usage: show <txHash> <outputIndex>");
-      await show(args[0], Number(args[1]));
-    } else {
-      console.log("Commands:");
-      console.log("  init <owner_wallet> <lovelace>");
-      console.log("  add-delegate <owner_wallet> <delegate_wallet> <txHash> <outputIndex> <expiresMs>");
-      console.log("  remove-delegate <owner_wallet> <delegate_wallet> <txHash> <outputIndex>");
-      console.log("  transfer-owner <owner_wallet> <txHash> <outputIndex> <newOwnerAddress>");
-      console.log("  show <txHash> <outputIndex>");
-    }
-  } catch (error) {
-    console.error(error instanceof Error ? error.message : error);
-    Deno.exit(1);
-  }
+  await runScenario();
 }

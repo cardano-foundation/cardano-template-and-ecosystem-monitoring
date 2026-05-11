@@ -1,235 +1,187 @@
-import { MeshWallet, KoiosProvider, 
-  serializePlutusScript, resolvePaymentKeyHash, Transaction, largestFirst, 
-  Asset} from '@meshsdk/core';
-import { applyParamsToScript, deserializeAddress } from '@meshsdk/core-cst';
-import { builtinByteString, list, PlutusScript } from "@meshsdk/common";
-
+import {
+  BlockfrostProvider,
+  MeshTxBuilder,
+  MeshWallet,
+  builtinByteString,
+  list,
+  mConStr0,
+  resolvePaymentKeyHash,
+  serializePlutusScript,
+  stringToHex,
+  type UTxO,
+} from "@meshsdk/core";
+import { applyParamsToScript } from "@meshsdk/core-csl";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
-function createWallet () {
-  const mnemonic = MeshWallet.brew();
-  if (typeof mnemonic === 'string') {
-    return mnemonic.split(' ');
-  }
-  return mnemonic
+// ----------------------------------------------------------------------------
+// Payment splitter — Mesh.js targeting yaci-devkit.
+// Validator parameter: list of payee VKHs. Spend rule: split locked lovelace
+// equally to all payees. The PAYER must also be a payee (otherwise its change
+// output's credential would be flagged as "additional payee").
+// ----------------------------------------------------------------------------
+
+const YACI_URL = "http://localhost:8080/api/v1";
+const NETWORK = "preprod";
+const NETWORK_ID = 0;
+const FUNDER_MNEMONIC =
+  "test test test test test test test test test test test test test test test test test test test test test test test sauce";
+const PAYEE_COUNT = 5;
+
+function provider(): BlockfrostProvider {
+  return new BlockfrostProvider(YACI_URL);
 }
-
-async function prepare (payeeAmount: number) {
-  let mnemonic = createWallet();
-  const koiosProvider = new KoiosProvider('preprod');
-  
-  const addresses = [];
-  for (let i = 0; i < payeeAmount; i++) {
-    const wallet = new MeshWallet({
-        networkId: 0,
-        fetcher: koiosProvider,
-        submitter: koiosProvider,
-        key: {
-            type: 'mnemonic',
-            words: mnemonic,
-        },
-    });
-    // TODO: remove comment after upgrading to npm:@meshsdk/core@1.9.x
-    // await wallet.init();
-    const address = await wallet.getChangeAddress();
-    addresses.push(address);
-    Deno.writeTextFileSync(`payee_${i}.txt`, JSON.stringify(mnemonic));
-    mnemonic = createWallet();
-  }
-  console.log(`Successfully prepared ${payeeAmount} payees (seed phrases).`);
-  console.log(`Make sure to send some tADA to the payee ${addresses[0]} 
-  as this payee will be used in this example, to submit the transaction. 
-  Therefore enough tAda for covering fees and to provide a collateral will be needed.`);
-}
-
-async function setup () {
-  const koiosProvider = new KoiosProvider('preprod');
-  const mnemonic = JSON.parse(Deno.readTextFileSync("payee_0.txt"));
-
-  const wallet = new MeshWallet({
-    networkId: 0,
-    fetcher: koiosProvider,
-    submitter: koiosProvider,
-    key: {
-      type: 'mnemonic',
-      words: mnemonic,
-    },
+function makeWallet(words: string[]): MeshWallet {
+  const p = provider();
+  return new MeshWallet({
+    networkId: NETWORK_ID,
+    fetcher: p,
+    submitter: p,
+    key: { type: "mnemonic", words },
   });
-    // TODO: remove comment after upgrading to npm:@meshsdk/core@1.9.x
-    // await wallet.init();
-  const files = Deno.readDirSync('.')
-
-  const payeeSeeds = [];
-  for (const file of files) {
-    if (file.name.match(/payee_[0-9]+.txt/) !== null) {
-      payeeSeeds.push(file.name);
-    }
-  }
-
-  const payees = [];
-  for (const payeeSeed of payeeSeeds) {
-    const seed = JSON.parse(Deno.readTextFileSync(payeeSeed));
-    const payee = new MeshWallet({
-      networkId: 0,
-      fetcher: koiosProvider,
-      submitter: koiosProvider,
-      key: {
-        type: 'mnemonic',
-        words: seed,
-      },
-    });
-    // TODO: remove comment after upgrading to npm:@meshsdk/core@1.9.x
-    // await payee.init();
-    payees.push(await payee.getChangeAddress());
-  }
-
-  const plutusData = list(
-    payees.map((payee) => {
-      const paymentCredential = deserializeAddress(payee).asBase()?.getPaymentCredential().hash
-      if (paymentCredential) {
-        return builtinByteString(paymentCredential)
-      }
-  }));
-  
-  const parameterizedScript = applyParamsToScript(
-          blueprint.validators[0].compiledCode,
-          [plutusData],
-          "JSON",
-        );
-
-  const script: PlutusScript = {
-    code: parameterizedScript,
-    version: "V3",
-  };
-  const scriptAddress = serializePlutusScript(script, undefined, 0);
-
-  return {
-    koiosProvider,
-    wallet,
-    scriptAddress,
-    script,
-    payees
-  }
+}
+function funderWallet(): MeshWallet {
+  return makeWallet(FUNDER_MNEMONIC.split(/\s+/));
 }
 
-async function lockAda(lovelaceAmount: string) {
-  const { wallet, scriptAddress } = await setup();
-  const paymentAddress = await wallet.getChangeAddress();
+async function waitForUtxoAt(addr: string, minCount = 1, timeoutSec = 60) {
+  const p = provider();
+  for (let i = 0; i < timeoutSec; i++) {
+    try {
+      const u = await p.fetchAddressUTxOs(addr);
+      if (u.length >= minCount) return;
+    } catch { /* transient */ }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${addr}`);
+}
 
-  const hash = resolvePaymentKeyHash(paymentAddress);
-  const datum = {
-      alternative: 0,
-      fields: [hash],
-  };
+async function fundFromFunder(targets: Array<{ addr: string; lovelace: bigint }>) {
+  const wallet = funderWallet();
+  const myAddr = await wallet.getChangeAddress();
+  const myUtxos = await provider().fetchAddressUTxOs(myAddr);
+  const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
+    .setNetwork(NETWORK);
+  let b = tx as unknown as MeshTxBuilder;
+  for (const t of targets) {
+    b = b.txOut(t.addr, [{ unit: "lovelace", quantity: t.lovelace.toString() }]);
+  }
+  await b.changeAddress(myAddr).selectUtxosFrom(myUtxos).complete();
+  const signed = await wallet.signTx(tx.txHex);
+  const txHash = await wallet.submitTx(signed);
+  console.log(`Funded ${targets.length} addr(s). tx=${txHash}`);
+  for (const t of targets) await waitForUtxoAt(t.addr, 1);
+}
 
-  const tx = new Transaction({ initiator: wallet }).sendLovelace(
-      {
-      address: scriptAddress.address,
-      datum: { value: datum }
-      },
-      lovelaceAmount
+function getScriptInfo(payeeVkhs: string[]) {
+  const compiled = blueprint.validators[0].compiledCode;
+  const script = applyParamsToScript(
+    compiled,
+    [list(payeeVkhs.map((vkh) => builtinByteString(vkh)))],
+    "JSON",
   );
-
-  const unsignedTx = await tx.build();
-  const signedTx = await wallet.signTx(unsignedTx);
-  const txHash = await wallet.submitTx(signedTx);
-  console.log(`Successfully locked ${lovelaceAmount} lovelace to the script address ${scriptAddress.address}.\n
-  See: https://preprod.cexplorer.io/tx/${txHash}`);
-};
-
-async function unlockAda () {
-  const { koiosProvider, wallet, scriptAddress, script, payees } = await setup();
-  const utxos = await koiosProvider.fetchAddressUTxOs(scriptAddress.address);
-  const paymentAddress = await wallet.getChangeAddress();
-
-  const lovelaceForCollateral = "5000000";
-  const collateralUtxos = largestFirst(lovelaceForCollateral, await koiosProvider.fetchAddressUTxOs(paymentAddress));
-  const pubKeyHash = deserializeAddress(await wallet.getChangeAddress()).asBase()?.getPaymentCredential().hash || '';
-  const datum = {
-    alternative: 0,
-    fields: [pubKeyHash],
-  };
-
-  const redeemerData = "Hello, World!";
-  const redeemer = { data: { alternative: 0, fields: [redeemerData] } };
-
-  let tx = new Transaction({ initiator: wallet, fetcher: koiosProvider });
-  tx.setNetwork('preprod')
-  let split = 0;
-  for (const utxo of utxos) {
-    const amount: Asset[] = utxo.output?.amount;
-    if (amount) {
-      const lovelace = amount.find((asset) => asset.unit === 'lovelace');
-      if (lovelace) {
-        split += Math.floor(Number(lovelace.quantity) / payees.length);
-      }
-
-      tx = tx.redeemValue({
-        value: utxo,
-        script: script,
-        datum: datum,
-        redeemer: redeemer,
-      })
-    }
-  }
-
-  tx = tx.setCollateral(collateralUtxos);
-  for (const payee of payees) {   
-      tx = tx.sendLovelace(
-          payee,
-          split.toString()
-      )
-  }
-
-  tx = tx.setRequiredSigners([paymentAddress]);
-  const unsignedTx = await tx.build();
-  try {
-    const signedTx = await wallet.signTx(unsignedTx, true);
-    const txHash = await wallet.submitTx(signedTx);
-    console.log(`Successfully unlocked the lovelace from the script address ${scriptAddress.address} and split it equally (${split} Lovelace) to all payees.\n
-    See: https://preprod.cexplorer.io/tx/${txHash}`);
-  } catch (error) {
-    console.warn(error);
-  }
-};
-
-const isPositiveNumber = (s: string) => Number.isInteger(Number(s)) && Number(s) > 0
-
-if (Deno.args.length > 0) {
-  if (Deno.args[0] === 'lock') {
-    if (Deno.args.length > 1 && isPositiveNumber(Deno.args[1])) {
-      await lockAda(Deno.args[1]);
-    } else {
-      console.log('Expected a positive number (lovelace amount) as the second argument.');
-      console.log('Example usage: node use-payment-splitter.js lock 10000000');
-    } 
-  } else if (Deno.args[0] === 'unlock') {
-    await unlockAda();
-  } else if (Deno.args[0] === 'prepare') {
-    if (Deno.args.length > 1 && isPositiveNumber(Deno.args[1])) {
-      const files = Deno.readDirSync('.');
-      const payeeSeeds = [];
-      for (const file of files) {
-        if (file.name.match(/payee_[0-9]+.txt/) !== null) {
-          payeeSeeds.push(file.name);
-        }
-      }
-
-      if (payeeSeeds.length > 0) {
-        console.log('Seed phrases (files with format payee_[0-9]+.txt) already exist. Please remove them before preparing new ones.');
-      } else {
-        await prepare(parseInt(Deno.args[1]));
-      }
-    } else {
-      console.log('Expected a positive number (of seed phrases to prepare) as the second argument.');
-      console.log('Example usage: node use-payment-splitter.js prepare 5');
-    }    
-  } else {
-    console.log('Invalid argument. Allowed arguments are "lock", "unlock" or "prepare".');
-    console.log('Example usage: node use-payment-splitter.js prepare');
-  }
-} else {
-  console.log('Expected an argument. Allowed arguments are "lock", "unlock" or "prepare".');
-  console.log('Example usage: node use-payment-splitter.js prepare 5');
+  const { address: scriptAddress } = serializePlutusScript(
+    { code: script, version: "V3" },
+    undefined,
+    NETWORK_ID,
+  );
+  return { script, scriptAddress };
 }
 
+async function lockAda(payer: MeshWallet, payeeVkhs: string[], lovelace: bigint) {
+  const myAddr = await payer.getChangeAddress();
+  const ownerVkh = resolvePaymentKeyHash(myAddr);
+  const { scriptAddress } = getScriptInfo(payeeVkhs);
+
+  const utxos = await provider().fetchAddressUTxOs(myAddr);
+  const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
+    .setNetwork(NETWORK);
+  await tx
+    .txOut(scriptAddress, [{ unit: "lovelace", quantity: lovelace.toString() }])
+    .txOutInlineDatumValue(mConStr0([ownerVkh]))
+    .changeAddress(myAddr)
+    .selectUtxosFrom(utxos)
+    .complete();
+  const signed = await payer.signTx(tx.txHex);
+  const txHash = await payer.submitTx(signed);
+  console.log(`LOCK ok. ${lovelace} lovelace. tx=${txHash}`);
+}
+
+async function payout(
+  payer: MeshWallet,
+  payeeAddrs: string[],
+  payeeVkhs: string[],
+) {
+  const myAddr = await payer.getChangeAddress();
+  const ownerVkh = resolvePaymentKeyHash(myAddr);
+  const { script, scriptAddress } = getScriptInfo(payeeVkhs);
+
+  let scriptUtxos: UTxO[] = [];
+  for (let i = 0; i < 60; i++) {
+    scriptUtxos = await provider().fetchAddressUTxOs(scriptAddress);
+    if (scriptUtxos.length > 0) break;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  if (scriptUtxos.length === 0) throw new Error("No script UTxOs to spend");
+  const utxo = scriptUtxos[0];
+  const totalLovelace = BigInt(
+    utxo.output.amount.find((a) => a.unit === "lovelace")!.quantity,
+  );
+  const share = totalLovelace / BigInt(PAYEE_COUNT);
+
+  const ownUtxos = await provider().fetchAddressUTxOs(myAddr);
+  const collateral: UTxO[] = await payer.getCollateral();
+  const redeemer = mConStr0([stringToHex("payout")]);
+
+  const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
+    .setNetwork(NETWORK);
+  let b = tx
+    .spendingPlutusScriptV3()
+    .txIn(utxo.input.txHash, utxo.input.outputIndex, utxo.output.amount, scriptAddress)
+    .txInScript(script)
+    .txInRedeemerValue(redeemer)
+    .txInInlineDatumPresent();
+  for (const addr of payeeAddrs) {
+    b = b.txOut(addr, [{ unit: "lovelace", quantity: share.toString() }]);
+  }
+  await b
+    .txInCollateral(
+      collateral[0].input.txHash,
+      collateral[0].input.outputIndex,
+      collateral[0].output.amount,
+      collateral[0].output.address,
+    )
+    .requiredSignerHash(ownerVkh)
+    .changeAddress(myAddr)
+    .selectUtxosFrom(ownUtxos)
+    .complete();
+  const signed = await payer.signTx(tx.txHex, true);
+  const txHash = await payer.submitTx(signed);
+  console.log(`PAYOUT ok. share=${share} tx=${txHash}`);
+}
+
+async function runScenario() {
+  console.log("=== payment-splitter scenario: lock → payout ===");
+  // Generate 5 brewed payees; payee[0] is the payer (must be one of the
+  // payees so its change output doesn't introduce a non-payee credential).
+  const payeeWallets: MeshWallet[] = [];
+  const payeeAddrs: string[] = [];
+  const payeeVkhs: string[] = [];
+  for (let i = 0; i < PAYEE_COUNT; i++) {
+    const w = makeWallet(MeshWallet.brew(false) as string[]);
+    payeeWallets.push(w);
+    const a = await w.getChangeAddress();
+    payeeAddrs.push(a);
+    payeeVkhs.push(resolvePaymentKeyHash(a));
+  }
+  // Fund payer (account 0 here = payee[0]) with enough to cover lock + fees.
+  await fundFromFunder([{ addr: payeeAddrs[0], lovelace: 80_000_000n }]);
+
+  await lockAda(payeeWallets[0], payeeVkhs, 50_000_000n);
+  await new Promise((r) => setTimeout(r, 3000));
+  await payout(payeeWallets[0], payeeAddrs, payeeVkhs);
+  console.log("=== Scenario complete ===");
+}
+
+if (import.meta.main) {
+  await runScenario();
+}

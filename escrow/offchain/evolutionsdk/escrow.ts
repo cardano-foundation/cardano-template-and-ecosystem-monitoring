@@ -1,102 +1,158 @@
-import { 
-  Data, 
-  validatorToAddress, 
-  Validator, 
-  Assets,
-  generateSeedPhrase
-} from "@evolution-sdk/lucid";
-
-import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 import {
-  getLucid,
-  getWallet,
-  showAddresses,
-  checkBalances,
-  transfer,
-  loadStore,
-  saveStore,
-  addressToData,
-  assetsToMValue,
-  mergeAssets,
-  waitForUtxo
-} from "./lib/utils.ts";
-import { 
-  EscrowDatum, 
-  EscrowRedeemer 
-} from "./types.ts";
+  Lucid,
+  Blockfrost,
+  Data,
+  type Assets,
+  type LucidEvolution,
+  validatorToAddress,
+  type Validator,
+  getAddressDetails,
+} from "@evolution-sdk/lucid";
+import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
+import { EscrowDatum, EscrowRedeemer } from "./types.ts";
 
-/**
- * Setup Lucid and the Validator
- */
-async function setup() {
-  const lucid = await getLucid();
-  const script = blueprint.validators[0].compiledCode;
-  const validator: Validator = {
-    type: "PlutusV3",
-    script: script,
-  };
-  const scriptAddress = validatorToAddress("Preprod", validator);
+// ----------------------------------------------------------------------------
+// Escrow — Evolution SDK targeting yaci-devkit.
+// Initiation → ActiveEscrow → CompleteTrade (or CancelTrade) flow exercised end-to-end.
+// ----------------------------------------------------------------------------
 
-  return { lucid, scriptAddress, validator };
+const YACI_URL = "http://localhost:8080/api/v1";
+const NETWORK = "Preprod" as const;
+const TEST_MNEMONIC =
+  "test test test test test test test test test test test test test test test test test test test test test test test sauce";
+
+async function lucidAt(accountIndex: number): Promise<LucidEvolution> {
+  const lucid = await Lucid(new Blockfrost(YACI_URL, "Dummy Key"), NETWORK);
+  lucid.selectWallet.fromSeed(TEST_MNEMONIC, { accountIndex });
+  return lucid;
 }
 
-/**
- * Step 1: Initiator locks assets into the Escrow Contract
- */
-async function initiateEscrow(walletIndex: number, assets: Assets) {
-  const { lucid, scriptAddress } = await setup();
-  const wallet = await getWallet(lucid, walletIndex);
-  const address = await wallet.address();
+async function waitForUtxosAt(
+  lucid: LucidEvolution,
+  address: string,
+  minCount: number,
+  timeoutSec = 60,
+) {
+  for (let i = 0; i < timeoutSec; i++) {
+    try {
+      const u = await lucid.utxosAt(address);
+      if (u.length >= minCount) return;
+    } catch { /* transient */ }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${address}`);
+}
 
+async function waitForOutRef(
+  lucid: LucidEvolution,
+  txHash: string,
+  outputIndex = 0,
+  timeoutSec = 60,
+) {
+  for (let i = 0; i < timeoutSec; i++) {
+    try {
+      const u = await lucid.utxosByOutRef([{ txHash, outputIndex }]);
+      if (u.length > 0) return u[0];
+    } catch { /* transient */ }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  throw new Error(`Timed out waiting for ${txHash}#${outputIndex}`);
+}
+
+async function fundFromIndex0(targets: Array<{ address: string; lovelace: bigint }>) {
+  const lucid = await lucidAt(0);
+  let txb = lucid.newTx();
+  for (const t of targets) txb = txb.pay.ToAddress(t.address, { lovelace: t.lovelace });
+  const tx = await txb.complete();
+  const signed = await tx.sign.withWallet().complete();
+  const txHash = await signed.submit();
+  console.log(`Funded ${targets.length} target(s). tx=${txHash}`);
+  for (const t of targets) await waitForUtxosAt(lucid, t.address, 1, 60);
+  await new Promise((r) => setTimeout(r, 2000));
+}
+
+function setup() {
+  const validator: Validator = {
+    type: "PlutusV3",
+    script: blueprint.validators[0].compiledCode,
+  };
+  return { validator, scriptAddress: validatorToAddress(NETWORK, validator) };
+}
+
+function addressToData(addr: string) {
+  const d = getAddressDetails(addr);
+  const pc = d.paymentCredential!;
+  const sc = d.stakeCredential;
+  return {
+    payment_credential: pc.type === "Key"
+      ? { VerificationKey: [pc.hash] as [string] }
+      : { Script: [pc.hash] as [string] },
+    stake_credential: sc
+      ? {
+        Inline: [
+          sc.type === "Key"
+            ? { VerificationKey: [sc.hash] as [string] }
+            : { Script: [sc.hash] as [string] },
+        ] as [unknown],
+      }
+      : null,
+  };
+}
+
+function assetsToMValue(assets: Assets): Map<string, Map<string, bigint>> {
+  const m = new Map<string, Map<string, bigint>>();
+  for (const [unit, q] of Object.entries(assets)) {
+    const policy = unit === "lovelace" ? "" : unit.slice(0, 56);
+    const name = unit === "lovelace" ? "" : unit.slice(56);
+    const inner = m.get(policy) ?? new Map<string, bigint>();
+    inner.set(name, q);
+    m.set(policy, inner);
+  }
+  return m;
+}
+
+function mergeAssets(a: Assets, b: Assets): Assets {
+  const out: Assets = { ...a };
+  for (const [k, v] of Object.entries(b)) out[k] = (out[k] ?? 0n) + v;
+  return out;
+}
+
+async function initiate(initiator: LucidEvolution, assets: Assets): Promise<string> {
+  const { scriptAddress } = setup();
+  const initAddr = await initiator.wallet().address();
   const datum = Data.to(
     {
       Initiation: {
-        initiator: addressToData(address),
+        initiator: addressToData(initAddr),
         initiator_assets: assetsToMValue(assets),
       },
-    } as any,
-    EscrowDatum
+    } as never,
+    EscrowDatum as never,
   );
-
-  const tx = await lucid.newTx()
+  const tx = await initiator
+    .newTx()
     .pay.ToContract(scriptAddress, { kind: "inline", value: datum }, assets)
-    .addSigner(address)
+    .addSigner(initAddr)
     .complete();
-
-  try {
-    const signedTx = await tx.sign.withWallet();
-    const txHash = await (await signedTx.complete()).submit();
-    
-    const store = await loadStore();
-    store.push({
-      txHash,
-      initiator: address,
-      initiatorAssets: assets,
-      state: "Initiation",
-    });
-    await saveStore(store);
-
-    console.log(`Escrow initiated. TxHash: ${txHash}`);
-    console.log(`See: https://preprod.cexplorer.io/tx/${txHash}`);
-  } catch (error) {
-    console.error("Error while initiating escrow:", error);
-  }
+  const signed = await tx.sign.withWallet().complete();
+  const txHash = await signed.submit();
+  console.log(`INITIATE ok. tx=${txHash}`);
+  return txHash;
 }
 
-/**
- * Step 2: Recipient deposits assets to move the contract to ActiveEscrow state
- */
-async function depositEscrow(txHash: string, walletIndex: number, recipientAssets: Assets) {
-  const { lucid, scriptAddress, validator } = await setup();
-  const wallet = await getWallet(lucid, walletIndex);
-  const recipientAddr = await wallet.address();
-
-  const utxo = await waitForUtxo(lucid, txHash, scriptAddress);
-  if (!utxo.datum) throw new Error("UTXO missing datum");
-
-  const inputDatum = Data.from(utxo.datum, EscrowDatum) as any;
-  if (!("Initiation" in inputDatum)) throw new Error("Contract not in Initiation state");
-
+async function deposit(
+  recipient: LucidEvolution,
+  initTxHash: string,
+  recipientAssets: Assets,
+): Promise<string> {
+  const { validator, scriptAddress } = setup();
+  const recipientAddr = await recipient.wallet().address();
+  const utxo = await waitForOutRef(recipient, initTxHash, 0);
+  if (!utxo.datum) throw new Error("UTxO missing datum");
+  const inputDatum = Data.from(utxo.datum, EscrowDatum as never) as {
+    Initiation: { initiator: unknown; initiator_assets: unknown };
+  };
+  if (!("Initiation" in inputDatum)) throw new Error("Not in Initiation state");
   const { initiator, initiator_assets } = inputDatum.Initiation;
 
   const redeemer = Data.to(
@@ -105,10 +161,9 @@ async function depositEscrow(txHash: string, walletIndex: number, recipientAsset
         recipient: addressToData(recipientAddr),
         recipient_assets: assetsToMValue(recipientAssets),
       },
-    } as any,
-    EscrowRedeemer
+    } as never,
+    EscrowRedeemer as never,
   );
-
   const outputDatum = Data.to(
     {
       ActiveEscrow: {
@@ -117,273 +172,109 @@ async function depositEscrow(txHash: string, walletIndex: number, recipientAsset
         initiator_assets,
         recipient_assets: assetsToMValue(recipientAssets),
       },
-    } as any,
-    EscrowDatum
+    } as never,
+    EscrowDatum as never,
   );
-
   const totalValue = mergeAssets(utxo.assets, recipientAssets);
-
-  const tx = await lucid.newTx()
+  const tx = await recipient
+    .newTx()
     .collectFrom([utxo], redeemer)
     .attach.SpendingValidator(validator)
     .pay.ToContract(scriptAddress, { kind: "inline", value: outputDatum }, totalValue)
     .addSigner(recipientAddr)
-    .validTo(Date.now() + 100000)
     .complete();
-
-  try {
-    const signedTx = await tx.sign.withWallet();
-    const resultHash = await (await signedTx.complete()).submit();
-
-    const store = await loadStore();
-    const escrow = store.find(e => e.txHash === txHash);
-    if (escrow) {
-      escrow.txHash = resultHash;
-      escrow.recipient = recipientAddr;
-      escrow.recipientAssets = recipientAssets;
-      escrow.state = "ActiveEscrow";
-      await saveStore(store);
-    }
-
-    console.log(`Recipient deposited. State is now Active. TxHash: ${resultHash}`);
-    console.log(`See: https://preprod.cexplorer.io/tx/${resultHash}`);
-  } catch (error) {
-    console.error("Error while depositing to escrow:", error);
-  }
+  const signed = await tx.sign.withWallet().complete();
+  const txHash = await signed.submit();
+  console.log(`DEPOSIT ok. tx=${txHash}`);
+  return txHash;
 }
 
-/**
- * Step 3: Finalize trade (Swap assets to respective parties)
- */
-async function completeTrade(txHash: string, initiatorWalletIndex: number, recipientWalletIndex: number) {
-  const { lucid, scriptAddress, validator } = await setup();
-  
-  // Select a wallet to pay fees (e.g. initiator)
-  await getWallet(lucid, initiatorWalletIndex);
+async function completeTrade(
+  initiator: LucidEvolution,
+  recipient: LucidEvolution,
+  activeTx: string,
+  initiatorAddr: string,
+  recipientAddr: string,
+  initiatorAssets: Assets,
+  recipientAssets: Assets,
+) {
+  const { validator } = setup();
+  const utxo = await waitForOutRef(initiator, activeTx, 0);
+  const redeemer = Data.to("CompleteTrade", EscrowRedeemer as never);
 
-  const utxo = await waitForUtxo(lucid, txHash, scriptAddress);
-  if (!utxo.datum) throw new Error("UTXO missing datum");
-
-  const datum = Data.from(utxo.datum, EscrowDatum);
-  if (!("ActiveEscrow" in datum)) throw new Error("Escrow is not active");
-
-  const redeemer = Data.to("CompleteTrade", EscrowRedeemer as any);
-
-  const store = await loadStore();
-  const escrow = store.find(e => e.txHash === txHash);
-  if (!escrow || !escrow.recipient) throw new Error("Escrow not found in store or recipient missing");
-
-  const tx = await lucid.newTx()
+  const tx = await initiator
+    .newTx()
     .collectFrom([utxo], redeemer)
     .attach.SpendingValidator(validator)
-    .pay.ToAddress(escrow.initiator, escrow.recipientAssets!)
-    .pay.ToAddress(escrow.recipient, escrow.initiatorAssets)
-    .addSigner(escrow.initiator)
-    .addSigner(escrow.recipient)
+    .pay.ToAddress(initiatorAddr, recipientAssets)
+    .pay.ToAddress(recipientAddr, initiatorAssets)
+    .addSigner(initiatorAddr)
+    .addSigner(recipientAddr)
     .complete();
-
-  try {
-    // Note: This requires both parties to sign the transaction
-    const txComplete = tx;
-
-    const txCBOR = txComplete.toCBOR();
-
-    await getWallet(lucid, initiatorWalletIndex);
-    const witness1 = await lucid.fromTx(txCBOR).partialSign.withWallet();
-    
-    await getWallet(lucid, recipientWalletIndex);
-    const witness2 = await lucid.fromTx(txCBOR).partialSign.withWallet();
-    
-    const signedTx = await lucid.fromTx(txCBOR).assemble([witness1, witness2]).complete();
-    const resultHash = await signedTx.submit();
-
-    // Remove from store as it's completed
-    const newStore = store.filter(e => e.txHash !== txHash);
-    await saveStore(newStore);
-
-    console.log(`Trade Completed! Assets Swapped. TxHash: ${resultHash}`);
-    console.log(`See: https://preprod.cexplorer.io/tx/${resultHash}`);
-  } catch (error) {
-    console.error("Error while completing trade:", error);
-  }
+  const partial1 = await initiator.fromTx(tx.toCBOR()).partialSign.withWallet();
+  const partial2 = await recipient.fromTx(tx.toCBOR()).partialSign.withWallet();
+  const signed = await tx.sign.withWallet().assemble([partial1, partial2]).complete();
+  const txHash = await signed.submit();
+  console.log(`COMPLETE ok. tx=${txHash}`);
 }
 
-/**
- * Step 4: Cancel Trade (Refund assets)
- */
-async function cancelTrade(txHash: string, walletIndex: number) {
-  const { lucid, scriptAddress, validator } = await setup();
-  const wallet = await getWallet(lucid, walletIndex);
-  const signerAddr = await wallet.address();
-
-  const utxo = await waitForUtxo(lucid, txHash, scriptAddress);
-  if (!utxo.datum) throw new Error("UTXO missing datum");
-
-  const datum = Data.from(utxo.datum, EscrowDatum);
-  const redeemer = Data.to("CancelTrade", EscrowRedeemer as any);
-
-  const store = await loadStore();
-  const escrow = store.find(e => e.txHash === txHash);
-  if (!escrow) throw new Error("Escrow not found in store");
-
-  const tx = lucid.newTx()
+async function cancelInInitiation(
+  initiator: LucidEvolution,
+  initTxHash: string,
+  initiatorAddr: string,
+) {
+  const { validator } = setup();
+  const utxo = await waitForOutRef(initiator, initTxHash, 0);
+  const redeemer = Data.to("CancelTrade", EscrowRedeemer as never);
+  const tx = await initiator
+    .newTx()
     .collectFrom([utxo], redeemer)
     .attach.SpendingValidator(validator)
-    .addSigner(signerAddr);
-
-  if ("Initiation" in datum) {
-    tx.pay.ToAddress(escrow.initiator, utxo.assets);
-  } else if ("ActiveEscrow" in datum) {
-    tx.pay.ToAddress(escrow.initiator, escrow.initiatorAssets)
-      .pay.ToAddress(escrow.recipient!, escrow.recipientAssets!);
-  }
-
-  try {
-    const finishedTx = await tx.complete();
-    const signedTx = await finishedTx.sign.withWallet();
-    const resultHash = await (await signedTx.complete()).submit();
-
-    // Remove from store
-    const newStore = store.filter(e => e.txHash !== txHash);
-    await saveStore(newStore);
-
-    console.log(`Trade Cancelled. Funds Refunded. TxHash: ${resultHash}`);
-    console.log(`See: https://preprod.cexplorer.io/tx/${resultHash}`);
-  } catch (error) {
-    console.error("Error while cancelling trade:", error);
-  }
+    .pay.ToAddress(initiatorAddr, utxo.assets)
+    .addSigner(initiatorAddr)
+    .complete();
+  const signed = await tx.sign.withWallet().complete();
+  const txHash = await signed.submit();
+  console.log(`CANCEL (initiation) ok. tx=${txHash}`);
 }
 
-/**
- * List all escrow UTXOs from the store
- */
-async function listUtxos() {
-  const { lucid, scriptAddress } = await setup();
-  const store = await loadStore();
-  
-  if (store.length === 0) {
-    console.log("No escrows found in store.");
-    return;
-  }
+async function runScenario() {
+  console.log("=== escrow scenario: initiate → deposit → complete-trade ; initiate → cancel ===");
+  const initiator = await lucidAt(1);
+  const recipient = await lucidAt(2);
+  const initAddr = await initiator.wallet().address();
+  const recipAddr = await recipient.wallet().address();
+  await fundFromIndex0([
+    { address: initAddr, lovelace: 30_000_000n },
+    { address: recipAddr, lovelace: 30_000_000n },
+  ]);
 
-  console.log(`Checking escrows at ${scriptAddress}...`);
-  const utxos = await lucid.utxosAt(scriptAddress);
+  // Happy path: initiator locks 5M, recipient deposits 7M, trade swaps assets.
+  const initiatorAssets: Assets = { lovelace: 5_000_000n };
+  const recipientAssets: Assets = { lovelace: 7_000_000n };
+  const initTx = await initiate(initiator, initiatorAssets);
+  await new Promise((r) => setTimeout(r, 2000));
+  const activeTx = await deposit(recipient, initTx, recipientAssets);
+  await new Promise((r) => setTimeout(r, 2000));
+  await completeTrade(
+    initiator,
+    recipient,
+    activeTx,
+    initAddr,
+    recipAddr,
+    initiatorAssets,
+    recipientAssets,
+  );
+  await new Promise((r) => setTimeout(r, 2000));
 
-  for (const escrow of store) {
-    console.log(`--- Escrow ${escrow.txHash} ---`);
-    console.log(`State: ${escrow.state}`);
-    console.log(`Initiator: ${escrow.initiator}`);
-    if (escrow.recipient) console.log(`Recipient: ${escrow.recipient}`);
-    
-    const utxo = utxos.find((u) => u.txHash === escrow.txHash);
+  // Cancel path: initiator locks 4M, then cancels.
+  const initTx2 = await initiate(initiator, { lovelace: 4_000_000n });
+  await new Promise((r) => setTimeout(r, 2000));
+  await cancelInInitiation(initiator, initTx2, initAddr);
 
-    if (utxo) {
-      console.log(`Status: ON-CHAIN (UTXO found)`);
-      console.log(`Assets: ${JSON.stringify(utxo.assets, (_, v) => typeof v === 'bigint' ? v.toString() : v)}`);
-    } else {
-      console.log(`Status: SPENT or NOT FOUND`);
-    }
-    console.log("");
-  }
+  console.log("=== Scenario complete ===");
 }
 
-/**
- * Prepare wallets for testing
- */
-async function prepare(amount: number) {
-  const lucid = await getLucid();
-
-  const addresses = [];
-  for (let i = 0; i < amount; i++) {
-    const mnemonic = generateSeedPhrase();
-    lucid.selectWallet.fromSeed(mnemonic);
-    const address = await lucid.wallet().address();
-    addresses.push(address);
-    Deno.writeTextFileSync(`wallet_${i}.txt`, mnemonic);
-  }
-  console.log(`Successfully prepared ${amount} wallet (seed phrases).`);
-  console.log(`Make sure to send some tADA to the wallet ${addresses[0]} for fees and collateral.`);
-}
-
-const isPositiveNumber = (s: string) => Number.isInteger(Number(s)) && Number(s) > 0;
-
-if (Deno.args.length > 0) {
-  const command = Deno.args[0];
-  
-  switch (command) {
-    case "prepare":
-      if (Deno.args.length > 1 && isPositiveNumber(Deno.args[1])) {
-        await prepare(parseInt(Deno.args[1]));
-      } else {
-        console.log("Usage: deno run -A escrow.ts prepare <amount>");
-      }
-      break;
-
-    case "initiate":
-      // Example: deno run -A escrow.ts initiate 0 10000000
-      if (Deno.args.length > 2 && isPositiveNumber(Deno.args[2])) {
-        const walletIdx = parseInt(Deno.args[1]);
-        const lovelace = BigInt(Deno.args[2]);
-        await initiateEscrow(walletIdx, { lovelace });
-      } else {
-        console.log("Usage: deno run -A escrow.ts initiate <walletIndex> <lovelace>");
-      }
-      break;
-
-    case "deposit":
-      // Example: deno run -A escrow.ts deposit <txHash> 1 5000000
-      if (Deno.args.length > 3 && isPositiveNumber(Deno.args[3])) {
-        const txHash = Deno.args[1];
-        const walletIdx = parseInt(Deno.args[2]);
-        const lovelace = BigInt(Deno.args[3]);
-        await depositEscrow(txHash, walletIdx, { lovelace });
-      } else {
-        console.log("Usage: deno run -A escrow.ts deposit <txHash> <walletIndex> <lovelace>");
-      }
-      break;
-
-    case "complete":
-      if (Deno.args.length > 1) {
-        await completeTrade(Deno.args[1], 0, 1);
-      } else {
-        console.log("Usage: deno run -A escrow.ts complete <txHash>");
-      }
-      break;
-
-    case "cancel":
-      if (Deno.args.length > 2) {
-        await cancelTrade(Deno.args[1], parseInt(Deno.args[2]));
-      } else {
-        console.log("Usage: deno run -A escrow.ts cancel <txHash> <walletIndex>");
-      }
-      break;
-
-    case "show-addresses":
-      await showAddresses();
-      break;
-
-    case "balances":
-      await checkBalances();
-      break;
-
-    case "list-utxos":
-      await listUtxos();
-      break;
-
-    case "transfer":
-      if (Deno.args.length >= 4) {
-        const from = parseInt(Deno.args[1]);
-        const to = parseInt(Deno.args[2]);
-        const amount = Deno.args[3];
-        await transfer(from, to, amount);
-      } else {
-        console.log('Usage: deno run -A escrow.ts transfer <fromIndex> <toIndex> <amountLovelace>');
-      }
-      break;
-
-    default:
-      console.log("Commands: prepare, initiate, deposit, complete, cancel, show-addresses, balances, list-utxos, transfer");
-  }
-} else {
-  console.log("Expected an argument. Commands: prepare, initiate, deposit, complete, cancel, show-addresses, balances, list-utxos, transfer");
+if (import.meta.main) {
+  await runScenario();
 }

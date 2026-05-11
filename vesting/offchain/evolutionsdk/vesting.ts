@@ -1,150 +1,215 @@
 import {
   Lucid,
-  Koios,
-  applyParamsToScript,
+  Blockfrost,
   Constr,
   Data,
-  generateSeedPhrase,
+  applyParamsToScript,
   getAddressDetails,
   validatorToAddress,
   type LucidEvolution,
   type Validator,
 } from "@evolution-sdk/lucid";
+import { SLOT_CONFIG_NETWORK } from "@evolution-sdk/plutus";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
 // ----------------------------------------------------------------------------
-// Vesting — Evolution SDK port.
-//
-// Validator: no parameters.
-// Datum: VestingDatum { lock_until: Int, owner: ByteArray, beneficiary: ByteArray }
-// Spend allowed if (owner signed) OR (beneficiary signed AND now > lock_until).
+// Vesting — Evolution SDK targeting yaci-devkit.
+// Validator: spend allowed if owner signs OR (beneficiary signs AND now >
+// lock_until). Scenario exercises BOTH paths.
 // ----------------------------------------------------------------------------
 
-const KOIOS_URL = "https://preprod.koios.rest/api/v1";
+const YACI_URL = "http://localhost:8080/api/v1";
+const NETWORK = "Preview" as const;
+const TEST_MNEMONIC =
+  "test test test test test test test test test test test test test test test test test test test test test test test sauce";
+const ERA_OFFSET_SECONDS = 600;
 
-function selectWallet(lucid: LucidEvolution, index: string | number) {
-  const fileName = `wallet_${index}.txt`;
-  try {
-    const mnemonic = Deno.readTextFileSync(fileName).trim();
-    lucid.selectWallet.fromSeed(mnemonic);
-  } catch {
-    console.error(`Error reading ${fileName}. Run 'prepare' first.`);
-  }
+async function alignSlotConfig() {
+  const block = await fetch(`${YACI_URL}/blocks/latest`).then((r) => r.json());
+  const zeroTime = (block.time - block.slot + ERA_OFFSET_SECONDS) * 1000;
+  SLOT_CONFIG_NETWORK.Preview.zeroTime = zeroTime;
+  SLOT_CONFIG_NETWORK.Preview.zeroSlot = 0;
+  SLOT_CONFIG_NETWORK.Preview.slotLength = 1000;
 }
 
-async function prepare(amount: number) {
-  for (let i = 0; i < amount; i++) {
-    const fileName = `wallet_${i}.txt`;
+async function lucidAt(accountIndex: number): Promise<LucidEvolution> {
+  const lucid = await Lucid(new Blockfrost(YACI_URL, "Dummy Key"), NETWORK);
+  lucid.selectWallet.fromSeed(TEST_MNEMONIC, { accountIndex });
+  return lucid;
+}
+
+async function vkhOf(accountIndex: number): Promise<string> {
+  const l = await lucidAt(accountIndex);
+  return getAddressDetails(await l.wallet().address()).paymentCredential!.hash;
+}
+
+async function waitForUtxosAt(
+  lucid: LucidEvolution,
+  address: string,
+  minCount: number,
+  timeoutSec = 60,
+) {
+  for (let i = 0; i < timeoutSec; i++) {
     try {
-      await Deno.stat(fileName);
-      console.log(`${fileName} already exists, skipping.`);
-    } catch {
-      const mnemonic = generateSeedPhrase();
-      await Deno.writeTextFile(fileName, mnemonic);
-      const lucid = await Lucid(new Koios(KOIOS_URL), "Preprod");
-      lucid.selectWallet.fromSeed(mnemonic);
-      console.log(`Generated ${fileName}. Address: ${await lucid.wallet().address()}`);
-    }
+      const u = await lucid.utxosAt(address);
+      if (u.length >= minCount) return;
+    } catch { /* transient */ }
+    await new Promise((r) => setTimeout(r, 1000));
   }
+  throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${address}`);
+}
+
+async function fundFromIndex0(targets: Array<{ address: string; lovelace: bigint }>) {
+  const lucid = await lucidAt(0);
+  let txb = lucid.newTx();
+  for (const t of targets) txb = txb.pay.ToAddress(t.address, { lovelace: t.lovelace });
+  const tx = await txb.complete();
+  const signed = await tx.sign.withWallet().complete();
+  const txHash = await signed.submit();
+  console.log(`Funded ${targets.length} target(s). tx=${txHash}`);
+  for (const t of targets) await waitForUtxosAt(lucid, t.address, 1, 60);
 }
 
 function loadValidator(): { validator: Validator; scriptAddress: string } {
-  const compiledCode = blueprint.validators[0].compiledCode;
-  // No validator parameters.
-  const script = applyParamsToScript(compiledCode, []);
+  const script = applyParamsToScript(blueprint.validators[0].compiledCode, []);
   const validator: Validator = { type: "PlutusV3", script };
-  const scriptAddress = validatorToAddress("Preprod", validator);
-  return { validator, scriptAddress };
+  return { validator, scriptAddress: validatorToAddress(NETWORK, validator) };
 }
 
-async function deposit(amount: string, lockUntilMs: string, beneficiaryWalletIndex: string | number) {
-  const lucid = await Lucid(new Koios(KOIOS_URL), "Preprod");
-  selectWallet(lucid, 0); // owner is wallet_0
+async function yaciTipSlot(): Promise<number> {
+  return (await fetch(`${YACI_URL}/blocks/latest`).then((r) => r.json())).slot;
+}
+
+function slotToMs(slot: number): number {
+  const cfg = SLOT_CONFIG_NETWORK.Preview;
+  return cfg.zeroTime + (slot - cfg.zeroSlot) * cfg.slotLength;
+}
+
+async function deposit(
+  ownerLucid: LucidEvolution,
+  ownerVkh: string,
+  beneficiaryVkh: string,
+  lovelace: bigint,
+  lockUntilMs: number,
+): Promise<string> {
   const { scriptAddress } = loadValidator();
-
-  const ownerAddr = await lucid.wallet().address();
-  const ownerVkh = getAddressDetails(ownerAddr).paymentCredential!.hash;
-
-  // Beneficiary VKH from a different wallet seed.
-  const benLucid = await Lucid(new Koios(KOIOS_URL), "Preprod");
-  selectWallet(benLucid, beneficiaryWalletIndex);
-  const beneficiaryAddr = await benLucid.wallet().address();
-  const beneficiaryVkh = getAddressDetails(beneficiaryAddr).paymentCredential!.hash;
-
-  // Datum: Constr 0 [lock_until, owner_vkh, beneficiary_vkh]
-  const datum = Data.to(new Constr(0, [BigInt(lockUntilMs), ownerVkh, beneficiaryVkh]));
-
-  const tx = await lucid
+  const datum = Data.to(
+    new Constr(0, [BigInt(lockUntilMs), ownerVkh, beneficiaryVkh]),
+  );
+  const tx = await ownerLucid
     .newTx()
-    .pay.ToContract(scriptAddress, { kind: "inline", value: datum }, { lovelace: BigInt(amount) })
+    .pay.ToContract(scriptAddress, { kind: "inline", value: datum }, { lovelace })
     .complete();
-
   const signed = await tx.sign.withWallet().complete();
   const txHash = await signed.submit();
-  console.log(`Deposit submitted. Tx: ${txHash}`);
-  console.log(`Beneficiary: ${beneficiaryAddr}`);
-  console.log(`lock_until: ${lockUntilMs} (POSIX ms)`);
+  console.log(`DEPOSIT ok. lockUntilMs=${lockUntilMs} tx=${txHash}`);
+  return txHash;
 }
 
-async function withdrawAsBeneficiary(beneficiaryWalletIndex: string | number) {
-  const lucid = await Lucid(new Koios(KOIOS_URL), "Preprod");
-  selectWallet(lucid, beneficiaryWalletIndex);
-  const { validator, scriptAddress } = loadValidator();
-
-  const beneficiaryAddr = await lucid.wallet().address();
-  const beneficiaryVkh = getAddressDetails(beneficiaryAddr).paymentCredential!.hash;
-
-  // Find a vesting UTxO whose datum lists this wallet as beneficiary.
-  const utxos = await lucid.utxosAt(scriptAddress);
-  const utxo = utxos.find((u) => {
-    if (!u.datum) return false;
+async function findVestingUtxo(
+  lucid: LucidEvolution,
+  txHash: string,
+): Promise<{ assets: Record<string, bigint>; datum: string } & object> {
+  for (let i = 0; i < 60; i++) {
     try {
-      const d = Data.from(u.datum) as Constr<unknown>;
-      return d.fields[2] === beneficiaryVkh;
-    } catch {
-      return false;
-    }
-  });
-  if (!utxo) throw new Error("No vesting UTxO found for this beneficiary");
+      const utxos = await lucid.utxosByOutRef([{ txHash, outputIndex: 0 }]);
+      if (utxos.length > 0 && utxos[0].datum) return utxos[0] as never;
+    } catch { /* transient */ }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  throw new Error(`Vesting UTxO ${txHash}#0 not found`);
+}
 
-  // Redeemer is unused by the validator — anything serializable works.
-  const redeemer = Data.to(new Constr(0, []));
-
-  const now = Date.now();
-  const tx = await lucid
+async function withdrawAsOwner(
+  ownerLucid: LucidEvolution,
+  utxo: { datum: string },
+) {
+  const { validator } = loadValidator();
+  const ownerAddr = await ownerLucid.wallet().address();
+  const tx = await ownerLucid
     .newTx()
-    .collectFrom([utxo], redeemer)
+    .collectFrom([utxo as never], Data.to(new Constr(0, [])))
     .attach.SpendingValidator(validator)
-    .pay.ToAddress(beneficiaryAddr, utxo.assets)
-    .addSigner(beneficiaryAddr)
-    .validFrom(now)
-    .validTo(now + 120_000)
+    .addSigner(ownerAddr)
     .complete();
-
   const signed = await tx.sign.withWallet().complete();
   const txHash = await signed.submit();
-  console.log(`Withdraw submitted. Tx: ${txHash}`);
+  console.log(`WITHDRAW (owner) ok. tx=${txHash}`);
+}
+
+async function withdrawAsBeneficiary(
+  benLucid: LucidEvolution,
+  utxo: { datum: string },
+  lockUntilMs: number,
+) {
+  const { validator } = loadValidator();
+  const benAddr = await benLucid.wallet().address();
+  // Validity range strictly after lock_until ⇒ pick a slot whose POSIX > lockUntilMs.
+  const cfg = SLOT_CONFIG_NETWORK.Preview;
+  const lockUntilSlot = Math.floor((lockUntilMs - cfg.zeroTime) / cfg.slotLength) + cfg.zeroSlot;
+  const tipSlot = await yaciTipSlot();
+  const validFromSlot = Math.max(lockUntilSlot + 1, tipSlot - 5);
+  const validToSlot = validFromSlot + 120;
+  const tx = await benLucid
+    .newTx()
+    .collectFrom([utxo as never], Data.to(new Constr(0, [])))
+    .attach.SpendingValidator(validator)
+    .addSigner(benAddr)
+    .validFrom(slotToMs(validFromSlot))
+    .validTo(slotToMs(validToSlot))
+    .complete();
+  const signed = await tx.sign.withWallet().complete();
+  const txHash = await signed.submit();
+  console.log(`WITHDRAW (beneficiary) ok. tx=${txHash}`);
+}
+
+async function runScenario() {
+  console.log("=== vesting scenario: deposit×2 → owner-withdraw / beneficiary-withdraw ===");
+  await alignSlotConfig();
+
+  const owner = await lucidAt(0); // account 0
+  const ownerVkh = await vkhOf(0);
+  const ben = await lucidAt(1); // account 1 = beneficiary
+  const benVkh = await vkhOf(1);
+  const benAddr = await ben.wallet().address();
+  await fundFromIndex0([{ address: benAddr, lovelace: 20_000_000n }]);
+
+  // Lock 1: long lock so owner can pull back early via signature path.
+  const lockUntilFar = Date.now() + 60 * 60 * 1000;
+  const tx1 = await deposit(owner, ownerVkh, benVkh, 5_000_000n, lockUntilFar);
+  // Wait for chain to absorb the deposit tx (owner is also the funder of the
+  // beneficiary, so the new change UTxO must be indexed before the next tx).
+  await waitForUtxosAt(owner, await owner.wallet().address(), 1, 60);
+  await new Promise((r) => setTimeout(r, 2000));
+
+  // Lock 2: short lock so beneficiary can claim after expiry.
+  const cfg = SLOT_CONFIG_NETWORK.Preview;
+  const tipSlot = await yaciTipSlot();
+  const lockUntilShort = slotToMs(tipSlot + 10);
+  const tx2 = await deposit(owner, ownerVkh, benVkh, 5_000_000n, lockUntilShort);
+  await new Promise((r) => setTimeout(r, 2000));
+
+  // Owner withdraws lock 1 immediately.
+  const u1 = await findVestingUtxo(owner, tx1);
+  await withdrawAsOwner(owner, u1);
+
+  // Wait for chain slot past lockUntilShort, then beneficiary withdraws.
+  const lockSlot = Math.floor((lockUntilShort - cfg.zeroTime) / cfg.slotLength) + cfg.zeroSlot;
+  for (let i = 0; i < 300; i++) {
+    const tip = await yaciTipSlot();
+    if (tip > lockSlot) {
+      console.log(`tipSlot ${tip} > lockUntilSlot ${lockSlot}, proceeding`);
+      break;
+    }
+    if (i % 10 === 0) console.log(`Waiting for chain slot ${tip} → ${lockSlot}…`);
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  const u2 = await findVestingUtxo(ben, tx2);
+  await withdrawAsBeneficiary(ben, u2, lockUntilShort);
+
+  console.log("=== Scenario complete ===");
 }
 
 if (import.meta.main) {
-  const [cmd, ...args] = Deno.args;
-  if (!cmd) {
-    console.log(
-      "Usage:\n" +
-        "  prepare <count>                       # generate wallet seeds wallet_0..wallet_{N-1}\n" +
-        "  deposit <lovelace> <lock_until_ms> <beneficiary_wallet_idx>\n" +
-        "  withdraw <beneficiary_wallet_idx>     # claim after lock_until\n",
-    );
-  } else if (cmd === "prepare") {
-    if (!args[0]) console.error("Usage: prepare <count>");
-    else await prepare(parseInt(args[0], 10));
-  } else if (cmd === "deposit") {
-    if (args.length !== 3) console.error("Usage: deposit <lovelace> <lock_until_ms> <beneficiary_wallet_idx>");
-    else await deposit(args[0], args[1], args[2]);
-  } else if (cmd === "withdraw") {
-    if (!args[0]) console.error("Usage: withdraw <beneficiary_wallet_idx>");
-    else await withdrawAsBeneficiary(args[0]);
-  } else {
-    console.log("Unknown command");
-  }
+  await runScenario();
 }

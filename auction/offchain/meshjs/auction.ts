@@ -1,453 +1,342 @@
 import {
-  MeshWallet,
+  BlockfrostProvider,
   MeshTxBuilder,
-  KoiosProvider,
-  deserializeAddress,
+  MeshWallet,
+  deserializeDatum,
   mConStr0,
   mConStr2,
-  resolvePlutusScriptAddress,
-  deserializeDatum,
+  resolvePaymentKeyHash,
+  resolveScriptHash,
+  serializeAddressObj,
+  serializePlutusScript,
   stringToHex,
+  type UTxO,
 } from "@meshsdk/core";
-import { bech32 } from "npm:bech32";
+import { applyParamsToScript } from "@meshsdk/core-csl";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
-const PREPROD_SYSTEM_START = 1655683200000;
-const SLOT_LENGTH = 1000;
+// ----------------------------------------------------------------------------
+// Auction — Mesh.js targeting yaci-devkit.
+// Single PlutusV3 script provides both mint (START) and spend (BID, END).
+// Scenario exercises init → bid → bid → end with two distinct bidders.
+// ----------------------------------------------------------------------------
 
-function getSlotFromTime(timeVal: number): number {
-    return Math.floor((timeVal - PREPROD_SYSTEM_START) / SLOT_LENGTH);
+const YACI_URL = "http://localhost:8080/api/v1";
+const NETWORK = "preprod";
+const NETWORK_ID = 0;
+const ASSET_NAME = "auction_nft";
+const FUNDER_MNEMONIC =
+  "test test test test test test test test test test test test test test test test test test test test test test test sauce";
+
+function provider(): BlockfrostProvider {
+  return new BlockfrostProvider(YACI_URL);
+}
+function makeWallet(words: string[]): MeshWallet {
+  const p = provider();
+  return new MeshWallet({
+    networkId: NETWORK_ID,
+    fetcher: p,
+    submitter: p,
+    key: { type: "mnemonic", words },
+  });
+}
+function funderWallet(): MeshWallet {
+  return makeWallet(FUNDER_MNEMONIC.split(/\s+/));
 }
 
-function getTimeFromSlot(slot: number): number {
-    return (slot * SLOT_LENGTH) + PREPROD_SYSTEM_START;
+async function yaciTipSlot(): Promise<number> {
+  return (await fetch(`${YACI_URL}/blocks/latest`).then((r) => r.json())).slot;
+}
+async function yaciSystemStartSec(): Promise<number> {
+  const block = await fetch(`${YACI_URL}/blocks/latest`).then((r) => r.json());
+  return block.time - block.slot + 600;
+}
+function slotToMs(slot: number, systemStartSec: number): number {
+  return (systemStartSec + slot) * 1000;
 }
 
-export const setup = async (walletName: string | number = 0) => {
-  const provider = new KoiosProvider("preprod");
-  
-  let prefix = "";
-  try {
-    await Deno.stat("auction/offchain/meshjs");
-    prefix = "auction/offchain/meshjs/";
-  } catch {
-    prefix = "";
-  }
-
-  const fileName = typeof walletName === 'number' 
-      ? `${prefix}wallet_${walletName}.txt`
-      : `${prefix}${walletName}`;
-  let wallet;
-  try {
-    const mnemonic = await Deno.readTextFile(fileName);
-    wallet = new MeshWallet({
-      networkId: 0,
-      fetcher: provider,
-      submitter: provider,
-      key: {
-        type: "mnemonic",
-        words: mnemonic.trim().split(" "),
-      },
-    });
-  } catch (_e) {
-    console.log("No wallet found, generating new one...");
-    const mnemonic = MeshWallet.brew();
-    await Deno.writeTextFile(fileName, Array.isArray(mnemonic) ? mnemonic.join(" ") : mnemonic);
-    wallet = new MeshWallet({
-    networkId: 0,
-    fetcher: provider,
-    submitter: provider,
-    key: {
-        type: "mnemonic",
-        words: Array.isArray(mnemonic) ? mnemonic : mnemonic.split(" "),
-    },
-    });
-    console.log(`Generated ${fileName}. Send some tADA to: ` + (await wallet.getUnusedAddresses())[0]);
-  }
-  return { provider, wallet };
-};
-
-export class AuctionContract {
-  provider: KoiosProvider;
-  wallet: MeshWallet;
-  scriptCbor!: string;
-  scriptAddress!: string;
-  policyId!: string;
-  
-  constructor(provider: KoiosProvider, wallet: MeshWallet) {
-    this.provider = provider;
-    this.wallet = wallet;
-    
-    // @ts-ignore blueprint structure
-    const validator = blueprint.validators[0];
-    const originalCode = validator.compiledCode;
-    const len = originalCode.length / 2;
-    const lenHex = len.toString(16).padStart(4, '0');
-    // Double encoding: CBOR(Bytes( CBOR(Bytes(Flat)) ))? Or CBOR(Bytes(Flat))
-    // Assuming Aiken gives CBOR(Bytes(Flat)). Node wants Single Wrapped.
-    // If Trace said "CBOR deserialisation failed at offset 0 ... bytes malformed".
-    // It might be conflicting.
-    this.scriptCbor = "59" + lenHex + originalCode;
-    
-    this.scriptAddress = resolvePlutusScriptAddress({
-        code: this.scriptCbor,
-        version: "V3"
-    }, 0);
-    
-    this.policyId = deserializeAddress(this.scriptAddress).scriptHash;
-  }
-
-  async getCurrentSlot(): Promise<number> {
+async function waitForUtxoAt(addr: string, minCount = 1, timeoutSec = 60) {
+  const p = provider();
+  for (let i = 0; i < timeoutSec; i++) {
     try {
-        const response = await fetch('https://preprod.koios.rest/api/v1/tip');
-        const data = await response.json();
-        return Number(data[0].abs_slot);
-    } catch (error) {
-        console.error("Failed to fetch tip, fallback to local clock", error);
-        return getSlotFromTime(Date.now());
-    }
+      const u = await p.fetchAddressUTxOs(addr);
+      if (u.length >= minCount) return;
+    } catch { /* transient */ }
+    await new Promise((r) => setTimeout(r, 1000));
   }
+  throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${addr}`);
+}
 
-  /**
-   * Initialize a new auction.
-   * Mints an auction token and sends it to the script address with the initial datum.
-   */
-  async init(startingBid: string) {
-    const address = (await this.wallet.getUnusedAddresses())[0];
-    const { pubKeyHash } = deserializeAddress(address);
-    const assetName = "auction_nft";
-    const assetNameHex = stringToHex(assetName);
+async function findScriptUtxo(scriptAddr: string, prevTxHash: string): Promise<UTxO> {
+  const p = provider();
+  for (let i = 0; i < 60; i++) {
+    const utxos = await p.fetchAddressUTxOs(scriptAddr);
+    const u = utxos.find((x) => x.input.txHash === prevTxHash && x.input.outputIndex === 0);
+    if (u) return u;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  throw new Error(`UTxO ${prevTxHash} not found at ${scriptAddr}`);
+}
 
-    const currentSlot = await this.getCurrentSlot();
-    const expirationSlot = currentSlot + 1000;
-    const expirationTime = getTimeFromSlot(expirationSlot);
-    
-    console.log(`Starting new auction...`);
-    console.log(`Closing time: ${new Date(expirationTime).toLocaleString()} (Slot: ${expirationSlot})`);
+async function fundFromFunder(targets: Array<{ addr: string; lovelace: bigint }>) {
+  const wallet = funderWallet();
+  const myAddr = await wallet.getChangeAddress();
+  const myUtxos = await provider().fetchAddressUTxOs(myAddr);
+  const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
+    .setNetwork(NETWORK);
+  let b = tx as unknown as MeshTxBuilder;
+  for (const t of targets) {
+    b = b.txOut(t.addr, [{ unit: "lovelace", quantity: t.lovelace.toString() }]);
+  }
+  await b.changeAddress(myAddr).selectUtxosFrom(myUtxos).complete();
+  const signed = await wallet.signTx(tx.txHex);
+  const txHash = await wallet.submitTx(signed);
+  console.log(`Funded ${targets.length} target(s). tx=${txHash}`);
+  for (const t of targets) await waitForUtxoAt(t.addr, 1);
+}
 
-    // Construct Datum
-    // AuctionDatum { seller, highest_bidder, highest_bid, expiration, asset_policy, asset_name }
-    const datum = mConStr0([
-        pubKeyHash,
-        "",
-        parseInt(startingBid),
-        expirationTime,
-        this.policyId,
-        assetNameHex
-    ]);
+function getScriptInfo() {
+  const compiled = applyParamsToScript(blueprint.validators[0].compiledCode, [], "JSON");
+  const policyId = resolveScriptHash(compiled, "V3");
+  const { address: scriptAddress } = serializePlutusScript(
+    { code: compiled, version: "V3" },
+    undefined,
+    NETWORK_ID,
+  );
+  return { script: compiled, policyId, scriptAddress };
+}
 
-    const txBuilder = new MeshTxBuilder({ fetcher: this.provider, submitter: this.provider, evaluator: this.provider });
-    
-    const collateral = (await this.wallet.getCollateral())[0];
-    if (collateral) {
-        txBuilder.txInCollateral(
-            collateral.input.txHash,
-            collateral.input.outputIndex,
-            collateral.output.amount,
-            collateral.output.address
-        );
-    } else {
-        console.warn("No Collateral found! Transaction might fail.");
-    }
+function vkhToAddr(vkh: string): string {
+  return serializeAddressObj({
+    constructor: 0,
+    fields: [
+      { constructor: 0, fields: [{ bytes: vkh }] },
+      { constructor: 1, fields: [] },
+    ],
+  } as never, NETWORK_ID);
+}
 
-    const utxos = await this.wallet.getUtxos();
-    const freshUtxos = await this.provider.fetchAddressUTxOs(address);
-    txBuilder.selectUtxosFrom(freshUtxos);
+async function init(
+  seller: MeshWallet,
+  startingBid: bigint,
+  expirationMs: number,
+): Promise<string> {
+  const sellerAddr = await seller.getChangeAddress();
+  const sellerVkh = resolvePaymentKeyHash(sellerAddr);
+  const { script, policyId, scriptAddress } = getScriptInfo();
+  const assetNameHex = stringToHex(ASSET_NAME);
+  const unit = policyId + assetNameHex;
 
-    txBuilder.mintPlutusScriptV3()
-        .mint("1", this.policyId, assetNameHex)
-        .mintingScript(this.scriptCbor)
-        .mintRedeemerValue(mConStr0([]));
-    
-    txBuilder.txOut(this.scriptAddress, [
-        { unit: "lovelace", quantity: startingBid },
-        { unit: this.policyId + assetNameHex, quantity: "1" }
+  const datum = mConStr0([
+    sellerVkh,
+    "",
+    Number(startingBid),
+    expirationMs,
+    policyId,
+    assetNameHex,
+  ]);
+  const utxos = await provider().fetchAddressUTxOs(sellerAddr);
+  const collateral: UTxO[] = await seller.getCollateral();
+
+  const systemStartSec = await yaciSystemStartSec();
+  const tipSlot = await yaciTipSlot();
+  const expirationSlot = Math.floor(expirationMs / 1000) - systemStartSec;
+  const validToSlot = Math.min(tipSlot + 10, expirationSlot - 5);
+
+  const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
+    .setNetwork(NETWORK);
+  await tx
+    .mintPlutusScriptV3()
+    .mint("1", policyId, assetNameHex)
+    .mintingScript(script)
+    .mintRedeemerValue(mConStr0([]))
+    .txOut(scriptAddress, [
+      { unit: "lovelace", quantity: startingBid.toString() },
+      { unit, quantity: "1" },
     ])
-    .txOutInlineDatumValue(datum);
+    .txOutInlineDatumValue(datum)
+    .txInCollateral(
+      collateral[0].input.txHash,
+      collateral[0].input.outputIndex,
+      collateral[0].output.amount,
+      collateral[0].output.address,
+    )
+    .requiredSignerHash(sellerVkh)
+    .invalidBefore(tipSlot - 5)
+    .invalidHereafter(validToSlot)
+    .changeAddress(sellerAddr)
+    .selectUtxosFrom(utxos)
+    .complete();
+  const signed = await seller.signTx(tx.txHex);
+  const txHash = await seller.submitTx(signed);
+  console.log(`INIT ok. tx=${txHash}`);
+  return txHash;
+}
 
-    txBuilder
-        .changeAddress(address)
-        .requiredSignerHash(pubKeyHash)
-        .invalidHereafter(expirationSlot);
+async function bid(bidder: MeshWallet, prevTxHash: string, newBid: bigint): Promise<string> {
+  const bidderAddr = await bidder.getChangeAddress();
+  const bidderVkh = resolvePaymentKeyHash(bidderAddr);
+  const { script, policyId, scriptAddress } = getScriptInfo();
+  const assetNameHex = stringToHex(ASSET_NAME);
+  const unit = policyId + assetNameHex;
+  const utxo = await findScriptUtxo(scriptAddress, prevTxHash);
+  if (!utxo.output.plutusData) throw new Error("No datum");
+  const d = deserializeDatum(utxo.output.plutusData) as {
+    fields: Array<{ bytes?: string; int?: string | number | bigint }>;
+  };
+  const seller = d.fields[0].bytes ?? "";
+  const prevBidder = d.fields[1].bytes ?? "";
+  const prevBid = BigInt(d.fields[2].int ?? 0);
+  const expirationMs = Number(d.fields[3].int ?? 0);
 
-    const unsignedTx = await txBuilder.complete();
-    //console.log("Unsigned Tx:", JSON.stringify(unsignedTx, null, 2));
-    const signedTx = await this.wallet.signTx(unsignedTx);
-    
-    console.log(`Submitting transaction...`);
-    const txHash = await this.wallet.submitTx(signedTx);
-    
-    console.log(
-      `Auction initialized at ${this.scriptAddress} with starting bid ${startingBid} lovelace.\nSee: https://preprod.cexplorer.io/tx/${txHash}`
-    );
-    console.log(
-      `To bid: deno run -A auction.ts bid ${txHash} <newBidLovelace>`
-    );
-    return txHash;
-  }
+  const newDatum = mConStr0([
+    seller,
+    bidderVkh,
+    Number(newBid),
+    expirationMs,
+    policyId,
+    assetNameHex,
+  ]);
 
-  /**
-   * Place a bid on an existing auction.
-   */
-  async bid(auctionTxHash: string, newBidAmount: string) {
-    const address = (await this.wallet.getUnusedAddresses())[0];
-    const { pubKeyHash } = deserializeAddress(address);
+  const refundVkh = prevBidder && prevBidder.length > 0 ? prevBidder : seller;
+  const refundAddr = vkhToAddr(refundVkh);
 
-    const utxos = await this.provider.fetchAddressUTxOs(this.scriptAddress);
-    const scriptUtxo = utxos.find(u => u.input.txHash === auctionTxHash && u.input.outputIndex === 0);
-    
-    if (!scriptUtxo) {
-        throw new Error("Auction UTXO not found.");
-    }
+  const ownUtxos = await provider().fetchAddressUTxOs(bidderAddr);
+  const collateral: UTxO[] = await bidder.getCollateral();
 
-    if (!scriptUtxo.output.plutusData) {
-        throw new Error("No datum found on auction UTXO.");
-    }
+  const systemStartSec = await yaciSystemStartSec();
+  const tipSlot = await yaciTipSlot();
+  const expirationSlot = Math.floor(expirationMs / 1000) - systemStartSec;
+  const validToSlot = Math.min(tipSlot + 10, expirationSlot - 5);
 
-    const oldDatum = deserializeDatum(scriptUtxo.output.plutusData);
-    const fields = oldDatum.fields;
-    
-    // @ts-ignore type check
-    const seller = fields[0].bytes;
-    
-    // @ts-ignore type check
-    const rawBidder = fields[1];
-    const currentHighestBidder = (typeof rawBidder === 'object' && 'bytes' in rawBidder) ? rawBidder.bytes : rawBidder;
-
-    // @ts-ignore type check
-    const currentHighestBid = Number(fields[2].int);
-    // @ts-ignore type check
-    const expiration = Number(fields[3].int);
-    
-    // @ts-ignore type check
-    const rawPolicy = fields[4];
-    const assetPolicy = (typeof rawPolicy === 'object' && 'bytes' in rawPolicy) ? rawPolicy.bytes : rawPolicy;
-
-    // @ts-ignore type check
-    const rawName = fields[5];
-    const assetName = (typeof rawName === 'object' && 'bytes' in rawName) ? rawName.bytes : rawName;
-    const assetNameHex = assetName; 
-
-    const newBid = parseInt(newBidAmount);
-    if (newBid <= currentHighestBid) {
-        throw new Error(`Bid must be higher than current highest bid (${currentHighestBid}).`);
-    }
-
-    const newDatumData = mConStr0([
-        seller,
-        pubKeyHash,
-        parseInt(newBidAmount),
-        expiration,
-        assetPolicy,
-        assetNameHex
-    ]);
-
-    const txBuilder = new MeshTxBuilder({ fetcher: this.provider, submitter: this.provider, evaluator: this.provider });
-    
-    const collateral = (await this.wallet.getCollateral())[0];
-    let walletUtxos = await this.wallet.getUtxos();
-
-    if (collateral) {
-        txBuilder.txInCollateral(
-            collateral.input.txHash,
-            collateral.input.outputIndex,
-            collateral.output.amount,
-            collateral.output.address
-        );
-        walletUtxos = walletUtxos.filter(u => u.input.txHash !== collateral.input.txHash || u.input.outputIndex !== collateral.input.outputIndex);
-    }
-    
-    console.log(`Placing bid on auction UTXO from tx: ${auctionTxHash}`);
-    console.log(`Using bidder address: ${address}`);
-
-    txBuilder
-      .selectUtxosFrom(walletUtxos)
-      .spendingPlutusScriptV3()
-      .txIn(
-          scriptUtxo.input.txHash, 
-          scriptUtxo.input.outputIndex,
-          scriptUtxo.output.amount,
-          scriptUtxo.output.address
-      )
-      .txInScript(this.scriptCbor)
-      .txInRedeemerValue(mConStr0([]))
-      .txInInlineDatumPresent();
-        
-    //console.log(`Bid Output: ${newBidAmount}, Asset: ${assetPolicy}${assetNameHex}`);
-    
-    txBuilder.txOut(this.scriptAddress, [
-        { unit: "lovelace", quantity: newBidAmount },
-        { unit: assetPolicy + assetNameHex, quantity: "1" }
+  const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
+    .setNetwork(NETWORK);
+  await tx
+    .spendingPlutusScriptV3()
+    .txIn(utxo.input.txHash, utxo.input.outputIndex, utxo.output.amount, scriptAddress)
+    .txInScript(script)
+    .txInRedeemerValue(mConStr0([]))
+    .txInInlineDatumPresent()
+    .txOut(scriptAddress, [
+      { unit: "lovelace", quantity: newBid.toString() },
+      { unit, quantity: "1" },
     ])
-    .txOutInlineDatumValue(newDatumData);
+    .txOutInlineDatumValue(newDatum)
+    .txOut(refundAddr, [{ unit: "lovelace", quantity: prevBid.toString() }])
+    .txInCollateral(
+      collateral[0].input.txHash,
+      collateral[0].input.outputIndex,
+      collateral[0].output.amount,
+      collateral[0].output.address,
+    )
+    .requiredSignerHash(bidderVkh)
+    .invalidBefore(tipSlot - 5)
+    .invalidHereafter(validToSlot)
+    .changeAddress(bidderAddr)
+    .selectUtxosFrom(ownUtxos)
+    .complete();
+  const signed = await bidder.signTx(tx.txHex);
+  const txHash = await bidder.submitTx(signed);
+  console.log(`BID ok. ${newBid} lovelace tx=${txHash}`);
+  return txHash;
+}
 
-    if (typeof currentHighestBidder === 'string' && currentHighestBidder.length > 0 && currentHighestBid > 0) {
-        const fullHex = "60" + currentHighestBidder;
-        const pkhBytes = new Uint8Array(fullHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
-        const pkhWords = bech32.toWords(pkhBytes);
-        const refundAddress = bech32.encode("addr_test", pkhWords);
-        
-        console.log(`Refunding ${currentHighestBid} to previous bidder.`);
-        
-        txBuilder.txOut(refundAddress, [
-            { unit: "lovelace", quantity: currentHighestBid.toString() }
-        ]);
+async function close(caller: MeshWallet, prevTxHash: string): Promise<string> {
+  const callerAddr = await caller.getChangeAddress();
+  const callerVkh = resolvePaymentKeyHash(callerAddr);
+  const { script, policyId, scriptAddress } = getScriptInfo();
+  const assetNameHex = stringToHex(ASSET_NAME);
+  const unit = policyId + assetNameHex;
+  const utxo = await findScriptUtxo(scriptAddress, prevTxHash);
+  if (!utxo.output.plutusData) throw new Error("No datum");
+  const d = deserializeDatum(utxo.output.plutusData) as {
+    fields: Array<{ bytes?: string; int?: string | number | bigint }>;
+  };
+  const seller = d.fields[0].bytes ?? "";
+  const winner = d.fields[1].bytes ?? "";
+  const highestBid = BigInt(d.fields[2].int ?? 0);
+  const expirationMs = Number(d.fields[3].int ?? 0);
+
+  const systemStartSec = await yaciSystemStartSec();
+  const expirationSlot = Math.floor(expirationMs / 1000) - systemStartSec;
+  for (let i = 0; i < 300; i++) {
+    const tip = await yaciTipSlot();
+    if (tip > expirationSlot) {
+      console.log(`tipSlot ${tip} > expirationSlot ${expirationSlot}, proceeding`);
+      break;
     }
-    
-    const currentSlot = await this.getCurrentSlot();
-    const expirationSlot = getSlotFromTime(expiration);
-
-    txBuilder
-        .changeAddress(address)
-        .requiredSignerHash(pubKeyHash)
-        .invalidHereafter(expirationSlot);
-
-    const unsignedTx = await txBuilder.complete();
-    const signedTx = await this.wallet.signTx(unsignedTx);
-    
-    // console.log(`Submitting Bid Tx...`);
-    const txHash = await this.wallet.submitTx(signedTx);
-    console.log(
-      `Successfully placed bid of ${newBidAmount} lovelace.\nSee: https://preprod.cexplorer.io/tx/${txHash}`
-    );
-    return txHash;
+    if (i % 10 === 0) console.log(`Waiting for chain slot ${tip} → ${expirationSlot}…`);
+    await new Promise((r) => setTimeout(r, 1000));
   }
+  const tipSlot = await yaciTipSlot();
+  const validFromSlot = Math.max(expirationSlot + 1, tipSlot - 5);
+  const sellerAddr = vkhToAddr(seller);
 
-  async close(auctionTxHash: string) {
-    const address = (await this.wallet.getUnusedAddresses())[0];
-    const { pubKeyHash } = deserializeAddress(address);
+  const ownUtxos = await provider().fetchAddressUTxOs(callerAddr);
+  const collateral: UTxO[] = await caller.getCollateral();
 
-    const utxos = await this.provider.fetchAddressUTxOs(this.scriptAddress);
-    const scriptUtxo = utxos.find(u => u.input.txHash === auctionTxHash && u.input.outputIndex === 0);
-    
-    if (!scriptUtxo) throw new Error("Auction UTXO not found.");
-    if (!scriptUtxo.output.plutusData) throw new Error("No datum found.");
-
-    const oldDatum = deserializeDatum(scriptUtxo.output.plutusData);
-    const fields = oldDatum.fields;
-    
-    // @ts-ignore type check
-    const seller = fields[0].bytes;
-    // @ts-ignore type check
-    const highestBidder = fields[1].bytes;
-    // @ts-ignore type check
-    const highestBid = Number(fields[2].int);
-    // @ts-ignore type check
-    const expiration = Number(fields[3].int);
-    console.log(`Closing auction UTXO from tx: ${auctionTxHash}`);
-
-    const currentSlot = await this.getCurrentSlot();
-    const expirationSlot = getSlotFromTime(expiration);
-    
-    if (currentSlot < expirationSlot) {
-        throw new Error(`Auction has not expired yet. Expiration: ${new Date(expiration).toLocaleString()}`);
-    }
-
-    const txBuilder = new MeshTxBuilder({ fetcher: this.provider, submitter: this.provider, evaluator: this.provider });
-    
-    const collateral = (await this.wallet.getCollateral())[0];
-    let walletUtxos = await this.wallet.getUtxos();
-
-    if (collateral) {
-        txBuilder.txInCollateral(
-            collateral.input.txHash,
-            collateral.input.outputIndex,
-            collateral.output.amount,
-            collateral.output.address
-        );
-        walletUtxos = walletUtxos.filter(u => u.input.txHash !== collateral.input.txHash || u.input.outputIndex !== collateral.input.outputIndex);
-    }
-    
-    //console.log(`Script Input:`, JSON.stringify(scriptUtxo.output.amount));
-    //console.log(`Wallet Filtered: ${walletUtxos.length}`);
-    //walletUtxos.forEach(u => console.log(`W:`, JSON.stringify(u.output.amount)));
-    
-    txBuilder.selectUtxosFrom(walletUtxos);
-
-    txBuilder
-        .spendingPlutusScriptV3()
-        .txIn(
-            scriptUtxo.input.txHash, 
-            scriptUtxo.input.outputIndex,
-            scriptUtxo.output.amount,
-            scriptUtxo.output.address
-        )
-        .txInScript(this.scriptCbor)
-        .txInRedeemerValue(mConStr2([]))
-        .txInInlineDatumPresent();
-
-    const sellerFullHex = "60" + seller;
-    const sellerBytes = new Uint8Array(sellerFullHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
-    const sellerAddr = bech32.encode("addr_test", bech32.toWords(sellerBytes));
-
-    if (highestBidder && highestBidder !== "") {
-        const bidderFullHex = "60" + highestBidder;
-        const bidderBytes = new Uint8Array(bidderFullHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
-        const bidderAddr = bech32.encode("addr_test", bech32.toWords(bidderBytes));
-        
-        console.log(`Winner found. Sending NFT to winner and ${highestBid} ADA to seller.`);
-        
-        txBuilder.txOut(sellerAddr, [
-            { unit: "lovelace", quantity: highestBid.toString() }
-        ]);
-        
-        txBuilder.txOut(bidderAddr, [
-            { unit: this.policyId + stringToHex("auction_nft"), quantity: "1" }
-        ]);
-    } else {
-        console.log(`No bids. Returning NFT to Seller.`);
-        
-        txBuilder.txOut(sellerAddr, [
-            { unit: this.policyId + stringToHex("auction_nft"), quantity: "1" }
-        ]);
-    }
-
-    txBuilder
-        .changeAddress(address)
-        .requiredSignerHash(pubKeyHash)
-        .invalidBefore(expirationSlot + 1)
-        .invalidHereafter(currentSlot + 1000);
-
-    const unsignedTx = await txBuilder.complete();
-    const signedTx = await this.wallet.signTx(unsignedTx);
-    
-    const txHash = await this.wallet.submitTx(signedTx);
-    console.log(
-      `Auction closed successfully.\nSee: https://preprod.cexplorer.io/tx/${txHash}`
-    );
-    return txHash;
+  const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
+    .setNetwork(NETWORK);
+  let b = tx
+    .spendingPlutusScriptV3()
+    .txIn(utxo.input.txHash, utxo.input.outputIndex, utxo.output.amount, scriptAddress)
+    .txInScript(script)
+    .txInRedeemerValue(mConStr2([]))
+    .txInInlineDatumPresent();
+  if (winner && winner.length > 0) {
+    const winnerAddr = vkhToAddr(winner);
+    b = b
+      .txOut(winnerAddr, [{ unit, quantity: "1" }])
+      .txOut(sellerAddr, [{ unit: "lovelace", quantity: highestBid.toString() }]);
+  } else {
+    b = b.txOut(sellerAddr, [{ unit, quantity: "1" }]);
   }
+  await b
+    .txInCollateral(
+      collateral[0].input.txHash,
+      collateral[0].input.outputIndex,
+      collateral[0].output.amount,
+      collateral[0].output.address,
+    )
+    .requiredSignerHash(callerVkh)
+    .invalidBefore(validFromSlot)
+    .invalidHereafter(validFromSlot + 60)
+    .changeAddress(callerAddr)
+    .selectUtxosFrom(ownUtxos)
+    .complete();
+  const signed = await caller.signTx(tx.txHex);
+  const txHash = await caller.submitTx(signed);
+  console.log(`END ok. tx=${txHash}`);
+  return txHash;
+}
+
+async function runScenario() {
+  console.log("=== auction scenario: init → bid → bid → end ===");
+  const seller = makeWallet(MeshWallet.brew(false) as string[]);
+  const bidder1 = makeWallet(MeshWallet.brew(false) as string[]);
+  const bidder2 = makeWallet(MeshWallet.brew(false) as string[]);
+  await fundFromFunder([
+    { addr: await seller.getChangeAddress(), lovelace: 30_000_000n },
+    { addr: await bidder1.getChangeAddress(), lovelace: 30_000_000n },
+    { addr: await bidder2.getChangeAddress(), lovelace: 30_000_000n },
+  ]);
+
+  const systemStartSec = await yaciSystemStartSec();
+  const tipSlot = await yaciTipSlot();
+  const expirationSlot = tipSlot + 30;
+  const expirationMs = slotToMs(expirationSlot, systemStartSec);
+
+  const initTx = await init(seller, 3_000_000n, expirationMs);
+  await new Promise((r) => setTimeout(r, 2000));
+  const bid1Tx = await bid(bidder1, initTx, 6_000_000n);
+  await new Promise((r) => setTimeout(r, 2000));
+  const bid2Tx = await bid(bidder2, bid1Tx, 10_000_000n);
+  await new Promise((r) => setTimeout(r, 2000));
+  await close(seller, bid2Tx);
+
+  console.log("=== Scenario complete ===");
 }
 
 if (import.meta.main) {
-  const args = Deno.args;
-  if (args.length < 1) {
-    console.error("Please provide a command: prepare, init, bid <tx> <amount>, close <tx>");
-    // no-args: print usage and exit normally
-  } else {
-
-  const command = args[0];
-  
-  if (command === "prepare") {
-      const amount = args[1] ? parseInt(args[1]) : 1;
-      console.log(`Preparing ${amount} wallet(s)...`);
-      for (let i=0; i<amount; i++) {
-        await setup(i);
-      }
-      console.log("Wallets prepared.");
-  } else if (command === "init") {
-      const { provider, wallet } = await setup(0);
-      const contract = new AuctionContract(provider, wallet);
-      await contract.init(args[1] || "5000000");
-  } else if (command === "bid") {
-      const { provider, wallet } = await setup(1);
-      const contract = new AuctionContract(provider, wallet);
-      await contract.bid(args[1], args[2]);
-  } else if (command === "close") {
-      const { provider, wallet } = await setup(0);
-      const contract = new AuctionContract(provider, wallet);
-      await contract.close(args[1]);
-  }
-  } // end else (args.length >= 1)
+  await runScenario();
 }
-

@@ -2,6 +2,7 @@
   "version": "5",
   "specifiers": {
     "npm:@meshsdk/common@1.9.0-beta.102": "1.9.0-beta.102",
+    "npm:@meshsdk/core-csl@1.9.0-beta.102": "1.9.0-beta.102",
     "npm:@meshsdk/core-cst@^1.9.0-beta.94": "1.9.0-beta.102_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.0",
     "npm:@meshsdk/core@1.9.0-beta.102": "1.9.0-beta.102_@bufbuild+protobuf@1.10.1_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.0",
     "npm:bech32@*": "2.0.0"
@@ -278,6 +279,18 @@
         "blakejs"
       ]
     },
+    "@meshsdk/core-csl@1.9.0-beta.102": {
+      "integrity": "sha512-ZPRisFi/if9sEKfcWYtiUSasXP1zS+Pxrnm1mOIJSgBHk6zqh+6Na6zUIx6RmPNck2xSSS2sd5tuNbr9z3/L8g==",
+      "dependencies": [
+        "@meshsdk/common@1.9.0-beta.102",
+        "@sidan-lab/whisky-js-browser",
+        "@sidan-lab/whisky-js-nodejs",
+        "@types/base32-encoding",
+        "base32-encoding",
+        "bech32",
+        "json-bigint"
+      ]
+    },
     "@meshsdk/core-cst@1.9.0-beta.100_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.0": {
       "integrity": "sha512-gXC7c81puzv12C3xJ6vhH/KIEc/P6ScuXsgmLlqFMpDv0SuoMg+42HgdyWi0WrccVwi8cdepsn5YhtCaYVn0nw==",
       "dependencies": [
@@ -404,6 +417,12 @@
     },
     "@scure/base@1.2.6": {
       "integrity": "sha512-g/nm5FgUa//MCj1gV09zTJTaM6KBAHqLN907YVQqf7zC49+DcO4B1so4ZX07Ef10Twr6nuqYEH9GEggFXA4Fmg=="
+    },
+    "@sidan-lab/whisky-js-browser@1.0.25": {
+      "integrity": "sha512-Y2aShJwtyUB9j2L9NqGD+Qtxtke/Hnku2wsMT0eFavp7Ppwllro5WzWb20/q1gUs6vRAlVQzA9EChvUH+HsAJg=="
+    },
+    "@sidan-lab/whisky-js-nodejs@1.0.25": {
+      "integrity": "sha512-GKbyatMr/AKA/ax6urd7X+zlgKDEpjL/4Vq18re52mQGfbJzLkPJ0etOy3wZMywd9Cxwxaf6nnPIyqj7JlGsTg=="
     },
     "@simplewebauthn/browser@13.3.0": {
       "integrity": "sha512-BE/UWv6FOToAdVk0EokzkqQQDOWtNydYlY6+OrmiZ5SCNmb41VehttboTetUM3T/fr6EAFYVXjz4My2wg230rQ=="
@@ -1158,6 +1177,7 @@
     "dependencies": [
       "jsr:@std/assert@1",
       "npm:@meshsdk/common@1.9.0-beta.102",
+      "npm:@meshsdk/core-csl@1.9.0-beta.102",
       "npm:@meshsdk/core-cst@^1.9.0-beta.94",
       "npm:@meshsdk/core@1.9.0-beta.102"
     ]

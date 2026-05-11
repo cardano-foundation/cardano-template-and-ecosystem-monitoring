@@ -69,8 +69,9 @@ public class Bet {
         public static void main(String[] args) throws ApiException, InterruptedException {
                 System.out.println("Script Address: " + scriptAddress.getAddress());
                 fundAccount(player2.baseAddress(), 25);
-                fundAccount(oracle.baseAddress(), 5); // for collateral if needed later
-                waitForBalance(player2.baseAddress(), 25_000_000L, 60);
+                fundAccount(oracle.baseAddress(), 25); // oracle pays fee for ANNOUNCE_WINNER
+                waitForBalance(player2.baseAddress(), 20_000_000L, 60);
+                waitForBalance(oracle.baseAddress(), 20_000_000L, 60);
 
                 byte[] p1Vkh = player1.getBaseAddress().getPaymentCredentialHash().get();
                 byte[] p2Vkh = player2.getBaseAddress().getPaymentCredentialHash().get();
@@ -78,7 +79,9 @@ public class Bet {
 
                 long chainTimeMs = backendService.getBlockService()
                                 .getLatestBlock().getValue().getTime() * 1000L;
-                long expiration = chainTimeMs + 24L * 60L * 60L * 1000L; // 24h beyond chain time
+                // Short expiration so the test can wait it out within a reasonable
+                // wall-clock window before running ANNOUNCE_WINNER.
+                long expiration = chainTimeMs + 60_000L;
 
                 TxResult initRes = init(p1Vkh, oVkh, expiration, 10_000_000L);
                 System.out.println("INIT result: successful=" + initRes.isSuccessful()
@@ -92,6 +95,88 @@ public class Bet {
                                 + " txHash=" + joinRes.getTxHash());
                 if (!joinRes.isSuccessful())
                         throw new AssertionError("Bet JOIN failed: " + joinRes.getResponse());
+                waitForScriptUtxoTx(joinRes.getTxHash(), 60);
+
+                // Wait past the bet expiration before announcing. Yaci-devkit advances
+                // slots in real time, so a 60s expiration with a 70s wall-clock sleep
+                // plus a forced block tick puts the chain comfortably past expiration.
+                System.out.println("Waiting 70s for expiration to pass...");
+                Thread.sleep(70_000L);
+                tickChain();
+                waitUntilChainTime(expiration + 1_000L, 60);
+
+                // Oracle picks player1 as the winner.
+                TxResult announceRes = announceWinner(player1, joinRes.getTxHash());
+                System.out.println("ANNOUNCE result: successful=" + announceRes.isSuccessful()
+                                + " txHash=" + announceRes.getTxHash());
+                if (!announceRes.isSuccessful())
+                        throw new AssertionError("Bet ANNOUNCE failed: " + announceRes.getResponse());
+        }
+
+        private static TxResult announceWinner(Account winner, String prevTxHash)
+                        throws ApiException {
+                Utxo utxo = findScriptUtxoByTx(prevTxHash);
+                if (utxo == null)
+                        throw new AssertionError("Could not find script UTxO from tx " + prevTxHash);
+
+                long slot = backendService.getBlockService().getLatestBlock().getValue().getSlot();
+
+                byte[] winnerVkh = winner.getBaseAddress().getPaymentCredentialHash().get();
+
+                // ANNOUNCE_WINNER = Constr 1 [winner_vkh]
+                PlutusData redeemer = ConstrPlutusData.of(1, BytesPlutusData.of(winnerVkh));
+
+                // Validator demands list.length(outputs) == 1, NoDatum on that output,
+                // and address == from_verification_key(winner) — i.e., an enterprise
+                // address (no stake credential). Routing change to the same enterprise
+                // address lets CCL merge the fee-payer change into the single payout.
+                ScriptTx scriptTx = new ScriptTx()
+                                .collectFrom(List.of(utxo), redeemer)
+                                .payToAddress(winner.enterpriseAddress(), utxo.getAmount())
+                                .attachSpendingValidator(plutusScript)
+                                .withChangeAddress(winner.enterpriseAddress());
+
+                return quickTxBuilder.compose(scriptTx)
+                                // validFrom must be strictly after `expiration`: that's the
+                                // valid_after check on-chain. The 5-slot offset is fine
+                                // because we waited 70s + a forced block tick before this.
+                                .validFrom(slot - 5)
+                                .validTo(slot + 50)
+                                .feePayer(oracle.baseAddress())
+                                .withSigner(SignerProviders.signerFrom(oracle))
+                                .withRequiredSigners(oracle.getBaseAddress())
+                                .completeAndWait();
+        }
+
+        private static void tickChain() {
+                // Force yaci-devkit to produce a block by submitting a self-transfer.
+                // Without an explicit tick, block.getTime() can lag the actual slot
+                // by many seconds (yaci only forges when there's traffic).
+                System.out.println("Forcing chain tick (self-transfer)...");
+                com.bloxbean.cardano.client.quicktx.Tx tx =
+                                new com.bloxbean.cardano.client.quicktx.Tx()
+                                                .payToAddress(player1.baseAddress(), Amount.ada(1))
+                                                .from(player1.baseAddress());
+                TxResult res = quickTxBuilder.compose(tx)
+                                .feePayer(player1.baseAddress())
+                                .withSigner(SignerProviders.signerFrom(player1))
+                                .completeAndWait();
+                System.out.println("Tick produced. tx=" + res.getTxHash());
+        }
+
+        private static void waitUntilChainTime(long targetMs, int timeoutSec)
+                        throws InterruptedException, ApiException {
+                for (int i = 0; i < timeoutSec; i++) {
+                        long chainMs = backendService.getBlockService()
+                                        .getLatestBlock().getValue().getTime() * 1000L;
+                        if (chainMs >= targetMs) {
+                                System.out.println("Chain time " + chainMs + " >= target " + targetMs);
+                                return;
+                        }
+                        Thread.sleep(1000);
+                }
+                throw new AssertionError("Chain time did not reach " + targetMs + " within "
+                                + timeoutSec + "s");
         }
 
         private static TxResult init(byte[] p1Vkh, byte[] oracleVkh, long expiration, long lovelace)

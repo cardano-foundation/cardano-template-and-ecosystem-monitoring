@@ -1,13 +1,12 @@
 import {
   Lucid,
-  Koios,
-  applyParamsToScript,
+  Blockfrost,
   Constr,
   Data,
+  applyParamsToScript,
   fromText,
-  toText,
-  generateSeedPhrase,
   paymentCredentialOf,
+  toText,
   validatorToAddress,
   validatorToScriptHash,
   type LucidEvolution,
@@ -17,69 +16,67 @@ import blake2b from "blake2b";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
 // ----------------------------------------------------------------------------
-// Lottery — Evolution SDK port.
-//
-// 2 validators with chained parameters:
-//   lottery_creator (mint)  param: game_index (Int)
-//   lottery         (spend) params: creator_script_hash, game_index
-//
-// LotteryDatum = Constr 0 [
-//   player1_vkh, player2_vkh,
-//   commit1 (blake2b_256 hex), commit2,
-//   nonce1 (hex bytes, "" before reveal), nonce2,
-//   end_reveal (Int), delta (Int)
-// ]
-// Spend redeemers:
-//   0 Reveal1 [secret_bytes]
-//   1 Reveal2 [secret_bytes]
-//   2 Timeout1
-//   3 Timeout2
-//   4 Settle
-// Mint redeemer: 0 mint / 1 burn.
+// Lottery — Evolution SDK targeting yaci-devkit.
+// Two validators (lottery_creator mint + lottery spend), Reveal1+Reveal2+Settle.
+// Scenario exercises happy path (create → reveal1 → reveal2 → settle).
 // ----------------------------------------------------------------------------
 
-const KOIOS_URL = "https://preprod.koios.rest/api/v1";
+const YACI_URL = "http://localhost:8080/api/v1";
+const NETWORK = "Preprod" as const;
+const TEST_MNEMONIC =
+  "test test test test test test test test test test test test test test test test test test test test test test test sauce";
 const TOKEN_NAME = "LOTTERY_TOKEN";
-
-// Hardcoded mirror of the meshjs reference for happy-path testing.
 const GAME_INDEX = 19n;
-const END_REVEAL = 100n;
+const END_REVEAL = 9_999_999_999_999n; // far-future POSIX so reveal succeeds without timeout
 const DELTA = 20n;
 const BET_LOVELACE = 10_000_000n;
 const SECRET1 = "3";
 const SECRET2 = "4";
 
-function selectWallet(lucid: LucidEvolution, fileName: string) {
-  const mnemonic = JSON.parse(Deno.readTextFileSync(fileName));
-  lucid.selectWallet.fromSeed(
-    Array.isArray(mnemonic) ? mnemonic.join(" ") : mnemonic,
-  );
+async function lucidAt(accountIndex: number): Promise<LucidEvolution> {
+  const lucid = await Lucid(new Blockfrost(YACI_URL, "Dummy Key"), NETWORK);
+  lucid.selectWallet.fromSeed(TEST_MNEMONIC, { accountIndex });
+  return lucid;
+}
+
+async function vkhOf(accountIndex: number): Promise<string> {
+  const l = await lucidAt(accountIndex);
+  return paymentCredentialOf(await l.wallet().address()).hash;
+}
+
+async function waitForUtxosAt(
+  lucid: LucidEvolution,
+  address: string,
+  minCount: number,
+  timeoutSec = 60,
+) {
+  for (let i = 0; i < timeoutSec; i++) {
+    try {
+      const u = await lucid.utxosAt(address);
+      if (u.length >= minCount) return;
+    } catch { /* transient */ }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${address}`);
+}
+
+async function fundFromIndex0(targets: Array<{ address: string; lovelace: bigint }>) {
+  const lucid = await lucidAt(0);
+  let txb = lucid.newTx();
+  for (const t of targets) txb = txb.pay.ToAddress(t.address, { lovelace: t.lovelace });
+  const tx = await txb.complete();
+  const signed = await tx.sign.withWallet().complete();
+  const txHash = await signed.submit();
+  console.log(`Funded ${targets.length} target(s). tx=${txHash}`);
+  for (const t of targets) await waitForUtxosAt(lucid, t.address, 1, 60);
+  await new Promise((r) => setTimeout(r, 2000));
 }
 
 function bytesToHex(bytes: Uint8Array): string {
   return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
-
 function hashSecret(s: string): string {
-  const bytes = new TextEncoder().encode(s);
-  const hash = blake2b(blake2b.BYTES).update(bytes).digest();
-  return bytesToHex(hash);
-}
-
-async function prepare(amount: number) {
-  for (let i = 0; i < amount; i++) {
-    const fileName = `wallet_${i}.json`;
-    try {
-      await Deno.stat(fileName);
-      console.log(`${fileName} already exists, skipping.`);
-    } catch {
-      const mnemonic = generateSeedPhrase();
-      await Deno.writeTextFile(fileName, JSON.stringify(mnemonic.split(" ")));
-      const lucid = await Lucid(new Koios(KOIOS_URL), "Preprod");
-      lucid.selectWallet.fromSeed(mnemonic);
-      console.log(`Generated ${fileName}. Address: ${await lucid.wallet().address()}`);
-    }
-  }
+  return bytesToHex(blake2b(blake2b.BYTES).update(new TextEncoder().encode(s)).digest());
 }
 
 function getValidator(prefix: string): string {
@@ -94,18 +91,13 @@ function loadScripts() {
     script: applyParamsToScript(getValidator("lottery_creator."), [GAME_INDEX]),
   };
   const creatorPolicyId = validatorToScriptHash(creatorScript);
-
   const lotteryScript: Script = {
     type: "PlutusV3",
     script: applyParamsToScript(getValidator("lottery."), [creatorPolicyId, GAME_INDEX]),
   };
-
   return {
     creator: { script: creatorScript, policyId: creatorPolicyId },
-    lottery: {
-      script: lotteryScript,
-      address: validatorToAddress("Preprod", lotteryScript),
-    },
+    lottery: { script: lotteryScript, address: validatorToAddress(NETWORK, lotteryScript) },
   };
 }
 
@@ -114,27 +106,19 @@ interface LotteryDatum {
   player2: string;
   commit1: string;
   commit2: string;
-  nonce1: string; // "" before reveal
+  nonce1: string;
   nonce2: string;
   endReveal: bigint;
   delta: bigint;
 }
-
 function encodeDatum(d: LotteryDatum): string {
   return Data.to(
     new Constr(0, [
-      d.player1,
-      d.player2,
-      d.commit1,
-      d.commit2,
-      d.nonce1,
-      d.nonce2,
-      d.endReveal,
-      d.delta,
+      d.player1, d.player2, d.commit1, d.commit2,
+      d.nonce1, d.nonce2, d.endReveal, d.delta,
     ]),
   );
 }
-
 function decodeDatum(datumHex: string): LotteryDatum {
   const c = Data.from(datumHex) as Constr<Data>;
   return {
@@ -150,33 +134,23 @@ function decodeDatum(datumHex: string): LotteryDatum {
 }
 
 async function getLotteryUtxo(lucid: LucidEvolution, address: string) {
-  const utxos = await lucid.utxosAt(address);
-  const stateUtxo = utxos.find((u) => u.datum);
-  if (!stateUtxo) throw new Error("Lottery state UTxO not found");
-  return stateUtxo;
+  for (let i = 0; i < 60; i++) {
+    const utxos = await lucid.utxosAt(address);
+    const u = utxos.find((x) => x.datum);
+    if (u) return u;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  throw new Error("Lottery state UTxO not found");
 }
 
-export async function multisigCreate(
-  coordinatorWallet: string,
-  player1Wallet: string,
-  player2Wallet: string,
+async function create(
+  coordinator: LucidEvolution,
+  player1Lucid: LucidEvolution,
+  player2Lucid: LucidEvolution,
 ) {
-  // Each player and the coordinator must sign — use a fresh Lucid for each
-  // wallet so signing keys aren't trampled.
-  const lucid = await Lucid(new Koios(KOIOS_URL), "Preprod");
-  selectWallet(lucid, coordinatorWallet);
-
   const { creator, lottery } = loadScripts();
-  const coordAddr = await lucid.wallet().address();
-
-  const player1Lucid = await Lucid(new Koios(KOIOS_URL), "Preprod");
-  selectWallet(player1Lucid, player1Wallet);
   const player1Vkh = paymentCredentialOf(await player1Lucid.wallet().address()).hash;
-
-  const player2Lucid = await Lucid(new Koios(KOIOS_URL), "Preprod");
-  selectWallet(player2Lucid, player2Wallet);
   const player2Vkh = paymentCredentialOf(await player2Lucid.wallet().address()).hash;
-
   const datum: LotteryDatum = {
     player1: player1Vkh,
     player2: player2Vkh,
@@ -187,10 +161,8 @@ export async function multisigCreate(
     endReveal: END_REVEAL,
     delta: DELTA,
   };
-
   const tokenUnit = creator.policyId + fromText(TOKEN_NAME);
-
-  const tx = await lucid
+  const tx = await coordinator
     .newTx()
     .mintAssets({ [tokenUnit]: 1n }, Data.to(new Constr(0, [])))
     .attach.MintingPolicy(creator.script)
@@ -202,40 +174,26 @@ export async function multisigCreate(
     .addSigner(await player1Lucid.wallet().address())
     .addSigner(await player2Lucid.wallet().address())
     .complete();
-
   const partial1 = await player1Lucid.fromTx(tx.toCBOR()).partialSign.withWallet();
   const partial2 = await player2Lucid.fromTx(tx.toCBOR()).partialSign.withWallet();
   const signed = await tx.sign.withWallet().assemble([partial1, partial2]).complete();
   const txHash = await signed.submit();
-
-  console.log("Lottery created with marker token");
-  console.log("Script address:", lottery.address);
-  console.log("Policy ID:", creator.policyId);
-  console.log("Tx:", txHash);
-  void coordAddr;
+  console.log(`CREATE ok. tx=${txHash}`);
 }
 
-async function revealCommon(walletFile: string, player: 1 | 2, secret: string) {
-  const lucid = await Lucid(new Koios(KOIOS_URL), "Preprod");
-  selectWallet(lucid, walletFile);
+async function reveal(playerLucid: LucidEvolution, player: 1 | 2, secret: string) {
   const { lottery } = loadScripts();
-
-  const utxo = await getLotteryUtxo(lucid, lottery.address);
+  const utxo = await getLotteryUtxo(playerLucid, lottery.address);
   const current = decodeDatum(utxo.datum!);
   const secretHex = fromText(secret);
-
   const updated: LotteryDatum = {
     ...current,
     nonce1: player === 1 ? secretHex : current.nonce1,
     nonce2: player === 2 ? secretHex : current.nonce2,
   };
-
-  // Reveal redeemer index: 0 for Reveal1, 1 for Reveal2.
   const redeemer = Data.to(new Constr(player === 1 ? 0 : 1, [secretHex]));
-
-  const myAddr = await lucid.wallet().address();
-
-  const tx = await lucid
+  const myAddr = await playerLucid.wallet().address();
+  const tx = await playerLucid
     .newTx()
     .collectFrom([utxo], redeemer)
     .attach.SpendingValidator(lottery.script)
@@ -246,57 +204,25 @@ async function revealCommon(walletFile: string, player: 1 | 2, secret: string) {
     )
     .addSigner(myAddr)
     .complete();
-
   const signed = await tx.sign.withWallet().complete();
   const txHash = await signed.submit();
-  console.log(`Reveal${player} submitted. Tx: ${txHash}`);
+  console.log(`REVEAL${player} ok. tx=${txHash}`);
 }
 
-export async function reveal1(walletFile: string) {
-  await revealCommon(walletFile, 1, SECRET1);
-}
-
-export async function reveal2(walletFile: string) {
-  await revealCommon(walletFile, 2, SECRET2);
-}
-
-export async function settle(wallet1File: string, wallet2File: string) {
-  const lucid1 = await Lucid(new Koios(KOIOS_URL), "Preprod");
-  selectWallet(lucid1, wallet1File);
-  const lucid2 = await Lucid(new Koios(KOIOS_URL), "Preprod");
-  selectWallet(lucid2, wallet2File);
-
+async function settle(lucid1: LucidEvolution, lucid2: LucidEvolution) {
   const { creator, lottery } = loadScripts();
   const utxo = await getLotteryUtxo(lucid1, lottery.address);
   const current = decodeDatum(utxo.datum!);
-
   const n1 = Number(toText(current.nonce1));
   const n2 = Number(toText(current.nonce2));
-  if (Number.isNaN(n1) || Number.isNaN(n2)) {
-    throw new Error("Both secrets must be revealed before settlement");
-  }
-
-  // Mirror the on-chain choice: parity of (n1+n2) picks the winner.
   const winnerVkh = (n1 + n2) % 2 === 1 ? current.player1 : current.player2;
   const addr1 = await lucid1.wallet().address();
   const addr2 = await lucid2.wallet().address();
   const vkh1 = paymentCredentialOf(addr1).hash;
-  const vkh2 = paymentCredentialOf(addr2).hash;
-
-  let winnerLucid: LucidEvolution;
-  let winnerAddr: string;
-  if (winnerVkh === vkh1) {
-    winnerLucid = lucid1;
-    winnerAddr = addr1;
-  } else if (winnerVkh === vkh2) {
-    winnerLucid = lucid2;
-    winnerAddr = addr2;
-  } else {
-    throw new Error("Neither wallet matches the winning VKH");
-  }
+  const winnerLucid = winnerVkh === vkh1 ? lucid1 : lucid2;
+  const winnerAddr = winnerVkh === vkh1 ? addr1 : addr2;
 
   const tokenUnit = creator.policyId + fromText(TOKEN_NAME);
-
   const tx = await winnerLucid
     .newTx()
     .collectFrom([utxo], Data.to(new Constr(4, [])))
@@ -306,45 +232,33 @@ export async function settle(wallet1File: string, wallet2File: string) {
     .pay.ToAddress(winnerAddr, { lovelace: BET_LOVELACE })
     .addSigner(winnerAddr)
     .complete();
-
   const signed = await tx.sign.withWallet().complete();
   const txHash = await signed.submit();
-  console.log("Lottery settled");
-  console.log("Winner VKH:", winnerVkh);
-  console.log("Tx:", txHash);
+  console.log(`SETTLE ok. winner=${winnerVkh.slice(0, 16)}… tx=${txHash}`);
+}
+
+async function runScenario() {
+  console.log("=== lottery scenario: create → reveal1 → reveal2 → settle ===");
+  // Use account 0 as coordinator + funder. Players are account 1, 2.
+  const coordinator = await lucidAt(0);
+  const player1Lucid = await lucidAt(1);
+  const player2Lucid = await lucidAt(2);
+  await fundFromIndex0([
+    { address: await player1Lucid.wallet().address(), lovelace: 30_000_000n },
+    { address: await player2Lucid.wallet().address(), lovelace: 30_000_000n },
+  ]);
+
+  await create(coordinator, player1Lucid, player2Lucid);
+  await new Promise((r) => setTimeout(r, 2000));
+  await reveal(player1Lucid, 1, SECRET1);
+  await new Promise((r) => setTimeout(r, 2000));
+  await reveal(player2Lucid, 2, SECRET2);
+  await new Promise((r) => setTimeout(r, 2000));
+  await settle(player1Lucid, player2Lucid);
+
+  console.log("=== Scenario complete ===");
 }
 
 if (import.meta.main) {
-  const [cmd, ...args] = Deno.args;
-  try {
-    if (cmd === "prepare") {
-      await prepare(args[0] ? Number(args[0]) : 3);
-    } else if (cmd === "multisig-create") {
-      if (args.length !== 3) {
-        throw new Error("Usage: multisig-create <wallet_0.json> <wallet_1.json> <wallet_2.json>");
-      }
-      await multisigCreate(args[0], args[1], args[2]);
-    } else if (cmd === "reveal1") {
-      if (!args[0]) throw new Error("Usage: reveal1 <wallet.json>");
-      await reveal1(args[0]);
-    } else if (cmd === "reveal2") {
-      if (!args[0]) throw new Error("Usage: reveal2 <wallet.json>");
-      await reveal2(args[0]);
-    } else if (cmd === "settle") {
-      if (args.length !== 2) throw new Error("Usage: settle <wallet_1.json> <wallet_2.json>");
-      await settle(args[0], args[1]);
-    } else {
-      console.log(
-        "Usage:\n" +
-          "  prepare [count]\n" +
-          "  multisig-create <wallet_0.json> <wallet_1.json> <wallet_2.json>\n" +
-          "  reveal1 <wallet.json>\n" +
-          "  reveal2 <wallet.json>\n" +
-          "  settle <wallet_1.json> <wallet_2.json>\n",
-      );
-    }
-  } catch (error) {
-    console.error(error instanceof Error ? error.message : error);
-    Deno.exit(1);
-  }
+  await runScenario();
 }

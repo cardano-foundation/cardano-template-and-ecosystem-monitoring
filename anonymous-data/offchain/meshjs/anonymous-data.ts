@@ -1,442 +1,216 @@
 import {
-    KoiosProvider,
-    largestFirst,
-    MeshTxBuilder,
-    MeshWallet,
-    resolvePaymentKeyHash,
-    resolveScriptHash,
-    serializePlutusScript,
-    stringToHex,
-    UTxO
+  BlockfrostProvider,
+  MeshTxBuilder,
+  MeshWallet,
+  resolvePaymentKeyHash,
+  resolveScriptHash,
+  serializePlutusScript,
+  type UTxO,
 } from "@meshsdk/core";
-
-import {applyParamsToScript} from "@meshsdk/core-csl";
+import { applyParamsToScript } from "@meshsdk/core-csl";
 import blake2b from "blake2b";
+import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
-import blueprint from "../../onchain/aiken/plutus.json" with {type: "json"};
+// ----------------------------------------------------------------------------
+// Anonymous-data — Mesh.js targeting yaci-devkit.
+//   ID = blake2b_256(pkh || nonce)
+// Commit mints singleton ID-named token + locks it at the script with inline
+// datum. Reveal spends it with redeemer = nonce; signer pkh + nonce must
+// reproduce ID.
+// ----------------------------------------------------------------------------
 
-// ------------------------------------------------------------
-// Configuration
-// ------------------------------------------------------------
-
+const YACI_URL = "http://localhost:8080/api/v1";
 const NETWORK = "preprod";
 const NETWORK_ID = 0;
-const COLLATERAL_ADA = "5000000";
+const FUNDER_MNEMONIC =
+  "test test test test test test test test test test test test test test test test test test test test test test test sauce";
 
-// ------------------------------------------------------------
-// Wallet helpers
-// ------------------------------------------------------------
-
-function loadWalletFromFile(path: string): MeshWallet {
-    const mnemonic = JSON.parse(Deno.readTextFileSync(path));
-    const provider = new KoiosProvider(NETWORK);
-
-    return new MeshWallet({
-        networkId: NETWORK_ID,
-        fetcher: provider,
-        submitter: provider,
-        key: {
-            type: "mnemonic",
-            words: mnemonic,
-        },
-    });
+function provider(): BlockfrostProvider {
+  return new BlockfrostProvider(YACI_URL);
 }
 
-// ------------------------------------------------------------
-// Crypto helpers
-// ------------------------------------------------------------
+function makeWallet(words: string[]): MeshWallet {
+  const p = provider();
+  return new MeshWallet({
+    networkId: NETWORK_ID,
+    fetcher: p,
+    submitter: p,
+    key: { type: "mnemonic", words },
+  });
+}
+
+function funderWallet(): MeshWallet {
+  return makeWallet(FUNDER_MNEMONIC.split(/\s+/));
+}
+
+async function waitForUtxoAt(addr: string, minCount = 1, timeoutSec = 60) {
+  const p = provider();
+  for (let i = 0; i < timeoutSec; i++) {
+    try {
+      const u = await p.fetchAddressUTxOs(addr);
+      if (u.length >= minCount) return;
+    } catch { /* transient */ }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${addr}`);
+}
+
+async function fundFromFunder(targetAddr: string, lovelace: bigint) {
+  const wallet = funderWallet();
+  const myAddr = await wallet.getChangeAddress();
+  const myUtxos = await provider().fetchAddressUTxOs(myAddr);
+  const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
+    .setNetwork(NETWORK);
+  await tx
+    .txOut(targetAddr, [{ unit: "lovelace", quantity: lovelace.toString() }])
+    .changeAddress(myAddr)
+    .selectUtxosFrom(myUtxos)
+    .complete();
+  const signed = await wallet.signTx(tx.txHex);
+  const txHash = await wallet.submitTx(signed);
+  console.log(`Funded ${targetAddr} with ${lovelace} lovelace. tx=${txHash}`);
+  await waitForUtxoAt(targetAddr, 1);
+}
 
 function hexToBytes(hex: string): Uint8Array {
-    if (hex.length % 2 !== 0) {
-        throw new Error("Invalid hex string");
-    }
-
-    const bytes = new Uint8Array(hex.length / 2);
-    for (let i = 0; i < bytes.length; i++) {
-        bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-    }
-    return bytes;
+  return new Uint8Array(hex.match(/.{1,2}/g)!.map((b) => parseInt(b, 16)));
 }
-
-/**
- * Convert bytes to hex string.
- */
 function bytesToHex(bytes: Uint8Array): string {
-    return [...bytes]
-        .map((b) => b.toString(16).padStart(2, "0"))
-        .join("");
+  return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
-
-
-/**
- * Compute ID = blake2b_256(pkh || nonce)
- * Mirrors Aiken:
- *   blake2b_256(concat(pkh, nonce))
- */
 function computeIdHex(pkhHex: string, nonceHex: string): string {
-    const pkhBytes = hexToBytes(pkhHex);
-    const nonceBytes = hexToBytes(nonceHex);
-
-    const combined = new Uint8Array(pkhBytes.length + nonceBytes.length);
-    combined.set(pkhBytes);
-    combined.set(nonceBytes, pkhBytes.length);
-
-    const hash = blake2b(blake2b.BYTES)
-        .update(combined)
-        .digest();
-
-    return bytesToHex(hash);
+  const pkh = hexToBytes(pkhHex);
+  const nonce = hexToBytes(nonceHex);
+  const combined = new Uint8Array(pkh.length + nonce.length);
+  combined.set(pkh);
+  combined.set(nonce, pkh.length);
+  return bytesToHex(blake2b(blake2b.BYTES).update(combined).digest());
 }
 
-
-
-// ------------------------------------------------------------
-// Script helpers
-// ------------------------------------------------------------
-
-/**
- * Returns the anonymous-data validator information.
- *
- * IMPORTANT:
- * - The minting policy ID is the hash of this script.
- * - No parameters are applied.
- */
 function getScriptInfo() {
-    const compiled = blueprint.validators[0].compiledCode;
+  const compiled = blueprint.validators[0].compiledCode;
+  const script = applyParamsToScript(compiled, [], "JSON");
+  const policyId = resolveScriptHash(script, "V3");
+  const { address } = serializePlutusScript(
+    { code: script, version: "V3" },
+    undefined,
+    NETWORK_ID,
+  );
+  return { script, policyId, scriptAddress: address };
+}
 
-    const scriptCbor = applyParamsToScript(compiled, [], "JSON");
+async function pickCollateral(wallet: MeshWallet, utxos: UTxO[]): Promise<UTxO> {
+  // Collateral must be pure-ADA (yaci-devkit rejects multi-asset collateral).
+  const fromWallet = (await wallet.getCollateral()).filter((u) =>
+    u.output.amount.length === 1 && u.output.amount[0].unit === "lovelace",
+  );
+  if (fromWallet.length > 0) return fromWallet[0];
+  const pureAda = utxos.find((u) =>
+    u.output.amount.length === 1 &&
+    u.output.amount[0].unit === "lovelace" &&
+    BigInt(u.output.amount[0].quantity) >= 5_000_000n,
+  );
+  if (!pureAda) throw new Error("No pure-ADA collateral UTxO available");
+  return pureAda;
+}
 
-    const policyId = resolveScriptHash(scriptCbor, "V3");
+async function commit(wallet: MeshWallet, nonceHex: string, dataHex: string): Promise<string> {
+  const changeAddress = await wallet.getChangeAddress();
+  const signerPkh = resolvePaymentKeyHash(changeAddress);
+  const idHex = computeIdHex(signerPkh, nonceHex);
 
+  const { script, policyId, scriptAddress } = getScriptInfo();
+  const utxos = await provider().fetchAddressUTxOs(changeAddress);
+  const col = await pickCollateral(wallet, utxos);
 
-    const {address} = serializePlutusScript(
-        {code: scriptCbor, version: "V3"},
-        //getPayAddrStakeCredential(initiatorPaymentAddress),
-        undefined,
-        NETWORK_ID,
+  const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
+    .setNetwork(NETWORK);
+  await tx
+    .mintPlutusScriptV3()
+    .mint("1", policyId, idHex)
+    .mintingScript(script)
+    .mintRedeemerValue({ bytes: idHex }, "JSON")
+    .txOut(scriptAddress, [{ unit: policyId + idHex, quantity: "1" }])
+    .txOutInlineDatumValue(dataHex)
+    .txInCollateral(
+      col.input.txHash,
+      col.input.outputIndex,
+      col.output.amount,
+      col.output.address,
     )
-
-    return {
-        script: scriptCbor,
-        policyId,
-        scriptAddress: address,
-    };
+    .requiredSignerHash(signerPkh)
+    .changeAddress(changeAddress)
+    .selectUtxosFrom(utxos)
+    .complete();
+  const signed = await wallet.signTx(tx.txHex);
+  const txHash = await wallet.submitTx(signed);
+  console.log(`COMMIT ok. id=${idHex.slice(0, 16)}… tx=${txHash}`);
+  return idHex;
 }
 
-// ------------------------------------------------------------
-// Commit Phase (Mint + Store)
-// ------------------------------------------------------------
+async function reveal(wallet: MeshWallet, nonceHex: string, idHex: string) {
+  const changeAddress = await wallet.getChangeAddress();
+  const signerPkh = resolvePaymentKeyHash(changeAddress);
+  const { script, policyId, scriptAddress } = getScriptInfo();
+  const unit = policyId + idHex;
 
-/**
- * Reveal ownership and spend a previously committed UTxO.
- *
- * Off-chain responsibilities:
- * 1. Convert nonce to hex
- * 2. Recompute the commit ID as blake2b_256(pkh || nonce)
- * 3. Locate the script UTxO that carries the singleton ID token
- *    (unit = policyId || idHex, quantity = 1)
- * 4. Spend exactly that UTxO with the nonce as redeemer
- *
- * On-chain (validator) guarantees:
- * - Recomputes the same ID from (signer PKH || nonce)
- * - Verifies that the spent UTxO carries the ID token
- *
- * @param walletFile Path to the wallet mnemonic file
- * @param nonce      Human-readable nonce used during commit
- * @throws If no matching committed UTxO is found at the script address
- */
-export async function commitData(
-    walletFile: string,
-    nonce: string,
-    data: string,
-) {
-
-    const nonceHex = stringToHex(nonce)
-    const dataHex = stringToHex(data)
-    console.log("=== commitData: input params ===");
-    console.log({ walletFile, nonceHex, dataHex });
-
-    const wallet = loadWalletFromFile(walletFile);
-    const provider = new KoiosProvider(NETWORK);
-
-    const changeAddress = await wallet.getChangeAddress();
-    const signerPkh = resolvePaymentKeyHash(changeAddress);
-
-    console.log("=== wallet info ===");
-    console.log({
-        NETWORK,
-        NETWORK_ID,
-        changeAddress,
-        signerPkh,
-    });
-
-    // Derive commit ID from (signer PKH || nonce)
-    const idHex = await computeIdHex(signerPkh, nonceHex);
-
-    console.log("=== derived values ===");
-    console.log({
-        idHex,
-    });
-
-    const { script, policyId, scriptAddress } = getScriptInfo();
-
-    console.log("=== script info ===");
-    console.log({
-        policyId,
-        scriptAddress,
-        script, // careful: this can be large
-    });
-
-    const utxos = await provider.fetchAddressUTxOs(changeAddress);
-    const collateral: UTxO[] = await wallet.getCollateral();
-
-    console.log("=== PRE-TXBUILDER SNAPSHOT ===");
-    console.log({
-        changeAddress,
-        signerPkh,
-        nonceHex,
-        dataHex,
-        idHex,
-        policyId,
-        scriptAddress,
-        collateral,
-    });
-
-    const tx = new MeshTxBuilder({
-        fetcher: provider,
-        submitter: provider,
-        evaluator: provider,
-    }).setNetwork(NETWORK);
-
-    await tx
-        // mint singleton ID token
-        .mintPlutusScriptV3()
-        .mint("1", policyId, idHex)
-        .mintingScript(script)
-        .mintRedeemerValue(
-            { bytes: idHex },
-            "JSON"
-        )
-
-        // lock token at script with arbitrary user data
-        .txOut(
-            scriptAddress,
-            [{unit: policyId + idHex, quantity: "1"}],
-        )
-        .txOutInlineDatumValue(dataHex)
-
-        // collateral + signer
-        .txInCollateral(
-            collateral[0].input.txHash,
-            collateral[0].input.outputIndex,
-            collateral[0].output.amount,
-            collateral[0].output.address,
-        )
-        .requiredSignerHash(signerPkh)
-        .changeAddress(changeAddress)
-        .selectUtxosFrom(utxos)
-        .complete();
-
-    const signed = await wallet.signTx(tx.txHex);
-    const txHash = await wallet.submitTx(signed);
-
-    console.log("✅ Commit tx submitted:", txHash);
-    console.log(" Secret ID:", idHex);
-    console.log(" Policy ID:", policyId);
-}
-
-// ------------------------------------------------------------
-// Reveal Phase (Spend)
-// ------------------------------------------------------------
-
-/**
- * Reveal ownership and spend a previously committed UTxO.
- *
- * Off-chain responsibilities:
- * 1. Recompute the commit ID as blake2b_256(pkh || nonce)
- * 2. Locate the script UTxO that carries the singleton ID token
- *    (unit = policyId || idHex, quantity = 1)
- * 3. Spend exactly that UTxO with the nonce as redeemer
- *
- * On-chain (validator) guarantees:
- * - Recomputes the same ID from (signer PKH || nonce)
- * - Verifies that the spent UTxO carries the ID token
- *
- * @param walletFile Path to the wallet mnemonic file
- * @param nonceHex   Hex-encoded nonce used during commit
- * @throws If no matching committed UTxO is found at the script address
- */
-export async function revealData(
-    walletFile: string,
-    nonce: string,
-) {
-    const nonceHex = stringToHex(nonce)
-    console.log("=== revealData: start ===");
-    console.log({ walletFile, nonceHex });
-
-    const wallet = loadWalletFromFile(walletFile);
-    const provider = new KoiosProvider(NETWORK);
-
-    const changeAddress = await wallet.getChangeAddress();
-    const signerPkh = resolvePaymentKeyHash(changeAddress);
-
-    console.log("=== wallet context ===");
-    console.log({
-        NETWORK,
-        changeAddress,
-        signerPkh,
-    });
-
-    const { script, scriptAddress, policyId } = getScriptInfo();
-
-    console.log("=== script info ===");
-    console.log({
-        scriptAddress,
-        policyId,
-    });
-
-    // recompute ID
-    const idHex = await computeIdHex(signerPkh, nonceHex);
-    const unit = policyId + idHex;
-
-    console.log("=== recomputed commit ID ===");
-    console.log({
-        idHex,
-        unit,
-    });
-
-    // fetch script UTxOs
-    const scriptUtxos = await provider.fetchAddressUTxOs(scriptAddress);
-
-    // locate committed UTxO
-    const committedUtxo = scriptUtxos.find(u =>
-        u.output.amount.some(
-            a => a.unit === unit && a.quantity === "1"
-        )
+  let committedUtxo: UTxO | undefined;
+  for (let i = 0; i < 60; i++) {
+    const utxos = await provider().fetchAddressUTxOs(scriptAddress);
+    committedUtxo = utxos.find((u) =>
+      u.output.amount.some((a) => a.unit === unit && a.quantity === "1"),
     );
+    if (committedUtxo) break;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  if (!committedUtxo) throw new Error(`Committed UTxO ${unit} not found`);
 
-    if (!committedUtxo) {
-        console.error("❌ No committed UTxO found");
-        console.error("Expected unit:", unit);
-        throw new Error("No committed UTxO found for this ID");
-    }
+  const utxos = await provider().fetchAddressUTxOs(changeAddress);
+  const col = await pickCollateral(wallet, utxos);
 
-    console.log("=== committed UTxO selected ===");
-    console.log({
-        txHash: committedUtxo.input.txHash,
-        outputIndex: committedUtxo.input.outputIndex,
-        amount: committedUtxo.output.amount,
-    });
-
-    // wallet UTxOs for fees + change
-    const utxos = await provider.fetchAddressUTxOs(changeAddress);
-    const collateral = largestFirst(COLLATERAL_ADA, utxos);
-
-    console.log("=== wallet UTxOs ===");
-    console.log({
-        utxoCount: utxos.length,
-        collateral,
-    });
-
-    const tx = new MeshTxBuilder({
-        fetcher: provider,
-        submitter: provider,
-        evaluator: provider,
-    }).setNetwork(NETWORK);
-
-    console.log("=== building reveal transaction ===");
-
-    await tx
-        .spendingPlutusScriptV3()
-        .txIn(
-            committedUtxo.input.txHash,
-            committedUtxo.input.outputIndex,
-            committedUtxo.output.amount,
-            scriptAddress,
-        )
-        .txInInlineDatumPresent()
-        .txInRedeemerValue(
-            { bytes: nonceHex },
-            "JSON"
-        )
-        .txInScript(script)
-        .txOut(
-            changeAddress,
-            [{unit: policyId + idHex, quantity: "1"}],
-        )
-        .txInCollateral(
-            collateral[0].input.txHash,
-            collateral[0].input.outputIndex,
-            collateral[0].output.amount,
-            collateral[0].output.address,
-        )
-        .requiredSignerHash(signerPkh)
-        .changeAddress(changeAddress)
-        .selectUtxosFrom(utxos)
-        .complete();
-
-    console.log("=== transaction built ===");
-    console.log({ txHex: tx.txHex });
-
-    const signed = await wallet.signTx(tx.txHex, true);
-    const txHash = await wallet.submitTx(signed);
-
-    console.log("✅ Reveal tx submitted:", txHash);
+  const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
+    .setNetwork(NETWORK);
+  await tx
+    .spendingPlutusScriptV3()
+    .txIn(
+      committedUtxo.input.txHash,
+      committedUtxo.input.outputIndex,
+      committedUtxo.output.amount,
+      scriptAddress,
+    )
+    .txInInlineDatumPresent()
+    .txInRedeemerValue({ bytes: nonceHex }, "JSON")
+    .txInScript(script)
+    .txOut(changeAddress, [{ unit, quantity: "1" }])
+    .txInCollateral(
+      col.input.txHash,
+      col.input.outputIndex,
+      col.output.amount,
+      col.output.address,
+    )
+    .requiredSignerHash(signerPkh)
+    .changeAddress(changeAddress)
+    .selectUtxosFrom(utxos)
+    .complete();
+  const signed = await wallet.signTx(tx.txHex, true);
+  const txHash = await wallet.submitTx(signed);
+  console.log(`REVEAL ok. tx=${txHash}`);
 }
 
-// ------------------------------------------------------------
-// CLI entrypoint
-// ------------------------------------------------------------
-async function main() {
-    const [command, ...args] = Deno.args;
+async function runScenario() {
+  console.log("=== anonymous-data scenario: commit → reveal ===");
+  // Use a fresh brewed wallet so collateral is naturally pure-ADA.
+  const wallet = makeWallet(MeshWallet.brew(false) as string[]);
+  await fundFromFunder(await wallet.getChangeAddress(), 30_000_000n);
 
-    // No command given => print help and exit successfully (CI-safe)
-    if (!command) {
-        console.log(
-          "Usage:\n\n" +
-          "  commit <wallet.json> <nonce> <data>\n" +
-          "  reveal <wallet.json> <nonce>\n",
-        );
-        return;
-    }
-
-    if (command === "commit") {
-        if (args.length !== 3) {
-            console.error(
-              "Usage:\n" +
-              "  deno run -A anonymous-data.ts commit <wallet.json> <nonce> <data>",
-            );
-            Deno.exit(1);
-        }
-
-        const [walletFile, nonce, data] = args;
-        await commitData(walletFile, nonce, data);
-        return;
-    }
-
-    if (command === "reveal") {
-        if (args.length !== 2) {
-            console.error(
-              "Usage:\n" +
-              "  deno run -A anonymous-data.ts reveal <wallet.json> <nonce>",
-            );
-            Deno.exit(1);
-        }
-
-        const [walletFile, nonce] = args;
-        await revealData(walletFile, nonce);
-        return;
-    }
-
-    console.error(
-      "Unknown command.\n\n" +
-      "Commands:\n" +
-      "  commit <wallet.json> <nonce> <data>\n" +
-      "  reveal <wallet.json> <nonce>",
-    );
-    Deno.exit(1);
+  const nonceHex = bytesToHex(crypto.getRandomValues(new Uint8Array(16)));
+  const dataHex = bytesToHex(new TextEncoder().encode("hello-world"));
+  const idHex = await commit(wallet, nonceHex, dataHex);
+  await new Promise((r) => setTimeout(r, 2000));
+  await reveal(wallet, nonceHex, idHex);
+  console.log("=== Scenario complete ===");
 }
 
 if (import.meta.main) {
-    main();
+  await runScenario();
 }
