@@ -24,6 +24,11 @@ runs:
     - name: Install Aiken
       if: steps.cache.outputs.cache-hit != 'true'
       shell: bash
+      env:
+        # aikup fetches release metadata from the GitHub API. Unauthenticated
+        # calls share a 60/hr quota across the entire runner IP and
+        # routinely hit rate-limit failures. Authenticated calls get 5000/hr.
+        GITHUB_TOKEN: ${{ github.token }}
       run: |
         curl --proto '=https' --tlsv1.2 -LsSf https://install.aiken-lang.org | sh
         export PATH="$HOME/.aiken/bin:$PATH"

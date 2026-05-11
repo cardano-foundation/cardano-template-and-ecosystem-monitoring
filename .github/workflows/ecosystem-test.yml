@@ -51,12 +51,52 @@ jobs:
           scripts/local-test-discovery.sh
 
   # ─────────────────────────────────────────────────────────────────────────
+  # Toolchain prepare
+  # Runs once per workflow run, warms the actions/cache for each toolchain
+  # the discovered examples will need. Downstream matrix jobs then hit the
+  # warm cache instead of each re-installing on cold cache (which would
+  # both waste time and risk GitHub API rate limits — aikup in particular
+  # fetches release metadata from the GitHub API).
+  # ─────────────────────────────────────────────────────────────────────────
+  prepare-toolchains:
+    name: Prepare toolchains
+    needs: discover
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Aiken
+        if: needs.discover.outputs.aiken-examples != '[]'
+        uses: ./.github/actions/setup-aiken
+        with:
+          aiken-version: ${{ env.AIKEN_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+
+      - name: Setup JBang + Java
+        if: needs.discover.outputs.ccl-examples != '[]'
+        uses: ./.github/actions/setup-jbang-java
+        with:
+          cache-version: ${{ env.CACHE_VERSION }}
+
+      - name: Setup Yaci DevKit (install only)
+        if: |
+          needs.discover.outputs.ccl-examples != '[]' ||
+          needs.discover.outputs.mesh-examples != '[]' ||
+          needs.discover.outputs.evosdk-examples != '[]'
+        uses: ./.github/actions/setup-yaci-devkit
+        with:
+          start: 'false'
+          cache-version: ${{ env.CACHE_VERSION }}
+
+  # ─────────────────────────────────────────────────────────────────────────
   # On-chain compile
   # Delegates to .github/workflows/_compile-aiken.yml, which fans out across
   # matrix entries and uploads each plutus.json as `plutus-<example>`.
   # ─────────────────────────────────────────────────────────────────────────
   compile-aiken:
-    needs: discover
+    needs: [discover, prepare-toolchains]
     if: needs.discover.outputs.aiken-examples != '[]'
     uses: ./.github/workflows/_compile-aiken.yml
     with:
@@ -69,7 +109,7 @@ jobs:
   # Each framework is one block: a reusable workflow + a small inputs map.
   # ─────────────────────────────────────────────────────────────────────────
   test-ccl-java:
-    needs: [discover, compile-aiken]
+    needs: [discover, prepare-toolchains, compile-aiken]
     if: needs.discover.outputs.ccl-examples != '[]'
     uses: ./.github/workflows/_test-offchain-jbang.yml
     with:
@@ -81,7 +121,7 @@ jobs:
       cache-version: v1
 
   test-mesh:
-    needs: [discover, compile-aiken]
+    needs: [discover, prepare-toolchains, compile-aiken]
     if: needs.discover.outputs.mesh-examples != '[]'
     uses: ./.github/workflows/_test-offchain-deno.yml
     with:
@@ -92,7 +132,7 @@ jobs:
       cache-version: v1
 
   test-evolutionsdk:
-    needs: [discover, compile-aiken]
+    needs: [discover, prepare-toolchains, compile-aiken]
     if: needs.discover.outputs.evosdk-examples != '[]'
     uses: ./.github/workflows/_test-offchain-deno.yml
     with:
@@ -260,15 +300,30 @@ jobs:
         env:
           BRANCH: ${{ github.head_ref || github.ref_name }}
         run: |
+          set -e
+          if [ ! -f docs/dashboard.json ]; then
+            echo "docs/dashboard.json missing — nothing to commit"
+            exit 0
+          fi
+
+          # dashboard.json carries a `lastUpdated` timestamp that bumps on every
+          # run, so a plain `git diff` always reports a change. Compare the
+          # *content-without-lastUpdated* against HEAD's version and only
+          # commit when something meaningful actually changed.
+          CURR=$(jq -S 'del(.lastUpdated)' docs/dashboard.json)
+          PREV=$(git show HEAD:docs/dashboard.json 2>/dev/null \
+                   | jq -S 'del(.lastUpdated)' 2>/dev/null || echo '')
+
+          if [ "$CURR" = "$PREV" ]; then
+            echo "No meaningful changes to dashboard.json (only timestamp differs) — skipping commit"
+            exit 0
+          fi
+
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add docs/dashboard.json
-          if git diff --cached --quiet; then
-            echo "No changes to dashboard.json"
-          else
-            git commit -m "chore: update dashboard.json [skip ci]"
-            git push origin "HEAD:${BRANCH}"
-          fi
+          git commit -m "chore: update dashboard.json [skip ci]"
+          git push origin "HEAD:${BRANCH}"
 
       - name: Update versions.json from upstream
         if: github.event_name == 'schedule' && env.VERSIONS_OUTDATED == 'true'
