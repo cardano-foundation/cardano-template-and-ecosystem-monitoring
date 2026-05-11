@@ -69,8 +69,10 @@ public class Storage {
         static QuickTxBuilder quickTxBuilder = new QuickTxBuilder(backendService);
 
         public static void main(String[] args) throws Exception {
-                // Publish a daily snapshot for today.
-                String snapshotId = "2026-05-08";
+                // Publish a daily snapshot. Include the wall-clock timestamp so
+                // re-runs on the same yaci-devkit session don't collide with a
+                // previously minted state token.
+                String snapshotId = "snap-" + System.currentTimeMillis() + "-daily";
                 byte[] commitmentHash = sha256(("commitment-data-" + snapshotId).getBytes());
 
                 TxResult res = publish(snapshotId, /* daily */ 0, commitmentHash);
