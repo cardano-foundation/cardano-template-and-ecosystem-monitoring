@@ -13,8 +13,10 @@ import { SLOT_CONFIG_NETWORK } from "@evolution-sdk/plutus";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
 // ----------------------------------------------------------------------------
-// DID — Evolution SDK targeting yaci-devkit.
-// Scenario: init → AddDelegate → RemoveDelegate → TransferOwner.
+// Decentralised identity. Single PlutusV3 spend validator exercising the
+// TransferOwner / AddDelegate / RemoveDelegate redeemers. AddDelegate has
+// a valid_before(expires) constraint, so its validity range is shrunk to
+// land before the delegate's expiration.
 // ----------------------------------------------------------------------------
 
 const YACI_URL = "http://localhost:8080/api/v1";
@@ -34,6 +36,10 @@ const IdentityDatumSchema = Data.Object({
 type IdentityDatum = Data.Static<typeof IdentityDatumSchema>;
 const IdentityDatum = IdentityDatumSchema as unknown as IdentityDatum;
 
+// yaci-devkit boots through several "instant" eras and enters Babbage at
+// relative slot/time 600s, so TxInfo POSIX = (systemStart + 600 + slot) * 1000.
+// We pre-bake that offset in SLOT_CONFIG_NETWORK so validFrom(Date.now())
+// round-trips against the validator's view of time.
 async function alignSlotConfig() {
   const block = await fetch(`${YACI_URL}/blocks/latest`).then((r) => r.json());
   const zeroTime = (block.time - block.slot + ERA_OFFSET_SECONDS) * 1000;
@@ -71,7 +77,7 @@ async function waitForUtxosAt(
     try {
       const u = await lucid.utxosAt(address);
       if (u.length >= minCount) return;
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${address}`);
@@ -118,7 +124,7 @@ async function loadIdentity(lucid: LucidEvolution, txHash: string) {
         const state = Data.from(utxos[0].datum, IdentityDatum) as unknown as IdentityDatum;
         return { utxo: utxos[0], state };
       }
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Identity UTxO ${txHash}#0 not found`);
@@ -223,7 +229,8 @@ async function runScenario() {
   console.log("=== did scenario: init → add-delegate → remove-delegate → transfer-owner ===");
   await alignSlotConfig();
 
-  // Fresh owner & delegate & new-owner wallets.
+  // owner = fresh seed (so the run is repeatable); account 1 = delegate;
+  // account 2 = next owner for the final TransferOwner step.
   const ownerSeed = generateSeedPhrase();
   const owner = await lucidFromSeed(ownerSeed);
   const ownerAddr = await owner.wallet().address();

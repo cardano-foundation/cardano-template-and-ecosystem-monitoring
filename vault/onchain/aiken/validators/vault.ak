@@ -7,6 +7,16 @@ use cardano/transaction.{
 use cocktail/vodka_extra_signatories.{key_signed}
 use cocktail/vodka_validity_range.{valid_after}
 
+// Time-locked vault with a two-step withdrawal. Lifecycle:
+//   WITHDRAW: owner schedules a withdrawal by stamping the UTxO with a
+//     lock_time. Funds stay in the contract; a datum-bearing output rebuilds
+//     the locked state, a datum-less output drains.
+//   FINALIZE: after lock_time + waitTime, owner can actually take the funds.
+//   CANCEL: owner aborts a scheduled withdrawal, reverting to a datum-less
+//     UTxO so the next withdrawal must restart the clock.
+// waitTime is a script parameter so every vault has a known cool-down baked
+// into its address.
+
 pub type Action {
   WITHDRAW
   FINALIZE
@@ -17,7 +27,6 @@ pub type WithdrawDatum {
   lock_time: Int,
 }
 
-// Wait time is the time milliseconds the owner has to wait before being able to finalize
 validator vault(owner: VerificationKeyHash, waitTime: Int) {
   spend(
     datum: Option<WithdrawDatum>,
@@ -28,9 +37,13 @@ validator vault(owner: VerificationKeyHash, waitTime: Int) {
     let Transaction { inputs, outputs, extra_signatories, validity_range, .. } =
       self
     when redeemer is {
+      // WITHDRAW — schedule (or re-schedule) a withdrawal. Conservation:
+      // total lovelace returning to the script must equal what was input.
+      // Each datum-bearing continuing output's lock_time must already be
+      // in the past, so the owner cannot push the clock backwards by
+      // re-scheduling with an earlier lock_time after waiting.
       WITHDRAW -> {
         expect Some(spent_utxo) = find_input(inputs, utxo)
-        // Verifiy if the spent_utxo isn't spend and goes back to the contract
         let output_back_to_contract =
           outputs
             |> list.filter(fn(out) { out.address == spent_utxo.output.address })
@@ -44,23 +57,21 @@ validator vault(owner: VerificationKeyHash, waitTime: Int) {
             )
           |> list.for_each(
               fn(o) {
-                // Expecting the lock time before the current tx time
                 expect InlineDatum(inline_datum) = o.datum
                 expect WithdrawDatum { lock_time } = inline_datum
                 expect valid_after(validity_range, lock_time)
               },
             )
         and {
-          // Ensure the output back to the contract is equal to the input
           output_back_to_contract == assets.lovelace_of(spent_utxo.output.value),
-          // Ensure the owner signed the transaction
           key_signed(extra_signatories, owner),
         }
       }
 
-      // }
+      // FINALIZE — collect the funds. Tx must start strictly after
+      // lock_time + waitTime, which is the full cool-down. No output checks
+      // here: once the timer elapses the owner has unconditional access.
       FINALIZE -> {
-        // Ensure the owner signed the transaction
         expect Some(withdraw_datum) = datum
         and {
           key_signed(extra_signatories, owner),
@@ -68,20 +79,19 @@ validator vault(owner: VerificationKeyHash, waitTime: Int) {
         }
       }
 
+      // CANCEL — abort the scheduled withdrawal. Funds stay in the vault
+      // (same conservation rule as WITHDRAW); off-chain side is expected to
+      // re-deposit them as a datum-less UTxO so the timer is reset.
       CANCEL -> {
         expect Some(spent_utxo) = find_input(inputs, utxo)
 
-        // Verifiy if the spent_utxo isn't spend and goes back to the contract
         let output_back_to_contract =
           outputs
             |> list.filter(fn(out) { out.address == spent_utxo.output.address })
             |> list.map(fn(o) { assets.lovelace_of(o.value) })
             |> list.foldr(0, fn(n, total) { n + total })
-        // expecting no datum to be present to reset it
         and {
-          // Ensure the output back to the contract is equal to the input
           output_back_to_contract == assets.lovelace_of(spent_utxo.output.value),
-          // Ensure the owner signed the transaction
           key_signed(extra_signatories, owner),
         }
       }

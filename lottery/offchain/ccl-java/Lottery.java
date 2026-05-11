@@ -46,16 +46,13 @@ import com.bloxbean.cardano.client.transaction.spec.Asset;
 import com.bloxbean.cardano.client.util.HexUtil;
 
 /**
- * Lottery — two validators with chained parameters.
+ * Commit-reveal lottery against two chained validators:
  *   lottery_creator (mint)  param: game_index
  *   lottery         (spend) params: creator_script_hash, game_index
+ * Exercises multisigCreate, reveal1, reveal2, settle.
  *
- * Operations exercised: multisigCreate (player1 + player2 mint marker + lock funds),
- * reveal1, reveal2, settle.
- *
- * Note: this happy path uses a single funded mnemonic at derivation indices 0/1/2.
- * Real CCL signing of a multi-required-signer tx uses .withSigner(...) chained for
- * each account. Player accounts must hold sufficient ADA — funded by index 0.
+ * Both players sign INIT via two .withSigner calls (CCL handles multi-required
+ * signers by chaining), and the funder at index 0 tops up the players first.
  */
 public class Lottery {
 
@@ -73,6 +70,7 @@ public class Lottery {
 
         static String mnemonic = "test test test test test test test test test test test test test test test test test test test test test test test sauce";
         static Network network = Networks.testnet();
+        // Roles: index 0 = funder (only used to top up the players), 1 = player1, 2 = player2.
         static Account funder = new Account(network, mnemonic, 0);
         static Account player1 = new Account(network, mnemonic, 1);
         static Account player2 = new Account(network, mnemonic, 2);
@@ -90,6 +88,8 @@ public class Lottery {
                 System.out.println("Lottery address: " + lotteryAddress.getAddress());
                 fundAccount(player1.baseAddress(), 25);
                 fundAccount(player2.baseAddress(), 25);
+                // Wait for the funder's change UTxOs to be indexed at each player wallet
+                // before they try to spend.
                 waitForBalance(player1.baseAddress(), 20_000_000L, 60);
                 waitForBalance(player2.baseAddress(), 20_000_000L, 60);
 
@@ -150,12 +150,14 @@ public class Lottery {
                 PlutusData mintRedeemer = ConstrPlutusData.of(0);
                 Asset asset = new Asset(TOKEN_NAME, BigInteger.ONE);
 
-                // Use a list of amounts so the locked output carries the marker token + 10 ADA.
                 ScriptTx scriptTx = new ScriptTx()
                                 .mintAsset(creatorPolicyId, List.of(asset), mintRedeemer,
                                                 lotteryAddress.getAddress(), datum)
                                 .attachMintValidator(creatorScript);
 
+                // Both players are required signers (must_be_signed_by p1 && must_be_signed_by p2),
+                // so chain two withSigner calls to attach both signing keys and pass both pkhs
+                // through withRequiredSigners so they appear in the script context.
                 long slot = backendService.getBlockService().getLatestBlock().getValue().getSlot();
                 return quickTxBuilder.compose(scriptTx)
                                 .validFrom(slot - 5)
@@ -197,8 +199,8 @@ public class Lottery {
                 Utxo utxo = findScriptUtxoByTx(prevTxHash);
                 if (utxo == null) throw new AssertionError("Lottery UTxO not indexed");
 
-                PlutusData spendRedeemer = ConstrPlutusData.of(4); // Settle
-                PlutusData burnRedeemer = ConstrPlutusData.of(1); // Burn
+                PlutusData spendRedeemer = ConstrPlutusData.of(4);
+                PlutusData burnRedeemer = ConstrPlutusData.of(1);
                 Asset burnAsset = new Asset(TOKEN_NAME, BigInteger.valueOf(-1));
 
                 ScriptTx scriptTx = new ScriptTx()

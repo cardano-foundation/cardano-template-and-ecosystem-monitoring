@@ -42,16 +42,14 @@ import com.bloxbean.cardano.client.transaction.spec.Asset;
 import com.bloxbean.cardano.client.util.HexUtil;
 
 /**
- * Anonymous data commit/reveal use-case.
+ * Commit/reveal of anonymous data against a single validator that serves as both
+ * mint policy and spend validator. COMMIT mints one token (asset_name =
+ * blake2b_256(pkh || nonce)) into the script address with an inline datum;
+ * REVEAL spends that UTxO supplying the nonce as redeemer.
  *
- *   ID = blake2b_256(pkh || nonce)
- *
- * Commit (mint): mint exactly one token with asset_name = ID, send it to the
- *   script address with an inline datum holding arbitrary user data.
- * Reveal (spend): spend that UTxO supplying the nonce as redeemer; the spender
- *   must be a signer whose pkh can reproduce the committed ID.
- *
- * The same script provides both the mint policy and the spend validator.
+ * CCL quirk: ScriptCollectFromIntent silently drops the script input when no
+ * payToAddress anchors the consumed value, so REVEAL forwards the full input
+ * value back to the owner explicitly.
  */
 public class AnonymousData {
 
@@ -65,8 +63,6 @@ public class AnonymousData {
         static Address ownerAddress = owner.getBaseAddress();
         static QuickTxBuilder quickTxBuilder = new QuickTxBuilder(backendService);
 
-        // The validator has no parameters; the same compiled script serves both
-        // the mint policy and the spending validator. Its hash is the policy id.
         static PlutusScript plutusScript = loadPlutusScript();
         static String policyId = computePolicyId(plutusScript);
         static Address scriptAddress = AddressProvider.getEntAddress(plutusScript, network);
@@ -79,7 +75,6 @@ public class AnonymousData {
                 }
         }
 
-        // Test inputs.
         static String NONCE_HEX = "deadbeef";
         static String DATA_HEX = HexUtil.encodeHexString("anonymous-payload".getBytes(StandardCharsets.UTF_8));
 
@@ -107,9 +102,9 @@ public class AnonymousData {
         private static TxResult commit(byte[] id, byte[] data) throws ApiException {
                 String idHex = HexUtil.encodeHexString(id);
 
-                // Mint redeemer for the policy is the id (ByteArray).
+                // BytesPlutusData encodes Aiken ByteArray for both the policy redeemer (the ID)
+                // and the inline datum (opaque user payload).
                 PlutusData mintRedeemer = BytesPlutusData.of(id);
-                // Inline datum on the script output is the user's data (opaque).
                 PlutusData inlineDatum = BytesPlutusData.of(data);
 
                 Asset asset = Asset.builder()
@@ -117,8 +112,6 @@ public class AnonymousData {
                                 .value(BigInteger.ONE)
                                 .build();
 
-                // Two-step: declare the policy script (so we can use the policyId-string
-                // overload of mintAsset that supports an inline datum on the output).
                 ScriptTx scriptTx = new ScriptTx()
                                 .mintAsset(policyId, List.of(asset), mintRedeemer,
                                                 scriptAddress.getAddress(), inlineDatum)
@@ -141,21 +134,21 @@ public class AnonymousData {
 
                 long slot = backendService.getBlockService().getLatestBlock().getValue().getSlot();
 
-                // Spend redeemer is the nonce ByteArray.
                 PlutusData spendRedeemer = BytesPlutusData.of(nonce);
 
-                // Note: we do NOT burn the token. The contract's mint handler enforces
-                // `token_minted(..., +1)` and would reject a -1 burn. The spend handler
-                // imposes no constraint on where the token goes, so we forward the
-                // entire UTxO value (lovelace + the singleton token) to the owner.
-                // CCL's ScriptCollectFromIntent silently drops the script input when
-                // there is no explicit output to anchor the UTxO's value, so we make
-                // the output explicit (pay the input's full amounts to the owner).
+                // CCL's collectFrom drops the script input when no payToAddress anchors its
+                // value, so explicitly forward the entire input (lovelace + the singleton
+                // token) to the owner. We deliberately do NOT burn the token here — the mint
+                // handler enforces token_minted(+1) and would reject a -1 in the same tx.
                 ScriptTx scriptTx = new ScriptTx()
                                 .collectFrom(List.of(target), spendRedeemer)
                                 .payToAddress(ownerAddress.getAddress(), target.getAmount())
                                 .attachSpendingValidator(plutusScript);
 
+                // validFrom(slot - 5) widens the lower bound a few slots into the past so
+                // the chain-side validity check has slack against clock/indexer drift.
+                // withSigner attaches a signing key; withRequiredSigners adds the pkh to the
+                // tx's required_signers field so the validator's must_be_signed_by passes.
                 return quickTxBuilder.compose(scriptTx)
                                 .validFrom(slot - 5)
                                 .validTo(slot + 5)

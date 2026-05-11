@@ -13,18 +13,24 @@ import { SLOT_CONFIG_NETWORK } from "@evolution-sdk/plutus";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
 // ----------------------------------------------------------------------------
-// Vault — Evolution SDK targeting yaci-devkit.
-// Validator params (owner_vkh, wait_time_ms).
-// Spend redeemers: WITHDRAW | FINALIZE | CANCEL. Scenario exercises ALL three.
+// Timelock vault. Parameterised PlutusV3 spend validator (owner_vkh,
+// wait_time_ms). Withdraw arms the cooldown by writing a new lock_time;
+// Finalize requires valid_after(lock_time + wait_time); Cancel returns the
+// funds to the script with no datum.
 // ----------------------------------------------------------------------------
 
 const YACI_URL = "http://localhost:8080/api/v1";
 const NETWORK = "Preview" as const;
 const TEST_MNEMONIC =
   "test test test test test test test test test test test test test test test test test test test test test test test sauce";
-const WAIT_TIME = 10_000n; // 10 seconds — short enough to exercise FINALIZE.
+// 10 seconds — short enough for the demo to actually reach FINALIZE.
+const WAIT_TIME = 10_000n;
 const ERA_OFFSET_SECONDS = 600;
 
+// yaci-devkit boots through several "instant" eras and enters Babbage at
+// relative slot/time 600s, so TxInfo POSIX = (systemStart + 600 + slot) * 1000.
+// We pre-bake that offset in SLOT_CONFIG_NETWORK so validFrom(Date.now())
+// round-trips against the validator's view of time.
 async function alignSlotConfig() {
   const block = await fetch(`${YACI_URL}/blocks/latest`).then((r) => r.json());
   const zeroTime = (block.time - block.slot + ERA_OFFSET_SECONDS) * 1000;
@@ -88,9 +94,9 @@ async function findScriptUtxo(lucid: LucidEvolution, scriptAddress: string, txHa
 async function withdraw(txHash: string): Promise<string> {
   const { lucid, validator, scriptAddress, address } = await setup();
   const utxo = await findScriptUtxo(lucid, scriptAddress, txHash);
-  // Validator requires `valid_after(validity_range, lock_time)`, i.e.
-  // validFrom > lock_time. Set lock_time just before validFrom so the predicate
-  // holds while keeping the cooldown anchor close to "now".
+  // Withdraw requires valid_after(lock_time). We set the new lock_time
+  // just before validFrom so the predicate passes while anchoring the
+  // wait_time cooldown to roughly "now".
   const tipSlot = await yaciTipSlot();
   const validFromSlot = tipSlot - 5;
   const lockTime = BigInt(slotToMs(validFromSlot - 5));
@@ -118,7 +124,6 @@ async function finalize(txHash: string): Promise<string> {
   const d = Data.from(utxo.datum) as Constr<bigint>;
   const lockTime = d.fields[0] as bigint;
   const validAfterMs = Number(lockTime + WAIT_TIME);
-  // Wait until chain slot > validAfter.
   const cfg = SLOT_CONFIG_NETWORK.Preview;
   const validAfterSlot = Math.floor((validAfterMs - cfg.zeroTime) / cfg.slotLength) + cfg.zeroSlot;
   for (let i = 0; i < 300; i++) {
@@ -148,7 +153,8 @@ async function cancel(txHash: string): Promise<string> {
   const { lucid, validator, scriptAddress, address } = await setup();
   const utxo = await findScriptUtxo(lucid, scriptAddress, txHash);
   const redeemer = Data.to(new Constr(2, []));
-  // CANCEL requires output back to script with same lovelace, NoDatum.
+  // Cancel pays the assets back to the script with NoDatum, effectively
+  // returning the vault to its initial undated state.
   const tx = await lucid
     .newTx()
     .collectFrom([utxo], redeemer)
@@ -166,20 +172,17 @@ async function runScenario() {
   console.log("=== vault scenario: lock×2 → withdraw → cancel (first lock) ; withdraw → finalize (second lock) ===");
   await alignSlotConfig();
 
-  // Lock A: long-locked deposit we'll start a withdraw on then CANCEL.
+  // Lock A exercises Withdraw -> Cancel; Lock B exercises Withdraw -> Finalize.
   const txA = await lock(8_000_000n, true);
   await new Promise((r) => setTimeout(r, 2000));
-  // Lock B: long-locked deposit we'll withdraw and FINALIZE.
   const txB = await lock(6_000_000n, true);
   await new Promise((r) => setTimeout(r, 2000));
 
-  // Start withdraw on A then cancel back to script.
   const txA2 = await withdraw(txA);
   await new Promise((r) => setTimeout(r, 2000));
   await cancel(txA2);
   await new Promise((r) => setTimeout(r, 2000));
 
-  // Withdraw → finalize on B.
   const txB2 = await withdraw(txB);
   await new Promise((r) => setTimeout(r, 2000));
   await finalize(txB2);

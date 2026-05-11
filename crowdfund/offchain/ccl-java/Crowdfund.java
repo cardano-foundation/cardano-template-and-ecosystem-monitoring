@@ -45,38 +45,42 @@ import com.bloxbean.cardano.client.quicktx.Tx;
 import com.bloxbean.cardano.client.quicktx.TxResult;
 import com.bloxbean.cardano.client.util.HexUtil;
 
+/**
+ * Crowdfund parametrised by (beneficiary, goal, deadline). Exercises Donate
+ * (Constr 0) and Claim (Constr 1); Reclaim (Constr 2) is left as a reference
+ * implementation for the past-deadline-and-goal-not-met path.
+ *
+ * MapPlutusData is the offchain mirror of the Aiken Pairs<...> donors map
+ * carried inline in the datum across continuing outputs.
+ */
 public class Crowdfund {
 
-    // Backend service to connect to Cardano node. Here we are using Blockfrost as
-    // an example.
     static BackendService backendService = new BFBackendService("http://localhost:8080/api/v1/", "Dummy Key");
     static UtxoSupplier utxoSupplier = new DefaultUtxoSupplier(backendService.getUtxoService());
 
-    // Dummy mnemonic for the example. Replace with a valid mnemonic.
     static String mnemonic = "test test test test test test test test test test test test test test test test test test test test test test test sauce";
 
-    // The network used for this example is Testnet
     static Network network = Networks.testnet();
 
+    // Roles: a single account plays initiator, donater and beneficiar in this
+    // happy-path test against yaci-devkit; in production they are distinct.
     static Account initiator = Account.createFromMnemonic(network, mnemonic);
-    static Account donater = initiator; // In this example, we are using the same account for the donater.
-    static Account beneficiar = initiator; // In this example, we are using the same account for the beneficiar.
+    static Account donater = initiator;
+    static Account beneficiar = initiator;
 
     static Address ownerAddress = initiator.getBaseAddress();
-    // In this example we are using the same address, but in a real scenario, you
-    // might have a different address for the receiver.
     static Address receiverAddress = initiator.getBaseAddress();
     static QuickTxBuilder quickTxBuilder = new QuickTxBuilder(backendService);
     static PlutusScript plutusScript = getParametrisedPlutusScript();
     static Address scriptAddress = AddressProvider.getEntAddress(plutusScript, network);
 
-    static int crowdFundGoal = 10_000_000; // 10 ADA in lovelace
+    static int crowdFundGoal = 10_000_000;
 
     public static void main(String[] args) throws InterruptedException, ApiException {
         MapPlutusData donorsMap = MapPlutusData.builder()
                 .build();
         donorsMap.put(BytesPlutusData.of(initiator.getBaseAddress().getPaymentCredentialHash().get()),
-                BigIntPlutusData.of(5_000_000L)); // 5 ADA
+                BigIntPlutusData.of(5_000_000L));
         Tx tx = new Tx()
                 .payToContract(scriptAddress.getAddress(), Amount.ada(5),
                         ConstrPlutusData.of(0,
@@ -89,17 +93,9 @@ public class Crowdfund {
                 .completeAndWait();
         System.out.println("Crowdfund initialized. Tx Hash: " + initTx.getTxHash());
 
-        // Reclaiming the funds after the crowdfund the deadline is exceeded and the
-        // goal is not reached
-        // Thread.sleep(5000); // Sleep for 5 seconds to simulate some delay
-        // TxResult reclaimResult = getReclaimTxResult(initiator, 5);
-        // System.out.println("Reclaim Tx Hash: " + reclaimResult.getTxHash());
-        // System.out.print(reclaimResult);
-
         TxResult donateTxResult = getDonateTxResult(donater, 5, donorsMap);
         System.out.println("Donation made. Tx Hash: " + donateTxResult.getTxHash());
 
-        // Now we can claim the funds by providing the secret answer
         TxResult claimTxResult = getClaimTxResult(beneficiar, 10);
         System.out.println("Funds claimed by beneficiar. Tx Hash: " +
                 claimTxResult.getTxHash());
@@ -124,7 +120,7 @@ public class Crowdfund {
         TxResult reclaimTxResult = quickTxBuilder.compose(reclaimTx)
                 .feePayer(initiator.baseAddress())
                 .validFrom(slot)
-                .validTo(slot + 10) // Set a valid to slot for the transaction
+                .validTo(slot + 10)
                 .withRequiredSigners(initiator.getBaseAddress())
                 .withSigner(SignerProviders.signerFrom(initiator))
                 .completeAndWait();
@@ -144,7 +140,6 @@ public class Crowdfund {
             donorsMap.getMap().put(paymentCredentialHashBytes, BigIntPlutusData.of(adaMount * 1_000_000L));
         }
 
-        // Now we can make a donation to the crowdfund
         List<Utxo> scriptUtxos = utxoSupplier.getAll(scriptAddress.getAddress());
         long slot = backendService.getBlockService().getLatestBlock().getValue().getSlot();
         ScriptTx donateTx = new ScriptTx()
@@ -160,7 +155,7 @@ public class Crowdfund {
         TxResult donateTxResult = quickTxBuilder.compose(donateTx)
                 .feePayer(donater.baseAddress())
                 .validFrom(slot)
-                .validTo(slot + 10) // Set a valid to slot for the transaction
+                .validTo(slot + 10)
                 .withRequiredSigners(donater.getBaseAddress())
                 .withSigner(SignerProviders.signerFrom(donater)).completeAndWait();
         return donateTxResult;
@@ -168,7 +163,9 @@ public class Crowdfund {
 
     private static TxResult getClaimTxResult(Account beneficiar, int adaAmount)
             throws InterruptedException, ApiException {
-        Thread.sleep(20000); // Sleep for 25 seconds to simulate some delay
+        // Sleep before claim so chain time crosses the validator's deadline parameter,
+        // letting the past-deadline branch evaluate against current validity bounds.
+        Thread.sleep(20000);
         List<Utxo> scriptUtxos2 = utxoSupplier.getAll(scriptAddress.getAddress());
         long slot2 = backendService.getBlockService().getLatestBlock().getValue().getSlot();
         ScriptTx claimTx = new ScriptTx()
@@ -182,7 +179,7 @@ public class Crowdfund {
                 .withChangeAddress(beneficiar.getBaseAddress().getAddress());
         TxResult claimTxResult = quickTxBuilder.compose(claimTx)
                 .validFrom(slot2 - 10)
-                .validTo(slot2 + 20) // Set a valid to slot for the transaction
+                .validTo(slot2 + 20)
                 .feePayer(beneficiar.baseAddress())
                 .withRequiredSigners(beneficiar.getBaseAddress())
                 .withSigner(SignerProviders.signerFrom(beneficiar))
@@ -197,9 +194,8 @@ public class Crowdfund {
         String simpleTransferCompiledCode = plutusContractBlueprint.getValidators().getFirst()
                 .getCompiledCode();
 
-        long expiration = System.currentTimeMillis();// + 10 * 1000; // Set expiration time to 10 seconds from now
+        long expiration = System.currentTimeMillis();
         System.out.println("Expiration time (epoch seconds): " + expiration);
-        // Apply parameters to the validator compiled code to get the compiled code
         String compiledCode = AikenScriptUtil.applyParamToScript(
                 ListPlutusData.of(
                         BytesPlutusData.of(beneficiar.getBaseAddress().getPaymentCredentialHash().get()),

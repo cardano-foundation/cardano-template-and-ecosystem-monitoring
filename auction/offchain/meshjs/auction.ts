@@ -15,11 +15,9 @@ import {
 import { applyParamsToScript } from "@meshsdk/core-csl";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
-// ----------------------------------------------------------------------------
-// Auction — Mesh.js targeting yaci-devkit.
-// Single PlutusV3 script provides both mint (START) and spend (BID, END).
-// Scenario exercises init → bid → bid → end with two distinct bidders.
-// ----------------------------------------------------------------------------
+// Auction: a single PlutusV3 script handling START (mint), BID, and END (spend).
+// Scenario walks init → bid → bid → end with three brewed wallets.
+// Mesh quirk: we omit `evaluator` so Mesh's CPU estimator runs against yaci-devkit.
 
 const YACI_URL = "http://localhost:8080/api/v1";
 const NETWORK = "preprod";
@@ -61,7 +59,7 @@ async function waitForUtxoAt(addr: string, minCount = 1, timeoutSec = 60) {
     try {
       const u = await p.fetchAddressUTxOs(addr);
       if (u.length >= minCount) return;
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${addr}`);
@@ -107,6 +105,8 @@ function getScriptInfo() {
 }
 
 function vkhToAddr(vkh: string): string {
+  // mPubKeyAddress returns Mesh-shape {alternative,fields}; serializeAddressObj wants JSON-shape
+  // {constructor,fields}. The enterprise-style 0/1 nesting here is the JSON shape it expects.
   return serializeAddressObj({
     constructor: 0,
     fields: [
@@ -143,11 +143,14 @@ async function init(
   const expirationSlot = Math.floor(expirationMs / 1000) - systemStartSec;
   const validToSlot = Math.min(tipSlot + 10, expirationSlot - 5);
 
+  // MeshBlockfrostProvider's evaluator mis-parses yaci-devkit's ogmios JSON-WSP response;
+  // omitting it makes mesh fall back to its CPU estimator.
   const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
     .setNetwork(NETWORK);
   await tx
     .mintPlutusScriptV3()
     .mint("1", policyId, assetNameHex)
+    // Inline minting script (vs. mintTxInReference): no on-chain reference UTxO is set up here.
     .mintingScript(script)
     .mintRedeemerValue(mConStr0([]))
     .txOut(scriptAddress, [
@@ -269,6 +272,7 @@ async function close(caller: MeshWallet, prevTxHash: string): Promise<string> {
     await new Promise((r) => setTimeout(r, 1000));
   }
   const tipSlot = await yaciTipSlot();
+  // END requires the auction to have expired, so invalidBefore must be strictly after expirationSlot.
   const validFromSlot = Math.max(expirationSlot + 1, tipSlot - 5);
   const sellerAddr = vkhToAddr(seller);
 
@@ -312,6 +316,7 @@ async function close(caller: MeshWallet, prevTxHash: string): Promise<string> {
 
 async function runScenario() {
   console.log("=== auction scenario: init → bid → bid → end ===");
+  // Roles: seller mints+lists, bidder1/bidder2 compete; brewed so collateral is pure-ADA on yaci.
   const seller = makeWallet(MeshWallet.brew(false) as string[]);
   const bidder1 = makeWallet(MeshWallet.brew(false) as string[]);
   const bidder2 = makeWallet(MeshWallet.brew(false) as string[]);

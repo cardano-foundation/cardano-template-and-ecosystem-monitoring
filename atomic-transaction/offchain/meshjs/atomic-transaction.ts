@@ -12,11 +12,9 @@ import {
 import { applyParamsToScript } from "@meshsdk/core-csl";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
-// ----------------------------------------------------------------------------
-// Atomic transaction — Mesh.js targeting yaci-devkit.
-// Single PlutusV3 validator with mint+spend. Scenario: mintAndLock → collect
-// (atomic spend+mint) → burn.
-// ----------------------------------------------------------------------------
+// Atomic transaction: one PlutusV3 validator handling both mint and spend.
+// Scenario: mintAndLock → collect (single tx that spends the locked UTxO AND mints) → burn.
+// Mesh quirk: omit `evaluator` so Mesh's CPU estimator is used against yaci-devkit.
 
 const YACI_URL = "http://localhost:8080/api/v1";
 const NETWORK = "preprod";
@@ -48,7 +46,7 @@ async function waitForUtxoAt(addr: string, minCount = 1, timeoutSec = 60) {
     try {
       const u = await p.fetchAddressUTxOs(addr);
       if (u.length >= minCount) return;
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${addr}`);
@@ -92,11 +90,14 @@ async function mintAndLock(wallet: MeshWallet): Promise<string> {
   const utxos = await provider().fetchAddressUTxOs(myAddr);
   const collateral: UTxO[] = await wallet.getCollateral();
 
+  // MeshBlockfrostProvider's evaluator mis-parses yaci-devkit's ogmios JSON-WSP response;
+  // omitting it makes mesh fall back to its CPU estimator.
   const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
     .setNetwork(NETWORK);
   await tx
     .mintPlutusScriptV3()
     .mint("1", policyId, stringToHex(ASSET_NAME))
+    // Inline minting script (vs. mintTxInReference): no reference UTxO infrastructure for this demo.
     .mintingScript(script)
     .mintRedeemerValue(redeemer)
     .txOut(scriptAddress, [{ unit, quantity: "1" }])
@@ -134,6 +135,8 @@ async function collect(wallet: MeshWallet, scriptAddress: string) {
   if (!target) throw new Error("No AtomicToken UTxO at script");
   const ownUtxos = await provider().fetchAddressUTxOs(myAddr);
   const collateral: UTxO[] = await wallet.getCollateral();
+  // Multiple Plutus scripts in one tx — default per-redeemer budget × N exceeds the tx limit,
+  // so set conservative explicit exUnits per call.
   const exUnits = { mem: 4_000_000, steps: 2_000_000_000 };
 
   const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })

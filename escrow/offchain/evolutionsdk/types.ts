@@ -1,3 +1,4 @@
+// Plutus data schemas mirroring the on-chain Aiken types for escrow.
 import { Data, Assets } from '@evolution-sdk/lucid';
 
 export type StoredEscrow = {

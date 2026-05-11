@@ -7,6 +7,11 @@ use cardano/transaction.{
   Input, NoDatum, Output, OutputReference, Transaction, placeholder,
 }
 
+// Pays a fixed list of payees an equal share of whatever this UTxO holds.
+// Any payee can trigger settlement; outputs are constrained to the payee set
+// and each payee's net (output - their own change) must be the same. The
+// payees list is a script parameter, so each splitter group has its own hash.
+
 pub type Datum {
   owner: VerificationKeyHash,
 }
@@ -30,23 +35,25 @@ validator split_payment(script_hashes: List<VerificationKeyHash>) {
     let output_credentials =
       list.map(outputs, fn(output) { output.address.payment_credential })
 
-    // Only the payees are allowed to trigger the payout and the list needs to include all payees
+    // Closed-set rule: every distinct output credential must be a payee.
+    // Prevents skimming to outside addresses.
     let has_no_additional_payees =
       list.difference(list.unique(output_credentials), payees) == []
 
-    // All payees must receive the same amount. The computation needs to take care about the change of the fee payer
+    // For each payee, compute their "received" amount accounting for the
+    // fact that the fee-payer is also one of the payees and gets change
+    // back. Without this correction, the fee-payer would appear to receive
+    // more and the equality check would always fail.
     let output_values =
       list.map(
         payees,
         fn(payee) {
-          // all outputs that are meant for the payee
           let payee_outputs =
             list.filter(
               outputs,
               fn(output) { output.address.payment_credential == payee },
             )
 
-          // lovelace sum of all outputs that are meant for the payee
           let payee_output_sum =
             list.foldr(
               payee_outputs,
@@ -54,14 +61,12 @@ validator split_payment(script_hashes: List<VerificationKeyHash>) {
               fn(output, acc) { acc + lovelace_of(output.value) },
             )
 
-          // all inputs that belong to the payee
           let payee_input =
             list.filter(
               inputs,
               fn(input) { input.output.address.payment_credential == payee },
             )
 
-          // lovelace sum of all inputs that belong to the payee
           let payee_input_sum =
             list.foldr(
               payee_input,
@@ -70,11 +75,11 @@ validator split_payment(script_hashes: List<VerificationKeyHash>) {
             )
 
           if payee_input_sum > 0 {
-            // The payee must receive the sum of its outputs minus the change
+            // Fee-payer: subtract their original balance (minus fee) so we
+            // measure only the share newly assigned to them.
             let change = payee_input_sum - fee
             payee_output_sum - change
           } else {
-            // The payee doesn't have any inputs, so it just receives the sum of its outputs
             payee_output_sum
           }
         },

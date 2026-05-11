@@ -48,20 +48,17 @@ import com.bloxbean.cardano.client.quicktx.Tx;
 import com.bloxbean.cardano.client.util.HexUtil;
 
 /**
- * Upgradable proxy — CCL Java port of the evosdk reference.
+ * Upgradable proxy with three validators:
+ *   proxy            (mint+spend)  param: seed_outref
+ *   script_logic_v_1 (withdraw)    param: proxy_policy_id
+ *   script_logic_v_2 (withdraw)    param: proxy_policy_id
+ * Exercises init (one-shot mint of a state token + lock proxy state). mint and
+ * change-version are stubbed because CCL 0.8.0-pre4 does not yet expose a
+ * Plutus-witnessed stake-script registration; the evosdk port covers the full
+ * flow.
  *
- * Validators:
- *   proxy            (mint+spend)   param: seed_outref
- *   script_logic_v_1 (withdraw)     param: proxy_policy_id
- *   script_logic_v_2 (withdraw)     param: proxy_policy_id
- *
- * Operations exercised: init (one-shot mint state token, register v1 stake,
- * lock proxy state), mint (use proxy with v1 logic to mint a product token),
- * change-version (flip pointer between v1 and v2).
- *
- * Reference scripts: the proxy script is attached as a reference script on
- * the proxy state UTxO so subsequent mint/spend transactions can use it
- * without re-attaching the validator inline.
+ * The proxy script is meant to live as a reference script on the proxy UTxO so
+ * downstream txs don't have to re-attach the full validator.
  */
 public class Proxy {
 
@@ -110,9 +107,6 @@ public class Proxy {
                         throw new AssertionError("Proxy INIT failed: " + initRes.getResponse());
                 waitForUtxoTx(proxyAddress, initRes.getTxHash(), 60);
 
-                // mint() and change-version() require a registered v1 stake-script address.
-                // Until CCL exposes a Plutus-witnessed register-stake-script helper, these
-                // operations cannot be exercised end-to-end from this CCL Java port.
                 System.out.println("Init succeeded. mint() and change-version() require a"
                                 + " Plutus-witnessed stake-script registration that CCL 0.8.0-pre4"
                                 + " does not yet expose; see evosdk port for the full flow.");
@@ -127,19 +121,12 @@ public class Proxy {
                                 BytesPlutusData.of(HexUtil.decodeHexString(v1Hash)),
                                 BytesPlutusData.of(ownerVkh));
 
-                // Mint redeemer (init): Constr 1 [].
                 PlutusData mintRedeemer = ConstrPlutusData.of(1);
 
-                // CCL Asset interprets a String as UTF-8 unless prefixed with "0x".
-                // The state token name is the raw 32-byte sha3_256 hash, so prefix.
+                // Asset(String, ...) interprets the name as UTF-8 unless prefixed with "0x";
+                // the state token is the raw 32-byte sha3_256 hash, so "0x" forces hex decoding.
                 Asset asset = new Asset("0x" + stateTokenName, BigInteger.ONE);
 
-                // The evosdk reference also registers the v1 logic's stake-script address
-                // here so future withdrawals can succeed. CCL 0.8.0-pre4's QuickTx API does
-                // not yet expose a Plutus-witnessed `registerStakeAddress` on ScriptTx, so we
-                // omit the cert and demonstrate only the mint + lock half of init. mint()
-                // and change-version() are stubbed below — they work once a Plutus-aware
-                // stake-registration helper lands in CCL.
                 ScriptTx scriptTx = new ScriptTx()
                                 .collectFrom(seedUtxo)
                                 .mintAsset(proxyPolicyId, List.of(asset), mintRedeemer,
@@ -162,7 +149,7 @@ public class Proxy {
                 Utxo proxyUtxo = findUtxoByTx(proxyAddress, prevTxHash);
                 if (proxyUtxo == null) throw new AssertionError("Proxy UTxO not indexed");
 
-                PlutusData proxyMintRedeemer = ConstrPlutusData.of(0); // Mint via proxy
+                PlutusData proxyMintRedeemer = ConstrPlutusData.of(0);
                 PlutusData withdrawRedeemer = ConstrPlutusData.of(0,
                                 BytesPlutusData.of(PROXY_MINT_TOKEN.getBytes()),
                                 BytesPlutusData.of("NoPassword".getBytes()));
@@ -214,7 +201,7 @@ public class Proxy {
                                 .findFirst().orElseThrow().getCompiledCode();
         }
 
-        // State token name = sha3_256(tx_hash_bytes || ascii(output_index))
+        // State token name = sha3_256(tx_hash_bytes || ascii(output_index)).
         private static String stateTokenName(String txHashHex, int outputIndex) {
                 byte[] txHashBytes = HexUtil.decodeHexString(txHashHex);
                 byte[] idxBytes = String.valueOf(outputIndex).getBytes();

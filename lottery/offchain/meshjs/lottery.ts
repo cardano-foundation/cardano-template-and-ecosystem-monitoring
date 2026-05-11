@@ -20,11 +20,9 @@ import { applyParamsToScript } from "@meshsdk/core-csl";
 import blake2b from "blake2b";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
-// ----------------------------------------------------------------------------
-// Lottery — Mesh.js targeting yaci-devkit.
-// Two validators (creator mint + lottery spend); Reveal1+Reveal2+Settle happy
-// path exercised end-to-end on yaci.
-// ----------------------------------------------------------------------------
+// Lottery: two validators (creator mint + lottery spend), commit-reveal between two players.
+// Scenario: create → reveal1 → reveal2 → settle (happy path; winner = (nonce1+nonce2) mod 2).
+// Mesh quirk: omit `evaluator` so Mesh's CPU estimator is used against yaci-devkit.
 
 const YACI_URL = "http://localhost:8080/api/v1";
 const NETWORK = "preprod";
@@ -100,7 +98,7 @@ async function waitForUtxoAt(addr: string, minCount = 1, timeoutSec = 60) {
     try {
       const u = await p.fetchAddressUTxOs(addr);
       if (u.length >= minCount) return;
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${addr}`);
@@ -191,11 +189,14 @@ async function create(
   const utxos = await provider().fetchAddressUTxOs(coordAddr);
   const collateral: UTxO[] = await coordinator.getCollateral();
 
+  // MeshBlockfrostProvider's evaluator mis-parses yaci-devkit's ogmios JSON-WSP response;
+  // omitting it makes mesh fall back to its CPU estimator.
   const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
     .setNetwork(NETWORK);
   await tx
     .mintPlutusScriptV3()
     .mint("1", creator.policyId, stringToHex(TOKEN_NAME))
+    // Inline minting script (vs. mintTxInReference): no on-chain reference UTxO infrastructure here.
     .mintingScript(creator.script)
     .mintRedeemerValue(mConStr0([]))
     .txOut(lottery.address, [
@@ -214,7 +215,7 @@ async function create(
     .changeAddress(coordAddr)
     .selectUtxosFrom(utxos)
     .complete();
-  // Coordinator + both players sign.
+  // Both players are required signers (datum binds them); coordinator funds + holds the tx.
   let signed = await coordinator.signTx(tx.txHex, true);
   signed = await player1.signTx(signed, true);
   signed = await player2.signTx(signed, true);
@@ -312,6 +313,7 @@ async function settle(player1: MeshWallet, player2: MeshWallet) {
 
 async function runScenario() {
   console.log("=== lottery scenario: create → reveal1 → reveal2 → settle ===");
+  // Roles: coordinator submits create + funds, player1/player2 commit secrets and reveal/settle.
   const coordinator = makeWallet(MeshWallet.brew(false) as string[]);
   const player1 = makeWallet(MeshWallet.brew(false) as string[]);
   const player2 = makeWallet(MeshWallet.brew(false) as string[]);

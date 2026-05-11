@@ -12,8 +12,10 @@ import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 import { EscrowDatum, EscrowRedeemer } from "./types.ts";
 
 // ----------------------------------------------------------------------------
-// Escrow — Evolution SDK targeting yaci-devkit.
-// Initiation → ActiveEscrow → CompleteTrade (or CancelTrade) flow exercised end-to-end.
+// Two-party escrow. Single PlutusV3 spend validator threading the
+// Initiation -> ActiveEscrow datum machine via RecipientDeposit /
+// CompleteTrade / CancelTrade redeemers. CompleteTrade requires both
+// parties' signatures, hence the partialSign + assemble dance.
 // ----------------------------------------------------------------------------
 
 const YACI_URL = "http://localhost:8080/api/v1";
@@ -37,7 +39,7 @@ async function waitForUtxosAt(
     try {
       const u = await lucid.utxosAt(address);
       if (u.length >= minCount) return;
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${address}`);
@@ -53,7 +55,7 @@ async function waitForOutRef(
     try {
       const u = await lucid.utxosByOutRef([{ txHash, outputIndex }]);
       if (u.length > 0) return u[0];
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Timed out waiting for ${txHash}#${outputIndex}`);
@@ -240,6 +242,7 @@ async function cancelInInitiation(
 
 async function runScenario() {
   console.log("=== escrow scenario: initiate → deposit → complete-trade ; initiate → cancel ===");
+  // account 0 = funder ; 1 = initiator ; 2 = recipient
   const initiator = await lucidAt(1);
   const recipient = await lucidAt(2);
   const initAddr = await initiator.wallet().address();
@@ -249,7 +252,6 @@ async function runScenario() {
     { address: recipAddr, lovelace: 30_000_000n },
   ]);
 
-  // Happy path: initiator locks 5M, recipient deposits 7M, trade swaps assets.
   const initiatorAssets: Assets = { lovelace: 5_000_000n };
   const recipientAssets: Assets = { lovelace: 7_000_000n };
   const initTx = await initiate(initiator, initiatorAssets);
@@ -267,7 +269,6 @@ async function runScenario() {
   );
   await new Promise((r) => setTimeout(r, 2000));
 
-  // Cancel path: initiator locks 4M, then cancels.
   const initTx2 = await initiate(initiator, { lovelace: 4_000_000n });
   await new Promise((r) => setTimeout(r, 2000));
   await cancelInInitiation(initiator, initTx2, initAddr);

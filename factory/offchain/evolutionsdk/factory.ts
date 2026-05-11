@@ -17,9 +17,11 @@ import {
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
 // ----------------------------------------------------------------------------
-// Factory — Evolution SDK targeting yaci-devkit.
-// 3 validators (factory_marker mint, factory spend, product mint+spend).
-// Scenario: create-factory → create-product (twice with different IDs).
+// Factory + Product pattern. Three PlutusV3 validators wired together:
+// factory_marker (one-shot mint parameterised by a seed OutputReference),
+// factory (spend that registers new product policies), and product (mint
+// gated by the factory marker). createFactory consumes the seed UTxO so
+// the marker can only ever mint once.
 // ----------------------------------------------------------------------------
 
 const YACI_URL = "http://localhost:8080/api/v1";
@@ -50,7 +52,7 @@ async function waitForUtxosAt(
     try {
       const u = await lucid.utxosAt(address);
       if (u.length >= minCount) return;
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${address}`);
@@ -210,7 +212,7 @@ async function getProductTag(
 
 async function runScenario() {
   console.log("=== factory scenario: create-factory → create-product × 2 → read tag ===");
-  // Use a fresh wallet so the seed UTxO is clean.
+  // Fresh seed so the parameterised marker policy is unique to this run.
   const seed = generateSeedPhrase();
   const lucid = await lucidFromSeed(seed);
   const ownerAddr = await lucid.wallet().address();

@@ -15,11 +15,9 @@ import {
 import { applyParamsToScript } from "@meshsdk/core-csl";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
-// ----------------------------------------------------------------------------
-// Vault — Mesh.js targeting yaci-devkit.
-// Validator params (owner_vkh, wait_time_ms).
-// Spend redeemers: WITHDRAW | FINALIZE | CANCEL. Scenario exercises ALL three.
-// ----------------------------------------------------------------------------
+// Vault: parameterized validator (owner_vkh, wait_time_ms) with WITHDRAW/FINALIZE/CANCEL paths.
+// Scenario: lock×2 → withdraw → cancel ; second lock: withdraw → wait → finalize.
+// Mesh quirk: omit `evaluator` so Mesh's CPU estimator is used against yaci-devkit.
 
 const YACI_URL = "http://localhost:8080/api/v1";
 const NETWORK = "preprod";
@@ -61,7 +59,7 @@ async function waitForUtxoAt(addr: string, minCount = 1, timeoutSec = 60) {
     try {
       const u = await p.fetchAddressUTxOs(addr);
       if (u.length >= minCount) return;
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${addr}`);
@@ -115,6 +113,8 @@ async function lock(owner: MeshWallet, ownerVkh: string, amount: bigint, infinit
   const lockTimeMs = infinite ? Date.now() + 365 * 24 * 60 * 60 * 1000 : Date.now() - 60_000;
   const datum = mConStr0([lockTimeMs]);
   const utxos = await provider().fetchAddressUTxOs(ownerAddr);
+  // MeshBlockfrostProvider's evaluator mis-parses yaci-devkit's ogmios JSON-WSP response;
+  // omitting it makes mesh fall back to its CPU estimator.
   const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
     .setNetwork(NETWORK);
   await tx
@@ -189,6 +189,7 @@ async function finalize(owner: MeshWallet, ownerVkh: string, withdrawTx: string)
     await new Promise((r) => setTimeout(r, 1000));
   }
   const tipSlot = await yaciTipSlot();
+  // FINALIZE requires `valid_after (lockTime + wait)` — invalidBefore must be strictly past it.
   const validFromSlot = Math.max(validAfterSlot + 1, tipSlot - 5);
 
   const ownUtxos = await provider().fetchAddressUTxOs(ownerAddr);
@@ -234,7 +235,7 @@ async function cancel(owner: MeshWallet, ownerVkh: string, withdrawTx: string): 
     .txInScript(script)
     .txInRedeemerValue(mConStr2([]))
     .txInInlineDatumPresent()
-    // CANCEL: output back to script without a datum.
+    // CANCEL rule: continuing output must have NO datum (reverts to "infinitely locked" state).
     .txOut(scriptAddress, [{ unit: "lovelace", quantity: lovelaceAmount }])
     .txInCollateral(
       collateral[0].input.txHash,

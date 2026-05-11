@@ -12,10 +12,9 @@ import {
 import { applyParamsToScript } from "@meshsdk/core-csl";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
-// ----------------------------------------------------------------------------
-// DID — Mesh.js targeting yaci-devkit.
+// Decentralized identity: one spending validator over a (owner, [delegates]) state.
 // Scenario: init → add-delegate → remove-delegate → transfer-owner.
-// ----------------------------------------------------------------------------
+// Mesh quirk: omit `evaluator` so Mesh's CPU estimator is used against yaci-devkit.
 
 const YACI_URL = "http://localhost:8080/api/v1";
 const NETWORK = "preprod";
@@ -56,7 +55,7 @@ async function waitForUtxoAt(addr: string, minCount = 1, timeoutSec = 60) {
     try {
       const u = await p.fetchAddressUTxOs(addr);
       if (u.length >= minCount) return;
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${addr}`);
@@ -69,7 +68,7 @@ async function waitForTx(txHash: string, outputIndex = 0, timeoutSec = 60): Prom
       const utxos = await p.fetchUTxOs(txHash);
       const u = utxos.find((x) => x.input.outputIndex === outputIndex);
       if (u) return u;
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Timed out waiting for ${txHash}#${outputIndex}`);
@@ -135,6 +134,8 @@ async function init(owner: MeshWallet, lovelace: bigint): Promise<string> {
   const { scriptAddress } = getScriptInfo();
   const datum = encodeDatum({ owner: ownerVkh, delegates: [] });
   const utxos = await provider().fetchAddressUTxOs(ownerAddr);
+  // MeshBlockfrostProvider's evaluator mis-parses yaci-devkit's ogmios JSON-WSP response;
+  // omitting it makes mesh fall back to its CPU estimator.
   const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
     .setNetwork(NETWORK);
   await tx
@@ -202,6 +203,7 @@ async function performAction(
 
 async function runScenario() {
   console.log("=== did scenario: init → add-delegate → remove-delegate → transfer-owner ===");
+  // Roles: owner controls + signs all updates, delegate is added/removed, newOwner receives the DID.
   const owner = makeWallet(MeshWallet.brew(false) as string[]);
   const delegate = makeWallet(MeshWallet.brew(false) as string[]);
   const newOwner = makeWallet(MeshWallet.brew(false) as string[]);

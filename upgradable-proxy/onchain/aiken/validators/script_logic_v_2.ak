@@ -5,8 +5,13 @@ use cardano/assets.{PolicyId, tokens}
 use cardano/certificate.{Certificate, RegisterCredential}
 use cardano/transaction.{Input, Output, Redeemer, Transaction}
 
-// Password is not needed anymore
-// Tokenname shouldn't be used anymore
+// Logic v2 of the upgradable proxy. Same shape as v1 but rules have moved:
+// the password gate is dropped, and the mint check is inverted to "asset
+// name must NOT equal a designated invalid_token_name". Spending is now
+// unconditional. Swapping from v1 to v2 is a single UPDATE in proxy.ak —
+// the proxy datum's script_pointer changes to this script's hash and every
+// subsequent SPEND/MINT routes through here.
+
 pub type MyRedeemer {
   invalid_token_name: ByteArray,
 }
@@ -25,7 +30,6 @@ fn validate_mint(
         |> assets.tokens(policy_id)
         |> dict.to_pairs()
 
-    // Changed mint logic
     and {
       amount == 1,
       asset_name != redeemer.invalid_token_name,
@@ -35,7 +39,9 @@ fn validate_mint(
   }
 }
 
-// It's always fine to spend from the contract (should not work for the state token)
+// Unconditional spend. The proxy already prevents the state token from
+// leaving via SPEND (state_token_still_locked guard), so this logic doesn't
+// need to re-check it.
 fn validate_spend(
   _redeemer: MyRedeemer,
   _policy_id: ByteArray,
@@ -82,6 +88,7 @@ validator script_logic_version_1_0(proxy_policy_id: PolicyId) {
     }
   }
 
+  // Required for credential registration; see script_logic_v_1.ak.
   publish(_redeemer: Redeemer, certificate: Certificate, _self: Transaction) {
     when certificate is {
       RegisterCredential { credential: _credential, deposit: _deposit } -> True

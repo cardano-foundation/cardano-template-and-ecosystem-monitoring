@@ -14,12 +14,9 @@ import {
 import { applyParamsToScript } from "@meshsdk/core-csl";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
-// ----------------------------------------------------------------------------
-// Crowdfund — Mesh.js targeting yaci-devkit.
-// Params (beneficiary_vkh, goal, deadline_ms). Datum carries a wallets map
-// (donor_vkh → lovelace contributed). Redeemers DONATE | WITHDRAW | RECLAIM
-// all exercised end-to-end.
-// ----------------------------------------------------------------------------
+// Crowdfund: parameterized validator (beneficiary, goal, deadline) with a wallets map
+// (donor_vkh → lovelace) in the datum. Exercises DONATE / WITHDRAW / RECLAIM end-to-end.
+// Mesh quirk: omit `evaluator` so Mesh's CPU estimator is used against yaci-devkit.
 
 const YACI_URL = "http://localhost:8080/api/v1";
 const NETWORK = "preprod";
@@ -60,7 +57,7 @@ async function waitForUtxoAt(addr: string, minCount = 1, timeoutSec = 60) {
     try {
       const u = await p.fetchAddressUTxOs(addr);
       if (u.length >= minCount) return;
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${addr}`);
@@ -102,7 +99,8 @@ function loadValidator(beneficiaryVkh: string, goal: bigint, deadlineMs: bigint)
   return { script, scriptAddress };
 }
 
-// JSON-shape plutus data: Constr 0 [Map<bytes, int>].
+// JSON-shape {constructor,fields} — serializeData / txOutInlineDatumValue("JSON") path.
+// Mesh-shape {alternative,fields} would be rejected here.
 function buildDatum(wallets: Map<string, bigint>): unknown {
   return {
     constructor: 0,
@@ -111,7 +109,7 @@ function buildDatum(wallets: Map<string, bigint>): unknown {
     ],
   };
 }
-// RECLAIM continuing datum is wrapped in Some(...) by the validator's pattern.
+// RECLAIM's continuing datum is wrapped in Some(...) by the validator's pattern match.
 function buildSomeDatum(wallets: Map<string, bigint>): unknown {
   return {
     constructor: 0,
@@ -154,6 +152,8 @@ async function initCampaign(
   wallets.set(ownerVkh, contribution);
   const utxos = await provider().fetchAddressUTxOs(ownerAddr);
 
+  // MeshBlockfrostProvider's evaluator mis-parses yaci-devkit's ogmios JSON-WSP response;
+  // omitting it makes mesh fall back to its CPU estimator.
   const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
     .setNetwork(NETWORK);
   await tx
@@ -310,6 +310,8 @@ async function reclaim(
 
 async function runScenario() {
   console.log("=== crowdfund scenario: init → donate → withdraw ; init → donate → reclaim ===");
+  // Roles: owner kicks off + first contribution, beneficiary withdraws on success,
+  // donor adds funds (and reclaims on failed campaign). Brewed → pure-ADA collateral on yaci.
   const owner = makeWallet(MeshWallet.brew(false) as string[]);
   const beneficiary = makeWallet(MeshWallet.brew(false) as string[]);
   const donor = makeWallet(MeshWallet.brew(false) as string[]);

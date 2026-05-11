@@ -22,11 +22,8 @@ import {
 import { applyParamsToScript } from "@meshsdk/core-csl";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
-// ----------------------------------------------------------------------------
-// Escrow — Mesh.js targeting yaci-devkit.
-// Scenario exercises Initiation → ActiveEscrow → CompleteTrade and a separate
-// Initiation → CancelTrade flow.
-// ----------------------------------------------------------------------------
+// Escrow: two-party trade — Initiation → ActiveEscrow → CompleteTrade, plus a Cancel path.
+// Mesh quirk: omit `evaluator` so Mesh's CPU estimator is used against yaci-devkit.
 
 const YACI_URL = "http://localhost:8080/api/v1";
 const NETWORK = "preprod";
@@ -56,7 +53,7 @@ async function waitForUtxoAt(addr: string, minCount = 1, timeoutSec = 60) {
     try {
       const u = await p.fetchAddressUTxOs(addr);
       if (u.length >= minCount) return;
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${addr}`);
@@ -69,7 +66,7 @@ async function waitForTx(txHash: string, outputIndex = 0, timeoutSec = 60): Prom
       const utxos = await p.fetchUTxOs(txHash);
       const u = utxos.find((x) => x.input.outputIndex === outputIndex);
       if (u) return u;
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Timed out waiting for ${txHash}#${outputIndex}`);
@@ -139,10 +136,14 @@ async function initiate(initiator: MeshWallet, escrowAmount: Asset[]): Promise<s
   const datum = buildInitiationDatum(myAddr, escrowAmount);
   const utxos = await provider().fetchAddressUTxOs(myAddr);
 
+  // MeshBlockfrostProvider's evaluator mis-parses yaci-devkit's ogmios JSON-WSP response;
+  // omitting it makes mesh fall back to its CPU estimator.
   const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
     .setNetwork(NETWORK);
   await tx
     .txOut(scriptAddress, escrowAmount)
+    // JSON-shape datum: conStr0 / pubKeyAddress / value all emit {constructor,fields} —
+    // mesh-shape {alternative,fields} would be rejected by the "JSON" encoder.
     .txOutInlineDatumValue(datum, "JSON")
     .requiredSignerHash(myVkh)
     .changeAddress(myAddr)
@@ -166,7 +167,8 @@ async function deposit(
   if (!utxo.output.plutusData) throw new Error("No datum");
   const inputDatum = deserializeDatum<InitiationDatum>(utxo.output.plutusData);
   const outputDatum = buildActiveEscrowDatum(inputDatum, recipAddr, recipientAmount);
-  // JSON-shape redeemer since pubKeyAddress/value helpers emit JSON-shape.
+  // pubKeyAddress / value emit JSON-shape {constructor,fields}, so the whole redeemer must
+  // be passed as "JSON" — mixing Mesh-shape here would corrupt the encoded redeemer.
   const redeemer = conStr0([
     pubKeyAddress(recipVkh, deserializeAddress(recipAddr).stakeCredentialHash),
     value(recipientAmount),
@@ -181,6 +183,8 @@ async function deposit(
     .spendingPlutusScriptV3()
     .txIn(utxo.input.txHash, utxo.input.outputIndex, utxo.output.amount, scriptAddress)
     .txInScript(script)
+    // Multiple Plutus scripts in one tx — default per-redeemer budget × N exceeds the tx limit,
+    // so set conservative explicit exUnits per call.
     .txInRedeemerValue(redeemer, "JSON", { mem: 7_000_000, steps: 3_000_000_000 })
     .txInInlineDatumPresent()
     .txOut(scriptAddress, totalValue)
@@ -214,12 +218,8 @@ async function completeTrade(
   const utxo = await waitForTx(activeTx, 0);
   if (!utxo.output.plutusData) throw new Error("No datum");
   const datum = deserializeDatum<ActiveEscrowDatum>(utxo.output.plutusData);
-  // datum.fields = [initiator, initiatorAmount, recipient, recipientAmount]
   const initiatorAmountField = datum.fields[1] as Value;
   const recipientAmountField = datum.fields[3] as Value;
-  // Re-derive Asset[] from MeshValue. We know they came from us, so reuse.
-  // We'll pay initiator the recipient's deposit, and recipient the initiator's deposit.
-  // Value is a JSON-shape plutus map: `{ map: [{ k: {bytes}, v: {map:[{k,v}]}}] }`.
   type MapEntry = { k: { bytes: string }; v: { int?: string | number | bigint; map?: MapEntry[] } };
   const toAssets = (v: unknown): Asset[] => {
     const outer = (v as { map?: MapEntry[] }).map ?? [];
@@ -248,6 +248,7 @@ async function completeTrade(
     .spendingPlutusScriptV3()
     .txIn(utxo.input.txHash, utxo.input.outputIndex, utxo.output.amount, scriptAddress)
     .txInScript(script)
+    // Explicit exUnits: complete-trade is the heaviest redeemer; let mesh fee estimate stay sane.
     .txInRedeemerValue(mConStr(2, []), "Mesh", { mem: 7_000_000, steps: 3_000_000_000 })
     .txInInlineDatumPresent()
     .txOut(initAddr, recipientAssets)
@@ -302,6 +303,7 @@ async function cancelInInitiation(initiator: MeshWallet, initTxHash: string) {
 
 async function runScenario() {
   console.log("=== escrow scenario: initiate → deposit → complete ; initiate → cancel ===");
+  // Roles: initiator locks first leg, recipient deposits second leg, both co-sign completion.
   const initiator = makeWallet(MeshWallet.brew(false) as string[]);
   const recipient = makeWallet(MeshWallet.brew(false) as string[]);
   const initAddr = await initiator.getChangeAddress();

@@ -19,11 +19,9 @@ import {
 import { applyParamsToScript } from "@meshsdk/core-csl";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
-// ----------------------------------------------------------------------------
-// Simple-wallet — Mesh.js targeting yaci-devkit.
-// 3 chained validators (intent, wallet-mint, funds) — exercise add-funds,
-// create-intent + execute, and withdraw.
-// ----------------------------------------------------------------------------
+// Simple wallet: 3 chained validators (intent, wallet-mint, funds).
+// Scenario: add-funds → create-intent → execute → add-funds → withdraw.
+// Mesh quirk: omit `evaluator` so Mesh's CPU estimator is used against yaci-devkit.
 
 const YACI_URL = "http://localhost:8080/api/v1";
 const NETWORK = "preprod";
@@ -55,7 +53,7 @@ async function waitForUtxoAt(addr: string, minCount = 1, timeoutSec = 60) {
     try {
       const u = await p.fetchAddressUTxOs(addr);
       if (u.length >= minCount) return;
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${addr}`);
@@ -121,6 +119,8 @@ async function addFunds(wallet: MeshWallet, lovelace: bigint) {
   const utxos = await provider().fetchAddressUTxOs(changeAddr);
   const collateral: UTxO[] = await wallet.getCollateral();
 
+  // MeshBlockfrostProvider's evaluator mis-parses yaci-devkit's ogmios JSON-WSP response;
+  // omitting it makes mesh fall back to its CPU estimator.
   const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
     .setNetwork(NETWORK);
   await tx
@@ -154,6 +154,8 @@ async function createIntent(
   const collateral: UTxO[] = await wallet.getCollateral();
 
   const recipient = deserializeAddress(recipientAddr);
+  // mPubKeyAddress emits Mesh-shape {alternative,fields} — fine here because the surrounding
+  // datum is built via mConStr0 (also Mesh-shape). Mixing JSON-shape would break encoding.
   const intentDatum = mConStr0([
     mPubKeyAddress(recipient.pubKeyHash, recipient.stakeCredentialHash),
     Number(lovelace),
@@ -165,6 +167,8 @@ async function createIntent(
   await tx
     .mintPlutusScriptV3()
     .mint("1", scripts.wallet.policyId, stringToHex(INTENT_ASSETNAME))
+    // Inline minting script (vs. mintTxInReference): the wallet validator is small and only used
+    // here; publishing a reference UTxO is extra ceremony for the same effect.
     .mintingScript(scripts.wallet.script)
     .mintRedeemerValue(mConStr0([]))
     .txOut(scripts.intent.address, [
@@ -205,12 +209,13 @@ async function executeIntent(wallet: MeshWallet) {
   if (!intentUtxo || !intentUtxo.output.plutusData) throw new Error("Intent UTxO missing");
 
   const datum = deserializeDatum(intentUtxo.output.plutusData);
+  // datum.fields[0] is JSON-shape after deserializeDatum; serializeAddressObj wants exactly that.
+  // Building this Address with mPubKeyAddress would yield Mesh-shape and crash here.
   const payeeAddress = serializeAddressObj(datum.fields[0]);
   const lovelace = Number(datum.fields[1].int).toString();
 
-  // Three Plutus scripts run in this tx (funds spend, intent spend, wallet
-  // burn); mesh's default ExUnits per redeemer × 3 exceeds the per-tx max,
-  // so set explicit conservative budgets per call.
+  // Multiple Plutus scripts in one tx — default per-redeemer budget × N exceeds the tx limit,
+  // so set conservative explicit exUnits per call.
   const exUnits = { mem: 3_000_000, steps: 1_500_000_000 };
 
   const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
@@ -281,6 +286,7 @@ async function withdrawAll(wallet: MeshWallet) {
 
 async function runScenario() {
   console.log("=== simple-wallet scenario: add-funds → create-intent → execute → add-funds → withdraw ===");
+  // Roles: owner runs all wallet ops; recipient just receives the intent payout.
   const owner = makeWallet(MeshWallet.brew(false) as string[]);
   const recipient = makeWallet(MeshWallet.brew(false) as string[]);
   await fundFromFunder(await owner.getChangeAddress(), 100_000_000n);

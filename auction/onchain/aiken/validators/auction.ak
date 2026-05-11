@@ -12,70 +12,48 @@ use mocktail/virgin_key_hash.{mock_policy_id, mock_pub_key_hash}
 use mocktail/virgin_output_reference.{mock_utxo_ref}
 use mocktail/virgin_validity_range.{mock_interval}
 
-/// Represents the state of an English auction.
-///
-/// The auction is for a single item (e.g. an NFT) that is held in the script
-/// UTXO alongside the ADA bids.
-///
-/// Lifecycle:
-/// 1. Seller initializes auction (no highest bidder yet).
-/// 2. Bidders place higher bids; previous highest bidder becomes withdrawable.
-/// 3. After expiration, seller or winner settles the auction.
+// English auction.
+//
+// The auctioned item (an NFT) is locked at the script address along with
+// the current best bid in lovelace. Datum tracks state, redeemer drives the
+// state machine: mint = START, then BID*, then END after expiration.
+
 pub type AuctionDatum {
-  /// Seller who is offering the item.
   seller: VerificationKeyHash,
-  /// Current highest bidder ("" if no bids yet).
   highest_bidder: VerificationKeyHash,
-  /// Current highest bid in lovelace.
+  // Empty bytes ("") = no bids yet. Sentinel chosen over Option to keep the
+  // datum representation flat and easier to compare on-chain.
   highest_bid: Int,
-  /// Auction expiration time (slot / POSIX time).
   expiration: Int,
-  /// Policy id of the auctioned asset.
   asset_policy: ByteArray,
-  /// Asset name of the auctioned asset.
   asset_name: ByteArray,
 }
 
-/// Actions on the auction validator.
-///
-/// - START: controlled by the minting policy (initial UTXO + item).
-/// - BID: place a higher bid during the auction period.
-/// - WITHDRAW: (to be extended) previous highest bidder reclaims their funds.
-/// - END: settle after expiration – seller gets ADA, winner gets the item.
 pub type Action {
   BID
   WITHDRAW
   END
 }
 
-/// Main auction validator
 validator auction {
-
-  /// Minting policy: Initializes a new auction.
-  ///
-  /// Responsibilities:
-  /// - Mint the unique auction token / or use a known policy id.
-  /// - Create a script output holding:
-  ///   - The auctioned item.
-  ///   - Starting bid (can be 0 or >0).
-  ///   - Inline AuctionDatum with empty highest bidder.
+  // START — minting policy invocation creates the initial auction UTxO.
+  // Enforces: one script output, seller signed, no bidder yet, bid >= 0,
+  // expiration still in the future, and the auctioned asset is actually
+  // present in the value. The minted token is the auction's identity.
   mint(_redeemer: Data, policy_id: ByteArray, transaction: Transaction) {
     let Transaction { outputs, extra_signatories, validity_range, .. } =
       transaction
 
-    // Find outputs going to this script address.
     let outputs_to_script =
       list.filter(
         outputs,
         fn(output) { output.address == from_script(policy_id) },
       )
 
-    // Exactly one output to the script – the auction UTXO.
     expect list.length(outputs_to_script) == 1
     expect Some(auction_output) = list.head(outputs_to_script)
     let Output { datum, value, .. } = auction_output
 
-    // Extract datum.
     expect InlineDatum(datum_data) = datum
     expect AuctionDatum {
       seller,
@@ -86,38 +64,24 @@ validator auction {
       asset_name: _asset_name,
     } = datum_data
 
-    // Check that the output actually holds the auctioned asset.
-    let has_auction_asset = list.has(list.map(policies(value), fn(policy) { policy }), asset_policy)
+    let has_auction_asset =
+      list.has(
+        list.map(policies(value), fn(policy) { policy }),
+        asset_policy,
+      )
 
     and {
-      // Seller must sign.
       key_signed(extra_signatories, seller),
-      // No highest bidder at start.
       highest_bidder == "",
-      // Starting bid must be non-negative.
       highest_bid >= 0,
-      // Auction must not be expired at creation.
+      // valid_before(range, point) <=> range.upper_bound < point.
+      // Anchoring expiration in datum (vs. as a script parameter) lets the
+      // seller schedule each auction independently with the same script.
       valid_before(validity_range, expiration),
-      // Script UTXO must contain the asset being auctioned.
       has_auction_asset,
     }
   }
 
-  /// Spending validator: controls auction state transitions.
-  ///
-  /// BID:
-  /// - New bid must exceed current highest_bid.
-  /// - Auction must not be expired.
-  /// - Highest bidder must sign and deposit additional ADA.
-  ///
-  /// WITHDRAW:
-  /// - Stubbed for now; full refund accounting can be added later.
-  ///
-  /// END:
-  /// - Auction must be expired.
-  /// - Seller receives ADA.
-  /// - Winner receives the item.
-  /// - Contract consumes the auction UTXO with no continuing auction output.
   spend(
     input_datum: Option<AuctionDatum>,
     redeemer: Action,
@@ -127,12 +91,10 @@ validator auction {
     let Transaction { inputs, outputs, extra_signatories, validity_range, .. } =
       transaction
 
-    // Find the input being spent (auction UTXO).
     expect Some(spent_input) = find_input(inputs, spent_output_ref)
     let Output { value: input_value, address: script_address, .. } =
       spent_input.output
 
-    // Extract current datum.
     expect Some(datum_data) = input_datum
     let AuctionDatum {
       seller,
@@ -144,31 +106,42 @@ validator auction {
     } = datum_data
 
     when redeemer is {
+      // BID — rebuild the auction UTxO at the same script address with a
+      // strictly higher bid, the asset still present, the previous bidder
+      // refunded their stake, and seller/asset/expiration unchanged. Refund
+      // happens in the same tx so we never need a separate "withdraw" path
+      // for losing bidders.
       BID -> {
-        // Find continuing auction output at the same script address.
         let continuing_outputs =
           list.filter(
             outputs,
             fn(output) { output.address == script_address },
           )
 
-        // Exactly one continuing auction output.
         expect list.length(continuing_outputs) == 1
         expect Some(continuing_output) = list.head(continuing_outputs)
         let Output { value: out_value, datum: out_datum, .. } =
           continuing_output
 
-        // New state.
         expect InlineDatum(out_datum_data) = out_datum
         expect new_datum: AuctionDatum = out_datum_data
         let new_highest = new_datum.highest_bidder
         let new_bid = new_datum.highest_bid
 
-        // Auctioned asset must stay locked in the script.
-        let has_auction_asset_in = list.has(list.map(policies(input_value), fn(policy) { policy }), asset_policy)
+        let has_auction_asset_in =
+          list.has(
+            list.map(policies(input_value), fn(policy) { policy }),
+            asset_policy,
+          )
 
-        let has_auction_asset_out = list.has(list.map(policies(out_value), fn(policy) { policy }), asset_policy)
+        let has_auction_asset_out =
+          list.has(
+            list.map(policies(out_value), fn(policy) { policy }),
+            asset_policy,
+          )
 
+        // First bid has no previous bidder (sentinel ""), so nothing to
+        // refund — checking would fail spuriously.
         let check_refund =
           if highest_bidder == "" {
             True
@@ -184,36 +157,31 @@ validator auction {
           }
 
         and {
-          // Auction not expired.
           valid_before(validity_range, expiration),
-          // New bid strictly larger than current highest.
           new_bid > highest_bid,
-          // Highest bidder must sign.
           key_signed(extra_signatories, new_highest),
-          // Seller and auctioned asset must remain unchanged.
           new_datum.seller == seller,
           new_datum.asset_policy == asset_policy,
           new_datum.asset_name == asset_name,
-          // Auctioned asset stays at script.
           has_auction_asset_in,
           has_auction_asset_out,
-          // Previous bidder is refunded.
           check_refund,
-          // Datum expiration unchanged.
           new_datum.expiration == expiration,
-          // Value at script non-decreasing in lovelace.
+          // Non-decreasing — the bidder can pile on extra ada for the next
+          // bidder to refund, but can't drain.
           lovelace_of(out_value) >= lovelace_of(input_value),
         }
       }
 
-      WITHDRAW -> {
-        // Minimal safety: forbid arbitrary WITHDRAW on main auction UTXO
-        // until a full per-bidder refund pattern is implemented.
-        fail
-      }
+      // WITHDRAW is currently always-fail. Refunds happen inline in BID; a
+      // dedicated withdraw path would need per-bidder accounting (e.g. a
+      // separate refund UTxO per losing bidder).
+      WITHDRAW -> fail
 
+      // END — settles the auction after expiration. Asset goes to the
+      // winner (or back to seller if no bids). Seller receives the highest
+      // bid. No continuing auction UTxO — the script lifetime ends here.
       END -> {
-        // Precompute helper lists outside `and {}`.
         let outputs_with_asset =
           list.filter(
             outputs,
@@ -229,34 +197,23 @@ validator auction {
 
         expect Some(item_out) = list.head(outputs_with_asset)
 
-        let has_continuing_auction = list.has(addresses_mapped, script_address)
-
-        let check_no_continuing = !has_continuing_auction
+        let check_no_continuing = !list.has(addresses_mapped, script_address)
         let check_asset_count = list.length(outputs_with_asset) == 1
 
         if highest_bidder == "" {
-          // No bids: item goes back to seller
           let check_item_to_seller =
             item_out.address == from_verification_key(seller)
 
           and {
-            // 1. Auction expired.
+            // valid_after(range, point) <=> range.lower_bound > point.
+            // I.e. the tx is forced to be valid only AFTER expiration.
             valid_after(validity_range, expiration),
-            // 2. Exactly one output (item back to seller).
-            // (We relax this to allow change, but simple expectation is safer)
-            // or just ensure item goes to seller.
-            // Let's stick to strict output check for now to match style?
-            // "list.length(outputs) == 1" might be too strict if there's change,
-            // but usually a close tx is constructed carefully.
-            // Let's loosen output count but ensure item destination.
             check_item_to_seller,
             check_no_continuing,
             check_asset_count,
-            // Seller must sign to reclaim if no bids (optional but good practice)
             key_signed(extra_signatories, seller),
           }
         } else {
-          // Winner exists
           let seller_outputs =
             list.filter(
               outputs,
@@ -271,15 +228,10 @@ validator auction {
             lovelace_of(seller_out.value) >= highest_bid
 
           and {
-            // 1. Auction expired.
             valid_after(validity_range, expiration),
-            // 2. No continuing auction at script address.
             check_no_continuing,
-            // 4. Exactly one asset-carrying output.
             check_asset_count,
-            // 5. Item goes to highest bidder.
             check_item_to_winner,
-            // 6. Seller receives highest bid.
             check_seller_count,
             check_seller_payment,
           }
@@ -288,7 +240,8 @@ validator auction {
     }
   }
 
-  /// Catch-all for any other redeemer - always fails.
+  // Reject any other purpose (e.g. stake withdrawals) to prevent the script
+  // hash from authorising unintended actions.
   else(_) {
     fail
   }

@@ -14,10 +14,10 @@ import {
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
 // ----------------------------------------------------------------------------
-// Storage — Evolution SDK targeting yaci-devkit.
-//
-// Two validators (mint + storage). storage is always-fail (immutable). The
-// scenario exercises BOTH SnapshotType variants (Daily and Monthly) end-to-end.
+// Immutable on-chain snapshot registry. Mint policy is parameterised by a
+// seed OutputReference (one-shot per publish) plus the storage script hash;
+// the storage validator is always-fail, so once a registry NFT is minted to
+// it the inline datum is frozen forever.
 // ----------------------------------------------------------------------------
 
 const YACI_URL = "http://localhost:8080/api/v1";
@@ -124,7 +124,7 @@ async function waitForUtxosAt(
     try {
       const u = await lucid.utxosAt(address);
       if (u.length >= minCount) return;
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${address}`);
@@ -135,12 +135,11 @@ async function runScenario() {
   const lucid = await lucidAt(0);
   const addr = await lucid.wallet().address();
 
-  // Two consecutive publishes — each consumes a different seed UTxO and mints
-  // a fresh one-shot NFT. Cover both SnapshotType variants.
   const commit1 = "a".repeat(64);
   const commit2 = "b".repeat(64);
   await publish(lucid, `snap-${Date.now()}-daily`, "daily", commit1);
-  // Wait for indexer to pick up new wallet UTxOs (change from first tx).
+  // Each publish consumes its own seed UTxO; wait for the change UTxO from
+  // the first publish before reading wallet utxos for the second.
   await waitForUtxosAt(lucid, addr, 1, 60);
   await new Promise((r) => setTimeout(r, 2000));
   await publish(lucid, `snap-${Date.now()}-monthly`, "monthly", commit2);

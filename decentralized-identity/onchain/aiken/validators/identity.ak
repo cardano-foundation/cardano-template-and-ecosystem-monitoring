@@ -12,6 +12,11 @@ use mocktail/virgin_key_hash.{mock_policy_id, mock_pub_key_hash}
 use mocktail/virgin_output_reference.{mock_utxo_ref}
 use mocktail/virgin_validity_range.{mock_interval}
 
+// Self-sovereign identity UTxO. Datum holds the owner pkh and a list of
+// time-bounded delegates. Owner-only transitions: transfer ownership, add
+// delegate, remove delegate. Value never moves — the UTxO is purely a
+// state cell. Off-chain callers use it as an address book / capability list.
+
 pub type Delegate {
   key: VerificationKeyHash,
   expires: Int,
@@ -42,7 +47,6 @@ validator identity {
     let Transaction { inputs, outputs, extra_signatories, validity_range, .. } =
       transaction
 
-    // expect Some(datum) = datum_opt
     expect Some(spent_input) = find_input(inputs, spent_ref)
     let Output { datum: input_datum, address, value: input_value, .. } =
       spent_input.output
@@ -53,6 +57,8 @@ validator identity {
     let continuing_outputs =
       list.filter(outputs, fn(output) { output.address == address })
 
+    // Exactly one continuing UTxO — duplicating the state cell would create
+    // two competing "identities" sharing the same address.
     expect list.length(continuing_outputs) == 1
     expect Some(continuing_output) = list.head(continuing_outputs)
     let Output { datum: output_datum, value: output_value, .. } =
@@ -64,6 +70,8 @@ validator identity {
     let owner_signed = key_signed(extra_signatories, owner)
 
     when redeemer is {
+      // TransferOwner — rotate the owner key. Delegate list and value carry
+      // over unchanged; only the owner field is allowed to shift.
       TransferOwner { new_owner } -> {
         and {
           owner_signed?,
@@ -72,6 +80,9 @@ validator identity {
           (input_value == output_value)?,
         }
       }
+      // AddDelegate — append a delegate with an expiry. Reject duplicates
+      // and self-delegation. valid_before(expires) refuses to anchor an
+      // already-expired delegate at insertion time.
       AddDelegate { delegate, expires } -> {
         and {
           owner_signed?,
@@ -84,6 +95,8 @@ validator identity {
           (input_value == output_value)?,
         }
       }
+      // RemoveDelegate — drop one entry. Length-delta of -1 prevents the
+      // owner from quietly stripping multiple delegates in a single tx.
       RemoveDelegate { delegate } -> {
         and {
           owner_signed?,

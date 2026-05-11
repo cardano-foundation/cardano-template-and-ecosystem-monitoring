@@ -3,6 +3,11 @@ use cardano/address.{Address}
 use cardano/transaction.{OutputReference, Transaction}
 use cocktail/vodka_extra_signatories.{key_signed}
 
+// Holds a single PaymentIntent (recipient, amount, opaque data). The intent
+// is read by funds.ak as a reference input during ExecuteTx and burned when
+// the intent is consumed. Owner-only spend lets the wallet owner cancel an
+// intent before it's executed.
+
 pub type PaymentIntent {
   recipient: Address,
   lovelace_amt: Int,

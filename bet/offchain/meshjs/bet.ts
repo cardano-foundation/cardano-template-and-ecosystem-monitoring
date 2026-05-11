@@ -15,13 +15,9 @@ import {
 import { applyParamsToScript } from "@meshsdk/core-csl";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
-// ----------------------------------------------------------------------------
-// Bet scenario — Mesh.js targeting yaci-devkit.
-// One PlutusV3 script provides both mint (INIT) and spend (JOIN, ANNOUNCE).
-// Three distinct actors are required by the on-chain rule
-// `player2 != player1 and player2 != oracle`; we generate fresh wallets at
-// runtime and self-fund them from the well-known funder mnemonic.
-// ----------------------------------------------------------------------------
+// Bet: one PlutusV3 script for mint (INIT) and spend (JOIN, ANNOUNCE).
+// Three brewed actors satisfy on-chain `player2 != player1 and player2 != oracle`.
+// Mesh quirk: omit `evaluator` so Mesh's CPU estimator is used against yaci-devkit.
 
 const YACI_URL = "http://localhost:8080/api/v1";
 const NETWORK = "preprod";
@@ -54,7 +50,7 @@ async function waitForUtxoAt(addr: string, minCount = 1, timeoutSec = 60) {
     try {
       const u = await p.fetchAddressUTxOs(addr);
       if (u.length >= minCount) return;
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${addr}`);
@@ -67,7 +63,7 @@ async function waitForTx(txHash: string, outputIndex = 0, timeoutSec = 60): Prom
       const utxos = await p.fetchUTxOs(txHash);
       const u = utxos.find((x) => x.input.outputIndex === outputIndex);
       if (u) return u;
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Timed out waiting for ${txHash}#${outputIndex}`);
@@ -119,14 +115,10 @@ async function init(
   const player1Vkh = resolvePaymentKeyHash(player1Addr);
   const oracleVkh = resolvePaymentKeyHash(await oracle.getChangeAddress());
 
-  // Build everything around yaci's current chain slot. expirationMs lives in
-  // the datum and is consumed by the script's POSIXTime comparison; we set
-  // it strictly *after* validity_upper so `valid_before(validity_range,
-  // expiration)` holds. Chain-side POSIX(slot) = (systemStart_sec + slot)*1000.
   const tipSlot = await yaciTipSlot();
   const block = await fetch(`${YACI_URL}/blocks/latest`).then((r) => r.json());
-  // Chain's POSIX in TxInfo uses Babbage era-start offset (600s) above the
-  // nominal systemStart, so the datum's expirationMs must include that.
+  // TxInfo POSIX includes the 600s Babbage era-start offset above nominal systemStart;
+  // the datum's expirationMs must match this so on-chain time math agrees with our slot math.
   const ERA_OFFSET_SECONDS = 600;
   const systemStartSec = block.time - block.slot + ERA_OFFSET_SECONDS;
   const validFromSlot = tipSlot - 5;
@@ -134,17 +126,19 @@ async function init(
   const expirationSlot = validToSlot + 30;
   const expirationMs = (systemStartSec + expirationSlot) * 1000;
 
-  // mesh's "Mesh" data type: bare strings → bytes, bare numbers → ints.
   const datum = mConStr0([player1Vkh, "", oracleVkh, expirationMs]);
   const utxos = await provider().fetchAddressUTxOs(player1Addr);
   const collateral: UTxO[] = await player1.getCollateral();
 
+  // MeshBlockfrostProvider's evaluator mis-parses yaci-devkit's ogmios JSON-WSP response;
+  // omitting it makes mesh fall back to its CPU estimator.
   const tx = new MeshTxBuilder({
     fetcher: provider(), submitter: provider(),
   }).setNetwork(NETWORK);
   await tx
     .mintPlutusScriptV3()
     .mint("1", policyId, stringToHex(ASSET_NAME))
+    // Inline minting script (vs. mintTxInReference): no reference UTxO infrastructure in this demo.
     .mintingScript(script)
     .mintRedeemerValue(mConStr0([]))
     .txOut(scriptAddress, [
@@ -235,36 +229,33 @@ async function announce(oracle: MeshWallet, joinTxHash: string) {
   const expirationMs = Number(decoded.fields[3].int ?? 0);
   if (!p2) throw new Error("player2 still empty");
 
-  // Translate datum expirationMs back into a chain slot.
   const block = await fetch(`${YACI_URL}/blocks/latest`).then((r) => r.json());
   const ERA_OFFSET_SECONDS = 600;
   const systemStartSec = block.time - block.slot + ERA_OFFSET_SECONDS;
   const expirationSlot = Math.floor(expirationMs / 1000) - systemStartSec;
 
-  const winnerVkh = p1; // Oracle picks player1 as winner.
-  // Build the JSON-shape (constructor/fields) Address PlutusData expected by
-  // serializeAddressObj. mPubKeyAddress uses the Mesh-shape (alternative/fields)
-  // which the bech32 serializer doesn't accept.
+  const winnerVkh = p1;
+  // mPubKeyAddress returns Mesh-shape {alternative,fields}; serializeAddressObj wants JSON-shape
+  // {constructor,fields}. Enterprise address: payment cred + no stake (None).
   const winnerAddrJson = {
     constructor: 0,
     fields: [
-      { constructor: 0, fields: [{ bytes: winnerVkh }] }, // VerificationKey credential
-      { constructor: 1, fields: [] },                       // None stake
+      { constructor: 0, fields: [{ bytes: winnerVkh }] },
+      { constructor: 1, fields: [] },
     ],
   };
   const winnerEnt = serializeAddressObj(winnerAddrJson as never, NETWORK_ID);
-  // ANNOUNCE_WINNER = Constr 1 [winner_vkh]
   const redeemer = mConStr(1, [winnerVkh]);
 
   const ownUtxos = await provider().fetchAddressUTxOs(oracleAddr);
   const collateral: UTxO[] = await oracle.getCollateral();
+  // MeshBlockfrostProvider's evaluator mis-parses yaci-devkit's ogmios JSON-WSP response;
+  // omitting it makes mesh fall back to its CPU estimator.
   const tx = new MeshTxBuilder({
     fetcher: provider(), submitter: provider(),
   }).setNetwork(NETWORK);
-  // No explicit .txOut for the script value — the validator requires exactly
-  // one output total, so we route ALL change (script value + oracle input −
-  // fee) to the winner via changeAddress, yielding a single consolidated
-  // output with NoDatum.
+  // Validator requires exactly one output; we omit an explicit script-value txOut and let
+  // changeAddress consolidate (script value + oracle input − fee) into a single winner output.
   await tx
     .spendingPlutusScriptV3()
     .txIn(utxo.input.txHash, utxo.input.outputIndex, utxo.output.amount, utxo.output.address)
@@ -276,7 +267,7 @@ async function announce(oracle: MeshWallet, joinTxHash: string) {
       collateral[0].output.amount, collateral[0].output.address,
     )
     .requiredSignerHash(oracleVkh)
-    // valid_after expiration ⇒ pick validity strictly after expirationSlot.
+    // Validator demands valid_after(expiration) — invalidBefore must be strictly past expirationSlot.
     .invalidBefore(Math.max(await yaciTipSlot(), expirationSlot + 1))
     .invalidHereafter(Math.max(await yaciTipSlot(), expirationSlot + 1) + 120)
     .changeAddress(winnerEnt)
@@ -291,7 +282,8 @@ async function announce(oracle: MeshWallet, joinTxHash: string) {
 async function runScenario() {
   console.log("=== bet scenario: init → join → announce ===");
 
-  // Fresh wallets for each actor; fund from the well-known funder mnemonic.
+  // Roles: player1 stakes & locks, player2 matches, oracle announces. Brewed so each is distinct
+  // (on-chain check requires three different pkhs) and collateral is naturally pure-ADA on yaci.
   const player1 = makeWallet(MeshWallet.brew(false) as string[]);
   const player2 = makeWallet(MeshWallet.brew(false) as string[]);
   const oracle  = makeWallet(MeshWallet.brew(false) as string[]);
@@ -303,7 +295,6 @@ async function runScenario() {
   const { txHash: initTxHash, expirationSlot } = await init(player1, oracle, "10000000");
   const joinTxHash = await join(player2, initTxHash, expirationSlot);
 
-  // Wait for chain slot to surpass expiration slot.
   for (let i = 0; i < 300; i++) {
     const tipSlot = await yaciTipSlot();
     if (tipSlot > expirationSlot) {

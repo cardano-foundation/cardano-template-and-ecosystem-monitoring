@@ -19,10 +19,12 @@ import { SLOT_CONFIG_NETWORK } from "@evolution-sdk/plutus";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
 // ----------------------------------------------------------------------------
-// Pricebet — Evolution SDK targeting yaci-devkit.
-// Plus a "fake oracle" at an always-true PlutusV3 script address with an inline
-// OracleDatum. Scenario: setup-oracle → create → join → win.
-// Also separately: create → wait-deadline → timeout.
+// Price bet against an oracle UTxO. PlutusV3 spend validator exercising
+// Join, Win and Timeout. The "oracle" is just an inline OracleDatum sitting
+// at an always-true script; Win passes it via readFrom so the validator can
+// read the price without spending the oracle output.
+// Payouts go to enterprise (no-stake) addresses because the validator
+// rebuilds the winner's address with Aiken's from_verification_key.
 // ----------------------------------------------------------------------------
 
 const YACI_URL = "http://localhost:8080/api/v1";
@@ -51,6 +53,10 @@ const PriceBetRedeemerSchema = Data.Enum([
 type PriceBetRedeemer = Data.Static<typeof PriceBetRedeemerSchema>;
 const PriceBetRedeemer = PriceBetRedeemerSchema as unknown as PriceBetRedeemer;
 
+// yaci-devkit boots through several "instant" eras and enters Babbage at
+// relative slot/time 600s, so TxInfo POSIX = (systemStart + 600 + slot) * 1000.
+// We pre-bake that offset in SLOT_CONFIG_NETWORK so validFrom(Date.now())
+// round-trips against the validator's view of time.
 async function alignSlotConfig() {
   const block = await fetch(`${YACI_URL}/blocks/latest`).then((r) => r.json());
   const zeroTime = (block.time - block.slot + ERA_OFFSET_SECONDS) * 1000;
@@ -83,7 +89,7 @@ async function waitForUtxosAt(
     try {
       const u = await lucid.utxosAt(address);
       if (u.length >= minCount) return;
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${address}`);
@@ -98,8 +104,8 @@ async function fundFromIndex0(targets: Array<{ address: string; lovelace: bigint
   const txHash = await signed.submit();
   console.log(`Funded ${targets.length} target(s). tx=${txHash}`);
   for (const t of targets) await waitForUtxosAt(lucid, t.address, 1, 60);
-  // Funder (account 0 = owner) is the next caller — wait for its own new
-  // change UTxO so lucid doesn't re-select the spent input.
+  // Funder is the next caller — wait for its own new change UTxO so lucid
+  // doesn't re-select the spent input.
   const funderAddr = await lucid.wallet().address();
   for (let i = 0; i < 60; i++) {
     const u = await lucid.utxosAt(funderAddr);
@@ -115,8 +121,8 @@ function getValidator(): SpendingValidator {
 }
 
 function buildOracleDatum(price: number, timestamp: number, expiry: number): string {
-  // OracleDatum = Constr 0 [PriceData]
-  // PriceData GenericData = Constr 2 [Map<Int,Int>]
+  // OracleDatum = Constr 0 [PriceData]; PriceData GenericData wraps a
+  // Map<Int,Int> as Constr 2, matching the on-chain shape.
   const priceMap = new Map<bigint, bigint>();
   priceMap.set(0n, BigInt(price));
   priceMap.set(1n, BigInt(timestamp));
@@ -139,7 +145,6 @@ async function setupOracle(lucid: LucidEvolution, price: number, validForMs: num
   const signed = await tx.sign.withWallet().complete();
   const txHash = await signed.submit();
   console.log(`SETUP_ORACLE ok. tx=${txHash}`);
-  // Wait for chain to index it.
   let oracleUtxo: UTxO | undefined;
   for (let i = 0; i < 60; i++) {
     const utxos = await lucid.utxosAt(oracleAddress);
@@ -249,12 +254,13 @@ async function winBet(
   const tipSlot = await yaciTipSlot();
   const validToSlot = Math.min(tipSlot + 10, deadlineSlot - 1);
 
+  // readFrom attaches the oracle UTxO as a reference input — the validator
+  // pulls the price from its inline datum without consuming it.
   const tx = await player
     .newTx()
     .collectFrom([utxo], Data.to("Win", PriceBetRedeemer))
     .readFrom([oracleUtxo])
     .attach.SpendingValidator(validator)
-    // Validator requires payout to enterprise address (`from_verification_key`).
     .pay.ToAddress(playerEnterpriseAddr, { lovelace: totalPot })
     .addSigner(playerAddr)
     .validFrom(slotToMs(tipSlot - 5))
@@ -278,9 +284,10 @@ async function timeoutBet(
   const currentDatum = Data.from(utxo.datum, PriceBetDatum) as unknown as PriceBetDatum;
   const totalPot = utxo.assets.lovelace ?? 0n;
 
+  // Timeout requires valid_after(deadline) — must block until the chain tip
+  // actually rolls past the deadline before building the tx.
   const cfg = SLOT_CONFIG_NETWORK.Preview;
   const deadlineSlot = Math.floor((Number(currentDatum.deadline) - cfg.zeroTime) / cfg.slotLength) + cfg.zeroSlot;
-  // Wait until chain slot > deadlineSlot.
   for (let i = 0; i < 300; i++) {
     const tip = await yaciTipSlot();
     if (tip > deadlineSlot) {
@@ -299,7 +306,6 @@ async function timeoutBet(
     .newTx()
     .collectFrom([utxo], Data.to("Timeout", PriceBetRedeemer))
     .attach.SpendingValidator(validator)
-    // Validator requires payout to enterprise address.
     .pay.ToAddress(ownerEnterpriseAddr, { lovelace: totalPot })
     .addSigner(ownerAddr)
     .validFrom(slotToMs(validFromSlot))
@@ -315,19 +321,19 @@ async function runScenario() {
   console.log("=== pricebet scenario: setup-oracle → create → join → win ; create → timeout ===");
   await alignSlotConfig();
 
+  // account 0 = owner / funder / oracle publisher ; 1 = player
   const owner = await lucidAt(0);
   const player = await lucidAt(1);
   const playerAddr = await player.wallet().address();
   await fundFromIndex0([{ address: playerAddr, lovelace: 30_000_000n }]);
 
-  // Setup oracle with price 100 (> target 50 so player wins).
+  // Price=100, target=50 so the Win predicate passes in the happy path.
   const { oracleScriptHash, oracleUtxo } = await setupOracle(owner, 100, 24 * 60 * 60 * 1000);
   await new Promise((r) => setTimeout(r, 2000));
 
-  // Happy path: create → join → win.
   const cfg = SLOT_CONFIG_NETWORK.Preview;
   const tipSlot1 = await yaciTipSlot();
-  const deadline1Ms = BigInt(slotToMs(tipSlot1 + 90)); // ~90s window
+  const deadline1Ms = BigInt(slotToMs(tipSlot1 + 90));
   const createTx1 = await createBet(owner, oracleScriptHash, 50, deadline1Ms, 5_000_000n);
   await new Promise((r) => setTimeout(r, 2000));
   const joinTx = await joinBet(player, createTx1);
@@ -335,7 +341,6 @@ async function runScenario() {
   await winBet(player, joinTx, oracleUtxo);
   await new Promise((r) => setTimeout(r, 2000));
 
-  // Timeout path: short deadline, owner reclaims.
   const tipSlot2 = await yaciTipSlot();
   const deadline2Ms = BigInt(slotToMs(tipSlot2 + 15));
   const createTx2 = await createBet(owner, oracleScriptHash, 50, deadline2Ms, 5_000_000n);

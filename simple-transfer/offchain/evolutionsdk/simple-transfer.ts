@@ -11,17 +11,12 @@ import {
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
 // ----------------------------------------------------------------------------
-// Simple-transfer scenario — Evolution SDK targeting yaci-devkit.
-//
-// Validator: lock funds for a recipient (by VKH). Only the recipient can spend
-// after `from_verification_key` signs (their VKH must match the parameter).
-//
-// Scenario: lock as account 0 (sender) for the recipient account 1, then claim
-// as account 1.
+// Simple transfer. Parameterised PlutusV3 spend validator that hard-codes
+// the recipient VKH; only that key's signature can unlock the locked UTxO.
 // ----------------------------------------------------------------------------
 
 const YACI_URL = "http://localhost:8080/api/v1";
-const NETWORK = "Preprod" as const; // yaci-devkit emulates the Preprod magic.
+const NETWORK = "Preprod" as const;
 const TEST_MNEMONIC =
   "test test test test test test test test test test test test test test test test test test test test test test test sauce";
 
@@ -41,7 +36,7 @@ async function waitForUtxosAt(
     try {
       const u = await lucid.utxosAt(address);
       if (u.length >= minCount) return;
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${address}`);
@@ -68,8 +63,8 @@ async function fundFromIndex0(targetAddress: string, lovelace: bigint) {
   const txHash = await signed.submit();
   console.log(`Funded ${targetAddress} with ${lovelace} lovelace. tx=${txHash}`);
   await waitForUtxosAt(lucid, targetAddress, 1, 60);
-  // The funder (account 0) will be the next caller — wait for its new change
-  // UTxO to be indexed, otherwise lucid may re-select the consumed input.
+  // Funder is the next caller — wait for its own new change UTxO so lucid
+  // doesn't re-select the spent input.
   const funderAddr = await lucid.wallet().address();
   for (let i = 0; i < 60; i++) {
     const u = await lucid.utxosAt(funderAddr);
@@ -123,7 +118,7 @@ async function claim(receiverAccount: number) {
 async function runScenario() {
   console.log("=== simple-transfer scenario: lock → claim ===");
 
-  // Account 1 is the recipient. Fund it from account 0 so it can pay claim fees.
+  // account 0 = sender / funder ; 1 = recipient
   const recipientLucid = await lucidAt(1);
   const recipientAddress = await recipientLucid.wallet().address();
   await fundFromIndex0(recipientAddress, 25_000_000n);

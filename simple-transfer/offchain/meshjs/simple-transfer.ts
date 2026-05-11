@@ -11,11 +11,8 @@ import {
 import { applyParamsToScript } from "@meshsdk/core-csl";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
-// ----------------------------------------------------------------------------
-// Simple-transfer scenario — Mesh.js targeting yaci-devkit.
-// Lock funds for a recipient (parameter = receiver VKH); only the recipient
-// can claim.
-// ----------------------------------------------------------------------------
+// Simple transfer: parameterized validator (receiver_vkh); only the recipient may claim.
+// Mesh quirk: omit `evaluator` so Mesh's CPU estimator is used against yaci-devkit.
 
 const YACI_URL = "http://localhost:8080/api/v1";
 const NETWORK = "preprod";
@@ -47,7 +44,7 @@ async function waitForUtxoAt(addr: string, minCount = 1, timeoutSec = 60): Promi
     try {
       const utxos = await p.fetchAddressUTxOs(addr);
       if (utxos.length >= minCount) return;
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${addr}`);
@@ -96,11 +93,14 @@ async function lock(senderWallet: MeshWallet, receiverAddr: string, lovelace: bi
   const { scriptAddress } = buildScript(receiverVkh);
 
   const utxos = await provider().fetchAddressUTxOs(senderAddr);
+  // MeshBlockfrostProvider's evaluator mis-parses yaci-devkit's ogmios JSON-WSP response;
+  // omitting it makes mesh fall back to its CPU estimator.
   const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
     .setNetwork(NETWORK);
   await tx
     .txOut(scriptAddress, [{ unit: "lovelace", quantity: lovelace.toString() }])
-    // Mesh accepts the `{ alternative, fields }` shape for inline datums.
+    // Mesh-shape {alternative,fields}: default encoder here is "Mesh", not "JSON" —
+    // a JSON-shape {constructor,fields} value would silently produce the wrong CBOR.
     .txOutInlineDatumValue({ alternative: 0, fields: [] })
     .changeAddress(senderAddr)
     .selectUtxosFrom(utxos)
@@ -125,9 +125,6 @@ async function claim(receiverWallet: MeshWallet) {
   const ownUtxos = await provider().fetchAddressUTxOs(receiverAddr);
   const collateral: UTxO[] = await receiverWallet.getCollateral();
 
-  // Note: omit `evaluator` — mesh's BlockfrostProvider evaluator
-  // mis-parses yaci-devkit's ogmios JSON-WSP response and throws on
-  // a successful evaluation. Mesh falls back to default exec units.
   const tx = new MeshTxBuilder({
     fetcher: provider(),
     submitter: provider(),
@@ -137,7 +134,7 @@ async function claim(receiverWallet: MeshWallet) {
     .spendingPlutusScriptV3()
     .txIn(target.input.txHash, target.input.outputIndex, target.output.amount, target.output.address)
     .txInScript(script)
-    .txInRedeemerValue("") // unit
+    .txInRedeemerValue("")
     .txInInlineDatumPresent()
     .txInCollateral(
       collateral[0].input.txHash,
@@ -158,7 +155,7 @@ async function claim(receiverWallet: MeshWallet) {
 async function runScenario() {
   console.log("=== simple-transfer scenario: lock → claim ===");
 
-  // Recipient = fresh mnemonic, funded from the funder so they can pay claim fees.
+  // Brewed recipient: gives a pure-ADA wallet (no leftover assets) for clean collateral on yaci.
   const recipient = makeWallet(MeshWallet.brew(false) as string[]);
   const recipientAddr = await recipient.getChangeAddress();
   await fundFromFunder(recipientAddr, 25_000_000n);

@@ -16,9 +16,10 @@ import { SLOT_CONFIG_NETWORK } from "@evolution-sdk/plutus";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
 // ----------------------------------------------------------------------------
-// Auction — Evolution SDK targeting yaci-devkit.
-// One validator (single PlutusV3 mint+spend). Scenario exercises START → BID
-// → END.
+// English auction. Single PlutusV3 validator with mint (init the NFT lot)
+// and spend (Bid / End) redeemers. End requires validFrom > expiration, so
+// the close path waits for the chain tip to roll past the deadline before
+// building the tx.
 // ----------------------------------------------------------------------------
 
 const YACI_URL = "http://localhost:8080/api/v1";
@@ -28,6 +29,10 @@ const TEST_MNEMONIC =
 const ASSET_NAME = "auction_nft";
 const ERA_OFFSET_SECONDS = 600;
 
+// yaci-devkit boots through several "instant" eras and enters Babbage at
+// relative slot/time 600s, so TxInfo POSIX = (systemStart + 600 + slot) * 1000.
+// We pre-bake that offset in SLOT_CONFIG_NETWORK so validFrom(Date.now())
+// round-trips against the validator's view of time.
 async function alignSlotConfig() {
   const block = await fetch(`${YACI_URL}/blocks/latest`).then((r) => r.json());
   const zeroTime = (block.time - block.slot + ERA_OFFSET_SECONDS) * 1000;
@@ -71,7 +76,7 @@ async function waitForUtxosAt(
     try {
       const u = await lucid.utxosAt(address);
       if (u.length >= minCount) return;
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${address}`);
@@ -86,8 +91,8 @@ async function fundFromIndex0(targets: Array<{ address: string; lovelace: bigint
   const txHash = await signed.submit();
   console.log(`Funded ${targets.length} target(s). tx=${txHash}`);
   for (const t of targets) await waitForUtxosAt(lucid, t.address, 1, 60);
-  // Funder is also account 0 in some scenarios — wait for its own new change
-  // UTxO so lucid doesn't re-select the now-spent input on the next call.
+  // Funder is the next caller — wait for its own new change UTxO so lucid
+  // doesn't re-select the spent input.
   const funderAddr = await lucid.wallet().address();
   for (let i = 0; i < 60; i++) {
     const u = await lucid.utxosAt(funderAddr);
@@ -123,10 +128,12 @@ async function initAuction(
   const policy = validatorToScriptHash(validator);
   const unit = toUnit(policy, fromText(ASSET_NAME));
 
+  // Anchor validity to yaci's actual tip slot rather than Date.now(): yaci's
+  // chain ticks slightly faster than wall clock under load.
   const tipSlot = await yaciTipSlot();
   const cfg = SLOT_CONFIG_NETWORK.Preview;
   const expirationSlot = Math.floor((Number(expirationMs) - cfg.zeroTime) / cfg.slotLength) + cfg.zeroSlot;
-  // Validity window must end strictly before expirationMs (valid_before check).
+  // Bid/Init both check valid_before(expiration); validTo must land short of it.
   const validToSlot = Math.min(tipSlot + 10, expirationSlot - 5);
   const datum = Data.to({
     seller: sellerPc,
@@ -181,7 +188,8 @@ async function bid(
   };
   const newDatum = Data.to(updated, AuctionDatum);
 
-  // refund previous bidder OR (if first bid) refund the seller's "starting bid" reservation
+  // First bid has no previous bidder, so the seller's reserved starting bid
+  // is what gets refunded out.
   const refundAddrHash = previousBidder && previousBidder.length > 0
     ? previousBidder
     : auction.seller;
@@ -228,7 +236,9 @@ async function close(
   const unit = toUnit(policy, auction.asset_name);
   const sellerAddr = credentialToAddress(NETWORK, { type: "Key", hash: auction.seller });
 
-  // Wait for chain slot past expiration.
+  // End requires valid_after(expiration); the tx must declare a validity
+  // window that starts strictly past the deadline, so block until the chain
+  // tip has actually rolled there.
   const cfg = SLOT_CONFIG_NETWORK.Preview;
   const expirationSlot = Math.floor((Number(expirationMs) - cfg.zeroTime) / cfg.slotLength) + cfg.zeroSlot;
   for (let i = 0; i < 300; i++) {
@@ -271,6 +281,7 @@ async function runScenario() {
   console.log("=== auction scenario: init → bid → bid → end ===");
   await alignSlotConfig();
 
+  // account 0 = seller / funder ; 1 = bidder1 ; 2 = bidder2
   const seller = await lucidAt(0);
   const bidder1 = await lucidAt(1);
   const bidder2 = await lucidAt(2);
@@ -279,7 +290,6 @@ async function runScenario() {
     { address: await bidder2.wallet().address(), lovelace: 30_000_000n },
   ]);
 
-  // Short auction window so END runs in a reasonable time.
   const cfg = SLOT_CONFIG_NETWORK.Preview;
   const tipSlot = await yaciTipSlot();
   const expirationSlot = tipSlot + 25;

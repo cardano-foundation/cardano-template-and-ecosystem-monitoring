@@ -17,11 +17,9 @@ import {
 import { applyParamsToScript } from "@meshsdk/core-csl";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
-// ----------------------------------------------------------------------------
-// Factory — Mesh.js targeting yaci-devkit.
-// 3 validators (factory_marker mint, factory spend, product mint+spend).
+// Factory: 3 validators (factory_marker mint, factory spend, product mint+spend).
 // Scenario: create-factory → create-product × 2 → read tag.
-// ----------------------------------------------------------------------------
+// Mesh quirk: omit `evaluator` so Mesh's CPU estimator is used against yaci-devkit.
 
 const YACI_URL = "http://localhost:8080/api/v1";
 const NETWORK = "preprod";
@@ -52,7 +50,7 @@ async function waitForUtxoAt(addr: string, minCount = 1, timeoutSec = 60) {
     try {
       const u = await p.fetchAddressUTxOs(addr);
       if (u.length >= minCount) return;
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${addr}`);
@@ -142,12 +140,16 @@ async function createFactory(wallet: MeshWallet): Promise<string> {
   const markerUnit = markerPolicyId + stringToHex(FACTORY_MARKER_NAME);
   const collateral: UTxO[] = await wallet.getCollateral();
 
+  // MeshBlockfrostProvider's evaluator mis-parses yaci-devkit's ogmios JSON-WSP response;
+  // omitting it makes mesh fall back to its CPU estimator.
   const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
     .setNetwork(NETWORK);
   await tx
     .txIn(seedUtxo.input.txHash, seedUtxo.input.outputIndex, seedUtxo.output.amount, seedUtxo.output.address)
     .mintPlutusScriptV3()
     .mint("1", markerPolicyId, stringToHex(FACTORY_MARKER_NAME))
+    // Inline minting script (vs. mintTxInReference): one-shot bootstrap; a reference UTxO would
+    // mean an extra setup tx just to publish a script we use exactly once.
     .mintingScript(markerScript)
     .mintRedeemerValue(mConStr0([]))
     .txOut(factoryAddr, [{ unit: markerUnit, quantity: "1" }])
@@ -185,7 +187,6 @@ async function createProduct(
   const markerUnit = markerPolicyId + stringToHex(FACTORY_MARKER_NAME);
   const productUnit = product.policyId + stringToHex(productId);
 
-  // Decode existing registry, append new policy.
   const existing = deserializeDatum(factoryUtxo.output.plutusData) as {
     fields: Array<{ list?: Array<{ bytes: string }> }>;
   };
@@ -198,8 +199,8 @@ async function createProduct(
   const ownUtxos = await provider().fetchAddressUTxOs(ownerAddr);
   const collateral: UTxO[] = await wallet.getCollateral();
 
-  // Two Plutus scripts in this tx — factory spend + product mint — so use
-  // conservative explicit exUnits to keep within per-tx max.
+  // Multiple Plutus scripts in one tx — default per-redeemer budget × N exceeds the tx limit,
+  // so set conservative explicit exUnits per call.
   const exUnits = { mem: 5_000_000, steps: 2_000_000_000 };
   const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
     .setNetwork(NETWORK);

@@ -43,11 +43,12 @@ import com.bloxbean.cardano.client.quicktx.TxResult;
 import com.bloxbean.cardano.client.transaction.spec.Asset;
 
 /**
- * Auction — single script provides both mint policy and spend validator.
- * Datum: AuctionDatum { seller, highest_bidder ("" until first bid),
- *                       highest_bid, expiration, asset_policy, asset_name }
- * Operations exercised: INIT (seller mints auction marker + locks),
- * BID (a higher bid + refund of the empty starting bid).
+ * Auction against a single validator that doubles as mint policy and spend
+ * validator. Exercises INIT (seller mints the auction marker + locks it under
+ * an AuctionDatum) and BID (a higher bid that refunds the previous bid).
+ *
+ * Roles are derived from a single mnemonic via Account indices to keep the test
+ * self-funding on yaci-devkit.
  */
 public class Auction {
 
@@ -60,6 +61,7 @@ public class Auction {
 
         static String mnemonic = "test test test test test test test test test test test test test test test test test test test test test test test sauce";
         static Network network = Networks.testnet();
+        // Roles: index 0 = seller (funds the demo), index 1 = bidder.
         static Account seller = new Account(network, mnemonic, 0);
         static Account bidder = new Account(network, mnemonic, 1);
         static QuickTxBuilder quickTxBuilder = new QuickTxBuilder(backendService);
@@ -71,6 +73,8 @@ public class Auction {
         public static void main(String[] args) throws ApiException, InterruptedException {
                 System.out.println("Script Address: " + scriptAddress.getAddress());
                 fundAccount(bidder.baseAddress(), 25);
+                // Wait until the bidder's funding tx is indexed; without this the bid's
+                // input-selection step sees an empty wallet and fails the build.
                 waitForBalance(bidder.baseAddress(), 20_000_000L, 60);
 
                 byte[] sellerVkh = seller.getBaseAddress().getPaymentCredentialHash().get();
@@ -95,6 +99,8 @@ public class Auction {
                         throw new AssertionError("Auction BID failed: " + bidRes.getResponse());
         }
 
+        // ConstrPlutusData.of encodes the Aiken record (Constr 0); BytesPlutusData and
+        // BigIntPlutusData encode the ByteArray / Int fields respectively.
         private static PlutusData buildDatum(byte[] sellerVkh, byte[] highestBidderVkh,
                         long highestBid, long expiration) {
                 return ConstrPlutusData.of(0,
@@ -117,6 +123,9 @@ public class Auction {
                                                 scriptAddress.getAddress(), datum)
                                 .attachMintValidator(plutusScript);
 
+                // withSigner attaches a signing key to the tx; withRequiredSigners records
+                // the pkh in required_signers so the validator's must_be_signed_by check
+                // sees it inside the script context.
                 return quickTxBuilder.compose(scriptTx)
                                 .validFrom(slot - 5)
                                 .validTo(slot + 50)
@@ -133,13 +142,11 @@ public class Auction {
                         throw new AssertionError("Could not find script UTxO from tx " + prevTxHash);
                 long slot = backendService.getBlockService().getLatestBlock().getValue().getSlot();
 
-                // The continuing output keeps the auction asset and adds bidder's lovelace.
                 List<Amount> newAmount = List.of(
                                 Amount.lovelace(BigInteger.valueOf(bidLovelace)),
                                 Amount.asset(policyId, ASSET_NAME, BigInteger.ONE));
 
                 PlutusData newDatum = buildDatum(sellerVkh, bidderVkh, bidLovelace, expiration);
-                // BID = Constr 0 [].
                 PlutusData redeemer = ConstrPlutusData.of(0);
 
                 ScriptTx scriptTx = new ScriptTx()

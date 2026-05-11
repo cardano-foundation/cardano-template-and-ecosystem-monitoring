@@ -18,9 +18,10 @@ import {
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
 // ----------------------------------------------------------------------------
-// Simple-wallet — Evolution SDK targeting yaci-devkit.
-// 3 chained validators (intent, wallet-mint, funds) — exercise add-funds,
-// create-intent + execute, and withdraw.
+// Smart-contract wallet. Three chained PlutusV3 validators: funds (spend
+// vault), intent (spend single-use intent UTxO) and wallet (mint policy
+// for the intent marker). The minted INTENT_MARKER token is what ties an
+// intent UTxO back to the right wallet during executeIntent.
 // ----------------------------------------------------------------------------
 
 const YACI_URL = "http://localhost:8080/api/v1";
@@ -52,7 +53,7 @@ async function waitForUtxosAt(
     try {
       const u = await lucid.utxosAt(address);
       if (u.length >= minCount) return;
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${address}`);
@@ -168,9 +169,8 @@ async function executeIntent(lucid: LucidEvolution) {
   const paymentHash = paymentCred.fields[0] as string;
   let stakeHash: string | undefined;
   if (stakeOption.index === 0) {
-    // Option<StakeCred> Some = Constr 0 [StakeCred Inline (Credential)]
-    // StakeCred Inline    = Constr 0 [Credential]
-    // Credential          = Constr 0 [vkh] or Constr 1 [hash]
+    // Unwrap the Aiken Option<StakeCredential> -> Inline -> Credential chain
+    // (Constr 0 [Constr 0 [Constr 0|1 [hash]]]).
     const inline = stakeOption.fields[0] as Constr<Data>;
     const innerCred = inline.fields[0] as Constr<Data>;
     stakeHash = innerCred.fields[0] as string;
@@ -216,13 +216,13 @@ async function withdrawAll(lucid: LucidEvolution) {
 
 async function runScenario() {
   console.log("=== simple-wallet scenario: add-funds → create-intent → execute → withdraw ===");
-  // Fresh owner so its UTxOs are clean pure-ADA.
+  // Fresh owner so its UTxOs are clean pure-ADA. account 0 = funder ;
+  // account 1 = intent recipient.
   const seed = generateSeedPhrase();
   const lucid = await lucidFromSeed(seed);
   const ownerAddr = await lucid.wallet().address();
   await fundFromIndex0(ownerAddr, 100_000_000n);
 
-  // Recipient = account 1, so we can verify the payout went through.
   const recipientAddr = await (await lucidAt(1)).wallet().address();
 
   await addFunds(lucid, 20_000_000n);
@@ -231,7 +231,6 @@ async function runScenario() {
   await new Promise((r) => setTimeout(r, 2000));
   await executeIntent(lucid);
   await new Promise((r) => setTimeout(r, 2000));
-  // Add a second funds UTxO and exercise the withdraw path.
   await addFunds(lucid, 10_000_000n);
   await new Promise((r) => setTimeout(r, 2000));
   await withdrawAll(lucid);

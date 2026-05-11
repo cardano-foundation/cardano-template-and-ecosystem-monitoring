@@ -38,24 +38,24 @@ import com.bloxbean.cardano.client.quicktx.TxResult;
 import java.io.File;
 import java.util.List;
 
+/**
+ * Single-validator demo parametrised by receiver_pkh. Locks 10 ADA into the
+ * script, then unlocks 5 ADA back to the receiver leaving the rest as script
+ * change. The validator only checks must_be_signed_by receiver, so the
+ * redeemer is unit.
+ */
 public class SimpleTransfer {
 
-        // Backend service to connect to Cardano node. Here we are using Blockfrost as
-        // an example.
         static BackendService backendService = new BFBackendService("http://localhost:8080/api/v1/", "Dummy Key");
         static UtxoSupplier utxoSupplier = new DefaultUtxoSupplier(backendService.getUtxoService());
 
-        // Dummy mnemonic for the example. Replace with a valid mnemonic.
         static String mnemonic = "test test test test test test test test test test test test test test test test test test test test test test test sauce";
 
-        // The network used for this example is Testnet
         static Network network = Networks.testnet();
 
         static Account payee1 = new Account(network, mnemonic);
 
         static Address ownerAddress = payee1.getBaseAddress();
-        // In this example we are using the same address, but in a real scenario, you
-        // might have a different address for the receiver.
         static Address receiverAddress = payee1.getBaseAddress();
 
         public static void main(String[] args) throws ApiException {
@@ -64,7 +64,6 @@ public class SimpleTransfer {
                 String simpleTransferCompiledCode = plutusContractBlueprint.getValidators().getFirst()
                                 .getCompiledCode();
 
-                // Apply parameters to the validator compiled code to get the compiled code
                 String compiledCode = AikenScriptUtil.applyParamToScript(
                                 ListPlutusData.of(BytesPlutusData.of(receiverAddress.getPaymentCredentialHash().get())),
                                 simpleTransferCompiledCode);
@@ -75,7 +74,6 @@ public class SimpleTransfer {
 
                 QuickTxBuilder quickTxBuilder = new QuickTxBuilder(backendService);
 
-                // Locking 10 Ada to the contract address
                 Tx tx = new Tx().payToAddress(scriptAddress.getAddress(), Amount.ada(10))
                                 .withChangeAddress(ownerAddress.getAddress())
                                 .from(ownerAddress.getAddress());
@@ -86,10 +84,10 @@ public class SimpleTransfer {
                 System.out.println("Funds locked. TxHash:");
                 System.out.println(txResult.getTxHash());
 
-                // Getting all utxos from the script address
                 List<Utxo> allScriptUtxos = utxoSupplier.getAll(scriptAddress.getAddress());
-                // Paying 5 Ada to the receiver address and leaving the remaining amount as
-                // change in the script
+                // withSigner attaches the signing key. withRequiredSigners writes the pkh
+                // into the tx's required_signers, which is what the validator's
+                // must_be_signed_by check reads from the script context.
                 ScriptTx scriptTx1 = new ScriptTx()
                                 .collectFrom(allScriptUtxos, PlutusData.unit())
                                 .payToAddress(receiverAddress.getAddress(), Amount.ada(5))
@@ -103,7 +101,6 @@ public class SimpleTransfer {
                 System.out.println("Funds withdrawn. TxHash:");
                 System.out.println(txResult1.getTxHash());
 
-                // Verify transactions succeeded
                 if (!txResult.isSuccessful() || !txResult1.isSuccessful())
                         throw new AssertionError("SimpleTransfer CCL test failed");
         }

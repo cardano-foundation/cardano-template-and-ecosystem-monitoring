@@ -47,14 +47,16 @@ import com.bloxbean.cardano.client.transaction.spec.Asset;
 import com.bloxbean.cardano.client.util.HexUtil;
 
 /**
- * Simple-wallet — three chained validators.
- *   intent  (spend)        param: owner_pkh
- *   wallet  (mint)         params: owner_pkh, intent_script_hash
- *   funds   (spend)        params: owner_pkh, wallet_script_hash
+ * Smart-wallet pattern with three chained validators:
+ *   intent (spend) param: owner_pkh
+ *   wallet (mint)  params: owner_pkh, intent_script_hash
+ *   funds  (spend) params: owner_pkh, wallet_script_hash
+ * Exercises createIntent (mint INTENT_MARKER + lock at intent script), addFunds
+ * (lock lovelace at funds script), executeIntent (spend both + burn marker +
+ * pay recipient).
  *
- * Operations exercised: createIntent (mint INTENT_MARKER + lock at intent script),
- * addFunds (lock lovelace at funds script), executeIntent (spend funds + intent,
- * pay recipient, burn marker).
+ * Hard-coded validator indices come from plutus.json's emitted order; if the
+ * Aiken module is renamed, re-verify them.
  */
 public class SimpleWallet {
 
@@ -63,7 +65,6 @@ public class SimpleWallet {
         private static final long FUNDS_LOVELACE = 10_000_000L;
         private static final long PAYMENT_LOVELACE = 3_000_000L;
 
-        // Validator indices in plutus.json (verified by external listing).
         private static final int IDX_FUNDS = 0;
         private static final int IDX_INTENT = 2;
         private static final int IDX_WALLET = 4;
@@ -74,6 +75,7 @@ public class SimpleWallet {
 
         static String mnemonic = "test test test test test test test test test test test test test test test test test test test test test test test sauce";
         static Network network = Networks.testnet();
+        // Roles: index 0 = owner (signs intents, pays fees), index 1 = recipient.
         static Account owner = new Account(network, mnemonic, 0);
         static Account recipient = new Account(network, mnemonic, 1);
         static QuickTxBuilder quickTxBuilder = new QuickTxBuilder(backendService);
@@ -125,14 +127,13 @@ public class SimpleWallet {
 
         private static TxResult createIntent(Address intentAddr, PlutusScript walletScript,
                         String walletPolicyId) {
-                // PaymentIntent datum: Constr 0 [recipient_address, lovelace_amt, data]
                 PlutusData recipientAddrData = encodeAddress(recipient.getBaseAddress());
                 PlutusData intentDatum = ConstrPlutusData.of(0,
                                 recipientAddrData,
                                 BigIntPlutusData.of(PAYMENT_LOVELACE),
                                 BytesPlutusData.of("memo".getBytes()));
 
-                PlutusData mintRedeemer = ConstrPlutusData.of(0); // Mint
+                PlutusData mintRedeemer = ConstrPlutusData.of(0);
                 Asset asset = new Asset(INTENT_MARKER, BigInteger.ONE);
 
                 ScriptTx scriptTx = new ScriptTx()
@@ -148,7 +149,6 @@ public class SimpleWallet {
         }
 
         private static TxResult addFunds(Address fundsAddr) {
-                // Funds datum is unused by the validator; mirror evosdk: Constr 0 [0, []].
                 PlutusData fundsDatum = ConstrPlutusData.of(0,
                                 BigIntPlutusData.of(0),
                                 ListPlutusData.of());
@@ -175,11 +175,8 @@ public class SimpleWallet {
                 if (intentUtxo == null || fundsUtxo == null)
                         throw new AssertionError("Intent/Funds UTxO not indexed");
 
-                // Funds spend redeemer: ExecuteTx = Constr 0 [].
                 PlutusData fundsRedeemer = ConstrPlutusData.of(0);
-                // Intent spend redeemer: unused — supply unit (Constr 0 []).
                 PlutusData intentRedeemer = ConstrPlutusData.of(0);
-                // Wallet mint redeemer: Burn = Constr 1 [].
                 PlutusData burnRedeemer = ConstrPlutusData.of(1);
 
                 Asset burnAsset = new Asset(INTENT_MARKER, BigInteger.valueOf(-1));
@@ -204,10 +201,9 @@ public class SimpleWallet {
                                 .completeAndWait();
         }
 
-        // Aiken Address constructor: Constr 0 [PaymentCred, Option<StakeCred>]
-        // PaymentCred  = Constr 0 [vkh] | Constr 1 [scriptHash]
-        // StakeCred    = Some(Inline(Cred)) | None
-        // Some(Inline(...)) is encoded as Constr 0 [Constr 0 [Cred]].
+        // Aiken Address: Constr 0 [PaymentCred, Option<StakeCred>].
+        // PaymentCred = Constr 0 [vkh] | Constr 1 [scriptHash].
+        // Some(Inline(Cred)) wraps Cred with two nested Constr 0.
         private static PlutusData encodeAddress(Address addr) {
                 PlutusData paymentCred;
                 if (addr.getPaymentCredential().isPresent()) {
@@ -224,11 +220,10 @@ public class SimpleWallet {
                         Credential sc = addr.getDelegationCredential().get();
                         int idx = sc.getType() == CredentialType.Key ? 0 : 1;
                         PlutusData inner = ConstrPlutusData.of(idx, BytesPlutusData.of(sc.getBytes()));
-                        // Some (Constr 0) wrapping Inline (Constr 0) wrapping the credential.
                         stakeOption = ConstrPlutusData.of(0,
                                         ConstrPlutusData.of(0, inner));
                 } else {
-                        stakeOption = ConstrPlutusData.of(1); // None
+                        stakeOption = ConstrPlutusData.of(1);
                 }
 
                 return ConstrPlutusData.of(0, paymentCred, stakeOption);

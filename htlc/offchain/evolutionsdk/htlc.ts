@@ -14,9 +14,9 @@ import { SLOT_CONFIG_NETWORK } from "@evolution-sdk/plutus";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
 // ----------------------------------------------------------------------------
-// HTLC — Evolution SDK targeting yaci-devkit.
-// Validator params (secret_hash, expiration_ms, owner_vkh).
-// Spend redeemers: GUESS{answer} | WITHDRAW. Scenario exercises BOTH paths.
+// Hashed Timelock Contract. Parameterised PlutusV3 spend validator
+// (secret_hash, expiration_ms, owner_vkh). Guess (pre-image reveal) wins
+// before expiry; Withdraw (owner refund) requires valid_after(expiration).
 // ----------------------------------------------------------------------------
 
 const YACI_URL = "http://localhost:8080/api/v1";
@@ -25,6 +25,10 @@ const TEST_MNEMONIC =
   "test test test test test test test test test test test test test test test test test test test test test test test sauce";
 const ERA_OFFSET_SECONDS = 600;
 
+// yaci-devkit boots through several "instant" eras and enters Babbage at
+// relative slot/time 600s, so TxInfo POSIX = (systemStart + 600 + slot) * 1000.
+// We pre-bake that offset in SLOT_CONFIG_NETWORK so validFrom(Date.now())
+// round-trips against the validator's view of time.
 async function alignSlotConfig() {
   const block = await fetch(`${YACI_URL}/blocks/latest`).then((r) => r.json());
   const zeroTime = (block.time - block.slot + ERA_OFFSET_SECONDS) * 1000;
@@ -53,8 +57,8 @@ async function fundFromIndex0(targets: Array<{ address: string; lovelace: bigint
   const txHash = await signed.submit();
   console.log(`Funded ${targets.length} target(s). tx=${txHash}`);
   for (const t of targets) await waitForUtxosAt(lucid, t.address, 1, 60);
-  // Funder (account 0) is the next caller — wait for its own new change UTxO
-  // to be indexed so lucid doesn't re-select the now-spent input.
+  // Funder is the next caller — wait for its own new change UTxO so lucid
+  // doesn't re-select the spent input.
   const funderAddr = await lucid.wallet().address();
   for (let i = 0; i < 60; i++) {
     const u = await lucid.utxosAt(funderAddr);
@@ -73,7 +77,7 @@ async function waitForUtxosAt(
     try {
       const u = await lucid.utxosAt(address);
       if (u.length >= minCount) return;
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${address}`);
@@ -151,7 +155,6 @@ async function claim(
   const { validator, scriptAddress } = loadValidator(secretHashHex, expirationMs, ownerVkh);
   const utxo = await findLockedUtxo(claimer, scriptAddress, initTxHash);
   const answerHex = fromText(secret);
-  // GUESS = Constr 0 [answer]
   const redeemer = Data.to(new Constr(0, [answerHex]));
   const tx = await claimer
     .newTx()
@@ -173,7 +176,6 @@ async function refund(
 ) {
   const { validator, scriptAddress } = loadValidator(secretHashHex, expirationMs, ownerVkh);
   const utxo = await findLockedUtxo(owner, scriptAddress, initTxHash);
-  // WITHDRAW = Constr 1 []
   const redeemer = Data.to(new Constr(1, []));
   const cfg = SLOT_CONFIG_NETWORK.Preview;
   const expirationSlot = Math.floor((Number(expirationMs) - cfg.zeroTime) / cfg.slotLength) + cfg.zeroSlot;
@@ -197,19 +199,18 @@ async function runScenario() {
   console.log("=== htlc scenario: init×2 → claim (correct secret) / refund (after expiry) ===");
   await alignSlotConfig();
 
+  // account 0 = owner / funder ; 1 = claimer
   const owner = await lucidAt(0);
   const claimer = await lucidAt(1);
   const ownerVkh = await vkhOf(0);
   const claimerAddr = await claimer.wallet().address();
   await fundFromIndex0([{ address: claimerAddr, lovelace: 20_000_000n }]);
 
-  // Lock 1: long expiry — claimer reveals secret.
   const secret1 = "open-sesame";
   const exp1 = BigInt(Date.now() + 60 * 60 * 1000);
   const { txHash: tx1, secretHashHex: h1 } = await init(owner, secret1, ownerVkh, exp1, 10_000_000n);
   await new Promise((r) => setTimeout(r, 2000));
 
-  // Lock 2: short expiry — owner refunds after.
   const secret2 = "another-secret";
   const cfg = SLOT_CONFIG_NETWORK.Preview;
   const exp2Slot = (await yaciTipSlot()) + 10;
@@ -219,7 +220,6 @@ async function runScenario() {
 
   await claim(claimer, secret1, h1, exp1, ownerVkh, tx1);
 
-  // Wait for chain slot past exp2 slot.
   for (let i = 0; i < 300; i++) {
     const tip = await yaciTipSlot();
     if (tip > exp2Slot) {

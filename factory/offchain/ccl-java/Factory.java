@@ -45,13 +45,14 @@ import com.bloxbean.cardano.client.transaction.spec.Asset;
 import com.bloxbean.cardano.client.util.HexUtil;
 
 /**
- * Factory — three chained validators (factory_marker mint, factory spend, product mint+spend).
- * Operations: createFactory + createProduct.
+ * Factory pattern with three chained validators: factory_marker (mint),
+ * factory (spend), product (mint+spend). Parameters chain so that
+ * marker_policy = factory_marker(owner_pkh, seed_outref), the factory address
+ * depends on marker_policy, and each product depends on factory + product_id.
+ * Exercises createFactory and createProduct.
  *
- * Param chain:
- *   factory_marker(owner_pkh, seed_outref) → marker_policy_id
- *   factory(owner_pkh, marker_policy_id) → factory script + addr
- *   product(owner_pkh, marker_policy_id, product_id) → product script + addr
+ * OutputReference encodes as ConstrPlutusData.of(0, txHashBytes, idx) — the
+ * Aiken record gets the Constr-0 tag.
  */
 public class Factory {
 
@@ -107,7 +108,6 @@ public class Factory {
                         String markerPolicyId, Address factoryAddr) throws ApiException {
                 String tokenNameHex = HexUtil.encodeHexString(FACTORY_MARKER_NAME.getBytes());
 
-                // FactoryDatum starts as Constr 0 [empty list]
                 PlutusData initialDatum = ConstrPlutusData.of(0, ListPlutusData.of());
                 PlutusData mintRedeemer = ConstrPlutusData.of(0);
                 Asset asset = new Asset(FACTORY_MARKER_NAME, BigInteger.ONE);
@@ -118,6 +118,9 @@ public class Factory {
                                                 factoryAddr.getAddress(), initialDatum)
                                 .attachMintValidator(markerScript);
 
+                // withSigner attaches a signing key. withRequiredSigners records the pkh
+                // in required_signers so it appears inside the script context — the
+                // marker validator's must_be_signed_by check needs the latter.
                 long slot = backendService.getBlockService().getLatestBlock().getValue().getSlot();
                 return quickTxBuilder.compose(scriptTx)
                                 .validFrom(slot - 5)
@@ -142,18 +145,15 @@ public class Factory {
                 String productPolicyId = policyId(productScript);
                 Address productAddr = AddressProvider.getEntAddress(productScript, network);
 
-                // Updated factory datum: append productPolicyId.
                 List<PlutusData> registry = new ArrayList<>();
                 registry.add(BytesPlutusData.of(HexUtil.decodeHexString(productPolicyId)));
                 PlutusData updatedFactoryDatum = ConstrPlutusData.of(0,
                                 ListPlutusData.of(registry.toArray(new PlutusData[0])));
 
-                // Spend redeemer: Constr 0 [productPolicyId, productId].
                 PlutusData spendRedeemer = ConstrPlutusData.of(0,
                                 BytesPlutusData.of(HexUtil.decodeHexString(productPolicyId)),
                                 BytesPlutusData.of(PRODUCT_ID.getBytes()));
 
-                // Product datum: Constr 0 [tag].
                 PlutusData productDatum = ConstrPlutusData.of(0,
                                 BytesPlutusData.of(PRODUCT_TAG.getBytes()));
 

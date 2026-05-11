@@ -14,9 +14,9 @@ import {
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
 // ----------------------------------------------------------------------------
-// Atomic transaction — Evolution SDK targeting yaci-devkit.
-// Single PlutusV3 validator with mint + spend. Scenario: mint+lock → collect
-// (atomic spend+mint) → burn.
+// Atomic transaction. One PlutusV3 validator exposes both mint and spend
+// purposes; the collect step combines them in a single tx so the spend can
+// only succeed alongside a matching mint.
 // ----------------------------------------------------------------------------
 
 const YACI_URL = "http://localhost:8080/api/v1";
@@ -47,7 +47,7 @@ async function waitForUtxosAt(
     try {
       const u = await lucid.utxosAt(address);
       if (u.length >= minCount) return;
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${address}`);

@@ -12,9 +12,10 @@ import {
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
 // ----------------------------------------------------------------------------
-// Payment splitter — Evolution SDK targeting yaci-devkit.
-// Validator parameter is a list of payee VKHs; spending splits the locked
-// lovelace equally to all payees. Scenario locks then pays out.
+// Payment splitter. Parameterised PlutusV3 spend validator carrying the
+// payee VKH list; spending must produce exactly one equal-share output per
+// payee. Account 0 (the payer) must itself be a payee, otherwise lucid's
+// change output would be flagged as an unexpected extra credential.
 // ----------------------------------------------------------------------------
 
 const YACI_URL = "http://localhost:8080/api/v1";
@@ -22,8 +23,6 @@ const NETWORK = "Preprod" as const;
 const TEST_MNEMONIC =
   "test test test test test test test test test test test test test test test test test test test test test test test sauce";
 const PAYEE_COUNT = 5;
-// Account 0 must be a payee — otherwise lucid's change output to account 0
-// would introduce an "additional payee credential" the validator rejects.
 const PAYEE_INDICES = [0, 1, 2, 3, 4];
 
 async function lucidAt(accountIndex: number): Promise<LucidEvolution> {

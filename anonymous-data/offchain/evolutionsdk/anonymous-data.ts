@@ -14,13 +14,9 @@ import blake2b from "blake2b";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
 // ----------------------------------------------------------------------------
-// Anonymous data commit/reveal — Evolution SDK targeting yaci-devkit.
-//
-//   ID = blake2b_256(pkh || nonce)
-//
-// Commit (mint): mints exactly one token, asset_name = ID, sent to script with
-// inline datum. Reveal (spend): consumes the committed UTxO with redeemer =
-// nonce; signer's pkh + nonce must reproduce ID.
+// Anonymous-data commit/reveal. Exercises the validator's Mint (commit) and
+// Spend (reveal) redeemers. ID = blake2b_256(pkh || nonce); on reveal the
+// validator recomputes it from the signer's pkh and the nonce redeemer.
 // ----------------------------------------------------------------------------
 
 const YACI_URL = "http://localhost:8080/api/v1";
@@ -85,7 +81,6 @@ async function reveal(lucid: LucidEvolution, nonceHex: string, idHex: string) {
   const { validator, policyId, scriptAddress } = loadValidator();
   const unit = toUnit(policyId, idHex);
 
-  // Wait for the committed UTxO to appear at the script address.
   let utxo: { assets: Record<string, bigint> } | undefined;
   for (let i = 0; i < 60; i++) {
     const utxos = await lucid.utxosAt(scriptAddress);

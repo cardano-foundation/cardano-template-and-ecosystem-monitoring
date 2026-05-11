@@ -19,9 +19,10 @@ import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 import { ProxyDatum, WithdrawalRedeemerV1, WithdrawalRedeemerV2 } from "./types.ts";
 
 // ----------------------------------------------------------------------------
-// Upgradable proxy — Evolution SDK targeting yaci-devkit.
-// Scenario: init (v1) → mint via v1 → change-version (→ v2) → mint via v2.
-// Exercises stake registration + withdrawal + spend+mint paths.
+// Upgradable proxy. Proxy state lives at a script address with a datum
+// pointing at the active logic script's hash; the logic is invoked via a
+// zero-value stake withdrawal, so each logic version owns a stake address
+// that has to be registered before its first use.
 // ----------------------------------------------------------------------------
 
 const YACI_URL = "http://localhost:8080/api/v1";
@@ -50,7 +51,7 @@ async function waitForUtxosAt(
     try {
       const u = await lucid.utxosAt(address);
       if (u.length >= minCount) return;
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${address}`);
@@ -142,13 +143,12 @@ async function initProxy(lucid: LucidEvolution): Promise<{ tokenUnit: string }> 
 
 async function mintProxyToken(lucid: LucidEvolution, tokenUnit: string) {
   const ownerAddr = await lucid.wallet().address();
-  // Wait until utxoByUnit finds the proxy state UTxO.
   let utxo: Awaited<ReturnType<LucidEvolution["utxoByUnit"]>> | undefined;
   for (let i = 0; i < 60; i++) {
     try {
       utxo = await lucid.utxoByUnit(tokenUnit);
       if (utxo) break;
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   if (!utxo) throw new Error("Proxy state UTxO not indexed");
@@ -166,6 +166,9 @@ async function mintProxyToken(lucid: LucidEvolution, tokenUnit: string) {
     ? Data.to({ token_name: encodeHex("ProxyMintToken"), password: encodeHex("NoPassword") }, WithdrawalRedeemerV1)
     : Data.to({ invalid_token_name: encodeHex("InvalidToken") }, WithdrawalRedeemerV2);
 
+  // readFrom passes the proxy state UTxO as a reference input so the proxy
+  // mint policy can read script_pointer (and require it matches the logic
+  // validator hash being withdrawn-from) without spending the state.
   const tx = await lucid
     .newTx()
     .readFrom([utxo])

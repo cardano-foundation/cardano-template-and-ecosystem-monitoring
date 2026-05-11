@@ -44,25 +44,15 @@ import com.bloxbean.cardano.client.quicktx.ScriptTx;
 import com.bloxbean.cardano.client.quicktx.Tx;
 import com.bloxbean.cardano.client.quicktx.TxResult;
 
-// (Tx import already present above; left intact.)
-
 /**
- * Escrow — single spend validator (no parameters).
+ * Two-party escrow against a single spend validator (no params). Datum is
+ * Initiation (Constr 0) or ActiveEscrow (Constr 1). Exercises
+ * RecipientDeposit (Constr 0), CancelTrade (Constr 1) and CompleteTrade
+ * (Constr 2).
  *
- * Datum is one of:
- *   Initiation     = Constr 0 [initiator_address, initiator_assets]
- *   ActiveEscrow   = Constr 1 [initiator_address, initiator_assets, recipient_address, recipient_assets]
- *
- * Redeemers:
- *   RecipientDeposit = Constr 0 [recipient_address, recipient_assets]
- *   CancelTrade      = Constr 1 []
- *   CompleteTrade    = Constr 2 []
- *
- * `initiator_assets` and `recipient_assets` are MValue, an Aiken Pairs<PolicyId, Pairs<AssetName, Int>>
- * encoded as Map(PolicyId → Map(AssetName → Int)).
- *
- * Operations exercised: initiate (lock initiator's lovelace), recipient_deposit
- * (transition to ActiveEscrow with both parties' assets), complete (final payout).
+ * `initiator_assets` / `recipient_assets` are Aiken Pairs<PolicyId, Pairs<...>>
+ * (MValue): encode them with MapPlutusData (outer/inner Maps), since Aiken
+ * Pairs serialise as CBOR maps.
  */
 public class Escrow {
 
@@ -75,6 +65,8 @@ public class Escrow {
 
         static String mnemonic = "test test test test test test test test test test test test test test test test test test test test test test test sauce";
         static Network network = Networks.testnet();
+        // Roles: index 0 = initiator (funds the demo + locks INITIATOR_LOVELACE),
+        //        index 1 = recipient (deposits RECIPIENT_LOVELACE, pays fee on COMPLETE).
         static Account initiator = new Account(network, mnemonic, 0);
         static Account recipient = new Account(network, mnemonic, 1);
         static QuickTxBuilder quickTxBuilder = new QuickTxBuilder(backendService);
@@ -85,6 +77,8 @@ public class Escrow {
         public static void main(String[] args) throws ApiException, InterruptedException {
                 System.out.println("Script Address: " + scriptAddress.getAddress());
                 fundAccount(recipient.baseAddress(), 25);
+                // Wait for recipient's funder-change UTxO to be indexed before DEPOSIT
+                // selects inputs from that wallet.
                 waitForBalance(recipient.baseAddress(), 20_000_000L, 60);
 
                 TxResult initRes = initiate();
@@ -112,7 +106,6 @@ public class Escrow {
                 PlutusData initiatorAddrData = encodeAddress(initiator.getBaseAddress());
                 PlutusData initiatorAssets = mvalueLovelaceOnly(INITIATOR_LOVELACE);
 
-                // Initiation = Constr 0 [initiator, initiator_assets]
                 PlutusData datum = ConstrPlutusData.of(0, initiatorAddrData, initiatorAssets);
 
                 Tx tx = new Tx()
@@ -136,14 +129,12 @@ public class Escrow {
                 PlutusData initiatorAssets = mvalueLovelaceOnly(INITIATOR_LOVELACE);
                 PlutusData recipientAssets = mvalueLovelaceOnly(RECIPIENT_LOVELACE);
 
-                // ActiveEscrow = Constr 1 [initiator, initiator_assets, recipient, recipient_assets]
                 PlutusData newDatum = ConstrPlutusData.of(1,
                                 initiatorAddrData,
                                 initiatorAssets,
                                 recipientAddrData,
                                 recipientAssets);
 
-                // Redeemer RecipientDeposit = Constr 0 [recipient_address, recipient_assets]
                 PlutusData redeemer = ConstrPlutusData.of(0, recipientAddrData, recipientAssets);
 
                 long total = INITIATOR_LOVELACE + RECIPIENT_LOVELACE;
@@ -168,24 +159,22 @@ public class Escrow {
                 Utxo utxo = findScriptUtxoByTx(prevTxHash);
                 if (utxo == null) throw new AssertionError("Active escrow UTxO not indexed");
 
-                // CompleteTrade = Constr 2 []
                 PlutusData redeemer = ConstrPlutusData.of(2);
 
                 long slot = backendService.getBlockService().getLatestBlock().getValue().getSlot();
 
-                // The script holds INITIATOR_LOVELACE + RECIPIENT_LOVELACE = 9 ADA. If
-                // the explicit payouts total exactly that, CCL deducts the fee from the
-                // change output (which routes back to the initiator), pushing initiator's
-                // received value below `recipient_assets` and failing the validator.
-                // We pair the script spend with a tiny fee-bearing Tx from the recipient's
-                // wallet so the fee is sourced externally and our payouts stay intact.
+                // The script UTxO holds INITIATOR_LOVELACE + RECIPIENT_LOVELACE. If the
+                // explicit payouts equal that total, CCL deducts the tx fee from the
+                // change output (routed back to initiator), pushing the initiator's
+                // received amount below `recipient_assets` and failing the validator.
+                // Composing a tiny external Tx from the recipient sources the fee from
+                // outside the script value so the payouts stay intact.
                 Tx feeTx = new Tx()
                                 .payToAddress(recipient.baseAddress(), Amount.ada(2))
                                 .from(recipient.baseAddress());
 
                 ScriptTx scriptTx = new ScriptTx()
                                 .collectFrom(List.of(utxo), redeemer)
-                                // Initiator gets the recipient's assets, and vice versa.
                                 .payToAddress(initiator.baseAddress(),
                                                 Amount.lovelace(BigInteger.valueOf(RECIPIENT_LOVELACE)))
                                 .payToAddress(recipient.baseAddress(),
@@ -202,8 +191,9 @@ public class Escrow {
                                 .completeAndWait();
         }
 
-        // MValue: Pairs<PolicyId, Pairs<AssetName, Int>> = Map(PolicyId → Map(AssetName → Int))
-        // For lovelace-only: Map(""(empty policy) → Map(""(empty name) → qty))
+        // MValue is Aiken Pairs<PolicyId, Pairs<AssetName, Int>>; Aiken `Pairs` serialise
+        // as CBOR Maps, so use nested MapPlutusData. Lovelace-only encodes with
+        // empty-bytes policy and asset name.
         private static PlutusData mvalueLovelaceOnly(long lovelace) {
                 MapPlutusData inner = MapPlutusData.builder().build();
                 inner.put(BytesPlutusData.of(new byte[0]), BigIntPlutusData.of(lovelace));
@@ -213,7 +203,9 @@ public class Escrow {
                 return outer;
         }
 
-        // Aiken Address: Constr 0 [PaymentCred, Option<StakeCred>]
+        // Aiken Address: Constr 0 [PaymentCred, Option<StakeCred>].
+        // PaymentCred  = Constr 0 [vkh] | Constr 1 [scriptHash].
+        // Some(Inline(Cred)) is two nested Constr 0 wrappers around Cred.
         private static PlutusData encodeAddress(Address addr) {
                 PlutusData paymentCred;
                 if (addr.getPaymentCredential().isPresent()) {

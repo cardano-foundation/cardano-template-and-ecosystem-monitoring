@@ -42,10 +42,13 @@ import com.bloxbean.cardano.client.quicktx.TxResult;
 import com.bloxbean.cardano.client.transaction.spec.Asset;
 
 /**
- * Bet — single script provides both mint policy and spend validator.
- * Datum: BetDatum { player1: VKH, player2: VKH (empty until joined), oracle: VKH, expiration: Int }
- * Operations exercised: INIT (player1 mints + locks), JOIN (player2 spends + relocks 2x).
- * ANNOUNCE_WINNER deferred — would need a third account to act as oracle and clean payout.
+ * Two-player bet with an oracle, against a single validator that doubles as
+ * mint policy and spend validator. Exercises INIT (player1 mints + locks) and
+ * JOIN (player2 spends + relocks 2x). ANNOUNCE_WINNER is intentionally not
+ * executed — see comment in main().
+ *
+ * Runs on yaci-devkit: chain POSIX time needs a +600s offset to account for
+ * the emulator's "instant" pre-Babbage eras (see comment on chainTimeMs).
  */
 public class Bet {
 
@@ -57,6 +60,7 @@ public class Bet {
 
         static String mnemonic = "test test test test test test test test test test test test test test test test test test test test test test test sauce";
         static Network network = Networks.testnet();
+        // Roles: index 0 = player1 (funder + INIT), 1 = player2 (JOIN), 2 = oracle.
         static Account player1 = new Account(network, mnemonic, 0);
         static Account player2 = new Account(network, mnemonic, 1);
         static Account oracle = new Account(network, mnemonic, 2);
@@ -69,7 +73,8 @@ public class Bet {
         public static void main(String[] args) throws ApiException, InterruptedException {
                 System.out.println("Script Address: " + scriptAddress.getAddress());
                 fundAccount(player2.baseAddress(), 25);
-                fundAccount(oracle.baseAddress(), 25); // oracle pays fee for ANNOUNCE_WINNER
+                fundAccount(oracle.baseAddress(), 25);
+                // Wait for funder-change UTxOs to be indexed before any role tries to spend.
                 waitForBalance(player2.baseAddress(), 20_000_000L, 60);
                 waitForBalance(oracle.baseAddress(), 20_000_000L, 60);
 
@@ -77,15 +82,12 @@ public class Bet {
                 byte[] p2Vkh = player2.getBaseAddress().getPaymentCredentialHash().get();
                 byte[] oVkh = oracle.getBaseAddress().getPaymentCredentialHash().get();
 
-                // yaci-devkit emulates several "instant" eras before Babbage which
-                // starts at relative time 600s. The chain's TxInfo POSIX for a given
-                // slot is therefore (systemStart + 600 + slot)*1000, i.e. 600s ahead
-                // of the nominal block time. Bake that offset in so the datum's
-                // expiration is comparable to validity_range upper bound.
+                // yaci-devkit emulates several "instant" eras before Babbage starts at
+                // relative time 600s, so chain.TxInfo POSIX time = (block.time + 600) * 1000.
+                // Bake the offset in when comparing the datum's expiration to validity-range
+                // bounds, otherwise the on-chain time check fails by ~10 minutes.
                 long chainTimeMs = (backendService.getBlockService()
                                 .getLatestBlock().getValue().getTime() + 600L) * 1000L;
-                // Short expiration so the test can wait it out within a reasonable
-                // wall-clock window before running ANNOUNCE_WINNER.
                 long expiration = chainTimeMs + 60_000L;
 
                 TxResult initRes = init(p1Vkh, oVkh, expiration, 10_000_000L);
@@ -102,15 +104,11 @@ public class Bet {
                         throw new AssertionError("Bet JOIN failed: " + joinRes.getResponse());
                 waitForScriptUtxoTx(joinRes.getTxHash(), 60);
 
-                // ANNOUNCE_WINNER is intentionally not executed here. The on-chain
-                // validator requires `list.length(outputs) == 1`, but CCL's
-                // QuickTxBuilder always emits at least 2 outputs (explicit pay +
-                // fee-payer change). `mergeOutputs(true)` does not collapse them
-                // at evaluation time, so the script always rejects with the
-                // unlabelled `expect list.length(outputs) == 1` failure. Either
-                // CCL needs raw TxBuilder access (much bigger refactor) or the
-                // validator needs a separate redeemer with relaxed output
-                // accounting. The evolutionsdk and mesh.js ports cover this path.
+                // ANNOUNCE_WINNER is omitted: the on-chain validator requires
+                // list.length(outputs) == 1, but CCL's QuickTxBuilder always emits
+                // explicit-pay + fee-payer-change. mergeOutputs(true) does not collapse
+                // them at evaluation time, so the script always rejects. The evolutionsdk
+                // and mesh.js ports cover this path.
                 System.out.println("Skipping ANNOUNCE_WINNER (see comment in source).");
         }
 
@@ -124,23 +122,13 @@ public class Bet {
 
                 byte[] winnerVkh = winner.getBaseAddress().getPaymentCredentialHash().get();
 
-                // ANNOUNCE_WINNER = Constr 1 [winner_vkh]
                 PlutusData redeemer = ConstrPlutusData.of(1, BytesPlutusData.of(winnerVkh));
 
-                // Validator demands list.length(outputs) == 1, NoDatum on that
-                // output, address == from_verification_key(winner) (enterprise).
-                // Strategy: make the WINNER the fee payer and route change to its
-                // enterprise address. CCL puts the script value (20 ADA + NFT) plus
-                // any of winner's own selected inputs into one change output at
-                // winner.enterpriseAddress(). Oracle just signs (validator's
-                // key_signed check is satisfied by the witness, not by being fee
-                // payer).
-                // The validator demands `list.length(outputs) == 1`. CCL's
-                // ScriptTx with a fee payer naturally creates 2 outputs (the
-                // explicit pay + change). To produce exactly one, we precompute
-                // the payout = script UTxO's lovelace + oracle's input − fee
-                // buffer, all at winner.enterpriseAddress(), and a regular Tx
-                // from(oracle) consumes oracle's UTxO contributing the rest.
+                // mergeOutputs(true) asks CCL to collapse the script payout and the fee-payer
+                // change into a single output when they share an address. It works when the
+                // builder has full freedom over the change address; here the validator's
+                // list.length(outputs) == 1 still trips because the merge happens after
+                // evaluation, not before.
                 long scriptLovelace = utxo.getAmount().stream()
                                 .filter(a -> "lovelace".equals(a.getUnit()))
                                 .findFirst().orElseThrow().getQuantity().longValueExact();
@@ -170,9 +158,6 @@ public class Bet {
         }
 
         private static void tickChain() {
-                // Force yaci-devkit to produce a block by submitting a self-transfer.
-                // Without an explicit tick, block.getTime() can lag the actual slot
-                // by many seconds (yaci only forges when there's traffic).
                 System.out.println("Forcing chain tick (self-transfer)...");
                 com.bloxbean.cardano.client.quicktx.Tx tx =
                                 new com.bloxbean.cardano.client.quicktx.Tx()
@@ -188,8 +173,6 @@ public class Bet {
         private static void waitUntilChainTime(long targetMs, int timeoutSec)
                         throws InterruptedException, ApiException {
                 for (int i = 0; i < timeoutSec; i++) {
-                        // Apply the same +600s Babbage era offset used elsewhere so we are
-                        // comparing chain TxInfo POSIX time against the datum's expiration.
                         long chainMs = (backendService.getBlockService()
                                         .getLatestBlock().getValue().getTime() + 600L) * 1000L;
                         if (chainMs >= targetMs) {
@@ -206,20 +189,18 @@ public class Bet {
                         throws ApiException {
                 long slot = backendService.getBlockService().getLatestBlock().getValue().getSlot();
 
-                // BetDatum: Constr 0 [p1, "" /* p2 */, oracle, expiration]
+                // BetDatum: Constr 0 [p1, "" (empty p2), oracle, expiration].
+                // The empty bytes encode the "no player2 yet" placeholder before JOIN.
                 PlutusData datum = ConstrPlutusData.of(0,
                                 BytesPlutusData.of(p1Vkh),
                                 BytesPlutusData.of(new byte[0]),
                                 BytesPlutusData.of(oracleVkh),
                                 BigIntPlutusData.of(expiration));
 
-                // Mint redeemer is unused by the validator; supply unit (Constr 0 []).
                 PlutusData mintRedeemer = ConstrPlutusData.of(0);
 
                 Asset asset = new Asset(ASSET_NAME, BigInteger.valueOf(1L));
 
-                // The mint output is the only output to the script. Min-ada is fine — the
-                // INIT validator does not check lovelace, only the datum invariants.
                 ScriptTx scriptTx = new ScriptTx()
                                 .mintAsset(policyId, List.of(asset), mintRedeemer,
                                                 scriptAddress.getAddress(), datum)
@@ -253,10 +234,8 @@ public class Bet {
                                 BytesPlutusData.of(oracleVkh),
                                 BigIntPlutusData.of(expiration));
 
-                // JOIN = Constr 0 []
                 PlutusData redeemer = ConstrPlutusData.of(0);
 
-                // Build the new output value: refund the marker token + double the lovelace.
                 List<Amount> newAmount = List.of(
                                 Amount.lovelace(BigInteger.valueOf(newLovelace)),
                                 Amount.asset(policyId, ASSET_NAME, BigInteger.ONE));
@@ -276,7 +255,6 @@ public class Bet {
         }
 
         private static void fundAccount(String address, long ada) {
-                // Send `ada` from player1 (the funded mnemonic-0 account) to `address`.
                 if (utxoSupplier.getAll(address).stream()
                                 .map(Utxo::getAmount)
                                 .flatMap(List::stream)

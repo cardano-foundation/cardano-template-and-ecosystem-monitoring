@@ -14,11 +14,9 @@ import {
 import { applyParamsToScript } from "@meshsdk/core-csl";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
-// ----------------------------------------------------------------------------
-// Storage — Mesh.js targeting yaci-devkit.
-// One-shot mint + lock to an always-fail spend validator. Scenario publishes
-// both Daily and Monthly snapshot variants end-to-end.
-// ----------------------------------------------------------------------------
+// Storage: one-shot mint of a snapshot token, locked at an always-fail spend address (immutable).
+// Scenario publishes both Daily and Monthly variants.
+// Mesh quirk: omit `evaluator` so Mesh's CPU estimator is used against yaci-devkit.
 
 const YACI_URL = "http://localhost:8080/api/v1";
 const NETWORK = "preprod";
@@ -68,7 +66,7 @@ async function waitForUtxoAt(addr: string, minCount = 1, timeoutSec = 60) {
     try {
       const u = await p.fetchAddressUTxOs(addr);
       if (u.length >= minCount) return;
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${addr}`);
@@ -110,6 +108,8 @@ async function publish(
   const mintRedeemer = mConStr0([snapshotIdHex, snapshotTypeData, commitmentHexHash]);
   const collateral: UTxO[] = await wallet.getCollateral();
 
+  // MeshBlockfrostProvider's evaluator mis-parses yaci-devkit's ogmios JSON-WSP response;
+  // omitting it makes mesh fall back to its CPU estimator.
   const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
     .setNetwork(NETWORK);
   await tx
@@ -121,6 +121,8 @@ async function publish(
     )
     .mintPlutusScriptV3()
     .mint("1", policyId, assetNameHex)
+    // Inline minting script (vs. mintTxInReference): the seed-UTxO param makes this policy
+    // single-use, so a reference UTxO would be wasted setup.
     .mintingScript(mintScript)
     .mintRedeemerValue(mintRedeemer)
     .txOut(storageAddress, [{ unit: tokenUnit, quantity: "1" }])

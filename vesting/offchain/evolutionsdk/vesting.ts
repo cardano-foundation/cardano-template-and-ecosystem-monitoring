@@ -13,9 +13,8 @@ import { SLOT_CONFIG_NETWORK } from "@evolution-sdk/plutus";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
 // ----------------------------------------------------------------------------
-// Vesting — Evolution SDK targeting yaci-devkit.
-// Validator: spend allowed if owner signs OR (beneficiary signs AND now >
-// lock_until). Scenario exercises BOTH paths.
+// Vesting. Single PlutusV3 spend validator: owner signature short-circuits
+// (early reclaim); beneficiary signature requires valid_after(lock_until).
 // ----------------------------------------------------------------------------
 
 const YACI_URL = "http://localhost:8080/api/v1";
@@ -24,6 +23,10 @@ const TEST_MNEMONIC =
   "test test test test test test test test test test test test test test test test test test test test test test test sauce";
 const ERA_OFFSET_SECONDS = 600;
 
+// yaci-devkit boots through several "instant" eras and enters Babbage at
+// relative slot/time 600s, so TxInfo POSIX = (systemStart + 600 + slot) * 1000.
+// We pre-bake that offset in SLOT_CONFIG_NETWORK so validFrom(Date.now())
+// round-trips against the validator's view of time.
 async function alignSlotConfig() {
   const block = await fetch(`${YACI_URL}/blocks/latest`).then((r) => r.json());
   const zeroTime = (block.time - block.slot + ERA_OFFSET_SECONDS) * 1000;
@@ -53,7 +56,7 @@ async function waitForUtxosAt(
     try {
       const u = await lucid.utxosAt(address);
       if (u.length >= minCount) return;
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${address}`);
@@ -68,8 +71,8 @@ async function fundFromIndex0(targets: Array<{ address: string; lovelace: bigint
   const txHash = await signed.submit();
   console.log(`Funded ${targets.length} target(s). tx=${txHash}`);
   for (const t of targets) await waitForUtxosAt(lucid, t.address, 1, 60);
-  // Funder (account 0 = owner) is the next caller — wait for its own new
-  // change UTxO so lucid doesn't re-select the now-spent input.
+  // Funder is the next caller — wait for its own new change UTxO so lucid
+  // doesn't re-select the spent input.
   const funderAddr = await lucid.wallet().address();
   for (let i = 0; i < 60; i++) {
     const u = await lucid.utxosAt(funderAddr);
@@ -122,7 +125,7 @@ async function findVestingUtxo(
     try {
       const utxos = await lucid.utxosByOutRef([{ txHash, outputIndex: 0 }]);
       if (utxos.length > 0 && utxos[0].datum) return utxos[0] as never;
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Vesting UTxO ${txHash}#0 not found`);
@@ -152,7 +155,6 @@ async function withdrawAsBeneficiary(
 ) {
   const { validator } = loadValidator();
   const benAddr = await benLucid.wallet().address();
-  // Validity range strictly after lock_until ⇒ pick a slot whose POSIX > lockUntilMs.
   const cfg = SLOT_CONFIG_NETWORK.Preview;
   const lockUntilSlot = Math.floor((lockUntilMs - cfg.zeroTime) / cfg.slotLength) + cfg.zeroSlot;
   const tipSlot = await yaciTipSlot();
@@ -175,33 +177,28 @@ async function runScenario() {
   console.log("=== vesting scenario: deposit×2 → owner-withdraw / beneficiary-withdraw ===");
   await alignSlotConfig();
 
-  const owner = await lucidAt(0); // account 0
+  // account 0 = owner / funder ; 1 = beneficiary
+  const owner = await lucidAt(0);
   const ownerVkh = await vkhOf(0);
-  const ben = await lucidAt(1); // account 1 = beneficiary
+  const ben = await lucidAt(1);
   const benVkh = await vkhOf(1);
   const benAddr = await ben.wallet().address();
   await fundFromIndex0([{ address: benAddr, lovelace: 20_000_000n }]);
 
-  // Lock 1: long lock so owner can pull back early via signature path.
   const lockUntilFar = Date.now() + 60 * 60 * 1000;
   const tx1 = await deposit(owner, ownerVkh, benVkh, 5_000_000n, lockUntilFar);
-  // Wait for chain to absorb the deposit tx (owner is also the funder of the
-  // beneficiary, so the new change UTxO must be indexed before the next tx).
   await waitForUtxosAt(owner, await owner.wallet().address(), 1, 60);
   await new Promise((r) => setTimeout(r, 2000));
 
-  // Lock 2: short lock so beneficiary can claim after expiry.
   const cfg = SLOT_CONFIG_NETWORK.Preview;
   const tipSlot = await yaciTipSlot();
   const lockUntilShort = slotToMs(tipSlot + 10);
   const tx2 = await deposit(owner, ownerVkh, benVkh, 5_000_000n, lockUntilShort);
   await new Promise((r) => setTimeout(r, 2000));
 
-  // Owner withdraws lock 1 immediately.
   const u1 = await findVestingUtxo(owner, tx1);
   await withdrawAsOwner(owner, u1);
 
-  // Wait for chain slot past lockUntilShort, then beneficiary withdraws.
   const lockSlot = Math.floor((lockUntilShort - cfg.zeroTime) / cfg.slotLength) + cfg.zeroSlot;
   for (let i = 0; i < 300; i++) {
     const tip = await yaciTipSlot();

@@ -17,12 +17,17 @@ import {
 import { SLOT_CONFIG_NETWORK } from "@evolution-sdk/plutus";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
-// Realign lucid's "Preview" slot config so that validFrom(Date.now()) maps
-// to yaci's current slot AND the chain's Plutus POSIXTime round-trips
-// correctly. yaci-devkit emulates several instant era transitions before
-// Babbage, which starts at relative time 600s — so the chain's effective
-// "slot 0" for TxInfo POSIX is 600 seconds *after* yaci's nominal system
-// start. We bake that 600s offset into zeroTime here.
+// ----------------------------------------------------------------------------
+// Two-party bet. Single PlutusV3 script: mint (Init) + spend (Join,
+// AnnounceWinner). AnnounceWinner is past-expiration and must produce
+// exactly one output to the winner, which forces the change-routing trick
+// in announce().
+// ----------------------------------------------------------------------------
+
+// yaci-devkit boots through several "instant" eras and enters Babbage at
+// relative slot/time 600s, so TxInfo POSIX = (systemStart + 600 + slot) * 1000.
+// We pre-bake that offset in SLOT_CONFIG_NETWORK so validFrom(Date.now())
+// round-trips against the validator's view of time.
 const ERA_OFFSET_SECONDS = 600;
 async function alignSlotConfig() {
   const block = await fetch(`${YACI_URL}/blocks/latest`).then((r) => r.json());
@@ -32,22 +37,9 @@ async function alignSlotConfig() {
   SLOT_CONFIG_NETWORK.Preview.slotLength = 1000;
 }
 
-// ----------------------------------------------------------------------------
-// Bet scenario — Evolution SDK against yaci-devkit.
-// Single PlutusV3 script provides both mint policy (INIT) and spend validator
-// (JOIN, ANNOUNCE_WINNER).
-//
-// All three actors derive from the same well-known test mnemonic via different
-// accountIndices (matches Bet.java).
-//   account 0 = player1
-//   account 1 = player2     (validator requires player2 ≠ player1 and ≠ oracle)
-//   account 2 = oracle
-// ----------------------------------------------------------------------------
-
 const YACI_URL = "http://localhost:8080/api/v1";
-// Preview has zeroSlot=0 by default (Preprod has 86400). Combined with a
-// runtime override of zeroTime, this lets us pass Date.now() to validFrom/
-// validTo and have lucid round-trip back to yaci's current slot number.
+// Preview has zeroSlot=0 by default (Preprod is 86400); easier to map Date.now()
+// to a yaci slot when paired with the zeroTime override above.
 const NETWORK = "Preview" as const;
 const TEST_MNEMONIC =
   "test test test test test test test test test test test test test test test test test test test test test test test sauce";
@@ -76,8 +68,6 @@ async function vkhOf(accountIndex: number): Promise<string> {
 async function fundFromIndex0(
   targets: Array<{ address: string; lovelace: bigint }>,
 ) {
-  // Fund all targets in a single transaction so we don't race the indexer
-  // between successive funder transactions.
   const lucid = await lucidAt(0);
   let txb = lucid.newTx();
   for (const t of targets) txb = txb.pay.ToAddress(t.address, { lovelace: t.lovelace });
@@ -86,8 +76,8 @@ async function fundFromIndex0(
   const txHash = await signed.submit();
   console.log(`Funded ${targets.length} target(s). tx=${txHash}`);
   for (const t of targets) await waitForUtxosAt(lucid, t.address, 1, 60);
-  // player1 = account 0 (the funder) will be the next caller — wait for the
-  // funder's own new change UTxO so lucid doesn't re-select the spent input.
+  // Funder is the next caller — wait for its own new change UTxO so lucid
+  // doesn't re-select the spent input.
   const funderAddr = await lucid.wallet().address();
   for (let i = 0; i < 60; i++) {
     const u = await lucid.utxosAt(funderAddr);
@@ -106,7 +96,7 @@ async function waitForUtxosAt(
     try {
       const u = await lucid.utxosAt(address);
       if (u.length >= minCount) return;
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${address}`);
@@ -122,7 +112,7 @@ async function waitForOutRef(
     try {
       const u = await lucid.utxosByOutRef([{ txHash, outputIndex }]);
       if (u.length > 0) return;
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Timed out waiting for ${txHash}#${outputIndex}`);
@@ -138,13 +128,13 @@ function loadValidator(): { validator: Validator; scriptAddress: string } {
 
 async function init(lovelace: bigint): Promise<{ txHash: string; expirationMs: number }> {
   const { validator, scriptAddress } = loadValidator();
-  const lucid = await lucidAt(0); // player1
+  const lucid = await lucidAt(0);
   const player1Addr = await lucid.wallet().address();
   const player1Vkh = getAddressDetails(player1Addr).paymentCredential!.hash;
   const oracleVkh = await vkhOf(2);
 
-  // Use yaci's actual current slot, not Date.now() — yaci-devkit's chain
-  // ticks faster than wall clock so wall-clock-derived slots can lag behind.
+  // Anchor validity to yaci's actual tip slot rather than Date.now(): yaci's
+  // chain ticks slightly faster than wall clock under load.
   const cfg = SLOT_CONFIG_NETWORK.Preview;
   const tipSlot = (await fetch(`${YACI_URL}/blocks/latest`).then((r) => r.json())).slot as number;
   const validFromSlot = tipSlot - 5;
@@ -180,7 +170,7 @@ async function init(lovelace: bigint): Promise<{ txHash: string; expirationMs: n
       { lovelace, [unit]: 1n },
     )
     .addSigner(player1Addr)
-    // Required by validator: valid_before(validity_range, expiration).
+    // Init requires valid_before(expiration): validTo must land before deadline.
     .validFrom(validFromMs)
     .validTo(validToMs)
     .complete();
@@ -192,7 +182,7 @@ async function init(lovelace: bigint): Promise<{ txHash: string; expirationMs: n
 
 async function join(initTxHash: string): Promise<string> {
   const { validator, scriptAddress } = loadValidator();
-  const lucid = await lucidAt(1); // player2
+  const lucid = await lucidAt(1);
   const player2Addr = await lucid.wallet().address();
   const player2Vkh = getAddressDetails(player2Addr).paymentCredential!.hash;
 
@@ -238,7 +228,7 @@ async function join(initTxHash: string): Promise<string> {
 
 async function announce(joinTxHash: string): Promise<string> {
   const { validator } = loadValidator();
-  const lucid = await lucidAt(2); // oracle
+  const lucid = await lucidAt(2);
   const oracleAddr = await lucid.wallet().address();
 
   await waitForOutRef(lucid, joinTxHash, 0);
@@ -247,14 +237,13 @@ async function announce(joinTxHash: string): Promise<string> {
   const bet = Data.from(utxo.datum, BetDatum);
   if (!bet.player2) throw new Error("player2 still empty");
 
-  // Aiken's from_verification_key → enterprise address.
+  // Aiken's from_verification_key builds an enterprise (no stake) address;
+  // matching that shape here is what makes the validator's address check pass.
   const winnerVkh = bet.player1;
   const winnerAddress = credentialToAddress(NETWORK, keyHashToCredential(winnerVkh));
 
-  // ANNOUNCE_WINNER = Constr 1 [winner_vkh]
   const redeemer = Data.to(new Constr(1, [winnerVkh]));
 
-  // Validity range strictly after expiration (chain-side).
   const cfg = SLOT_CONFIG_NETWORK.Preview;
   const tipSlot = (await fetch(`${YACI_URL}/blocks/latest`).then((r) => r.json())).slot as number;
   const expirationSlot = Math.floor((Number(bet.expiration) - cfg.zeroTime) / cfg.slotLength) + cfg.zeroSlot;
@@ -264,10 +253,9 @@ async function announce(joinTxHash: string): Promise<string> {
   const validToMs = cfg.zeroTime + (validToSlot - cfg.zeroSlot) * cfg.slotLength;
   console.log(`[announce] tipSlot=${tipSlot} expirationSlot=${expirationSlot} validity=[${validFromSlot},${validToSlot}]`);
 
-  // Validator demands exactly one output total. Don't add an explicit
-  // pay.ToAddress — instead route the entire change (script input + oracle
-  // wallet contribution - fee) to the winner via changeAddress, which yields
-  // a single output to winnerAddress with NoDatum.
+  // Validator demands exactly one output. We can't add pay.ToAddress(winner)
+  // because lucid would still emit a separate change output to the oracle —
+  // instead route ALL change to the winner via complete({ changeAddress }).
   const tx = await lucid
     .newTx()
     .attach.SpendingValidator(validator)
@@ -286,7 +274,8 @@ async function runScenario() {
   console.log("=== bet scenario: init → join → announce ===");
   await alignSlotConfig();
 
-  // Fund player2 and oracle from account 0 so they can pay fees.
+  // account 0 = player1 / funder ; 1 = player2 ; 2 = oracle (validator
+  // requires player2 != player1 and != oracle).
   const player2Addr = await (await lucidAt(1)).wallet().address();
   const oracleAddr = await (await lucidAt(2)).wallet().address();
   await fundFromIndex0([
@@ -297,7 +286,8 @@ async function runScenario() {
   const { txHash: initTxHash, expirationMs } = await init(10_000_000n);
   const joinTxHash = await join(initTxHash);
 
-  // Wait for chain's current slot to surpass the bet's expiration slot.
+  // AnnounceWinner is a valid_after(expiration) check — block until the
+  // chain tip has actually rolled past it.
   const cfg = SLOT_CONFIG_NETWORK.Preview;
   const expirationSlot = Math.floor((expirationMs - cfg.zeroTime) / cfg.slotLength) + cfg.zeroSlot;
   for (let i = 0; i < 300; i++) {

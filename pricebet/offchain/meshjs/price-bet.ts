@@ -16,12 +16,9 @@ import {
 import { applyParamsToScript } from "@meshsdk/core-csl";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
-// ----------------------------------------------------------------------------
-// Pricebet — Mesh.js targeting yaci-devkit.
-// Validator: no params. Datum holds bet state. We deploy a fake oracle UTxO at
-// an always-true PlutusV3 script address so the spend can reference it.
-// Scenario: setup-oracle → create → join → win ; create → wait → timeout.
-// ----------------------------------------------------------------------------
+// Pricebet: validator referencing an oracle UTxO at an always-true PlutusV3 address.
+// Scenario: setup-oracle → create → join → win ; second flow: create → wait → timeout.
+// Mesh quirk: omit `evaluator` so Mesh's CPU estimator is used against yaci-devkit.
 
 const YACI_URL = "http://localhost:8080/api/v1";
 const NETWORK = "preprod";
@@ -63,7 +60,7 @@ async function waitForUtxoAt(addr: string, minCount = 1, timeoutSec = 60) {
     try {
       const u = await p.fetchAddressUTxOs(addr);
       if (u.length >= minCount) return;
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${addr}`);
@@ -76,7 +73,7 @@ async function waitForTx(txHash: string, outputIndex = 0, timeoutSec = 60): Prom
       const utxos = await p.fetchUTxOs(txHash);
       const u = utxos.find((x) => x.input.outputIndex === outputIndex);
       if (u) return u;
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Timed out waiting for ${txHash}#${outputIndex}`);
@@ -120,6 +117,8 @@ function getOracleScript() {
 }
 
 function vkhToEnterpriseAddr(vkh: string): string {
+  // Validator requires the winner/owner payout to go to an enterprise address (no stake part).
+  // mPubKeyAddress returns Mesh-shape {alternative,fields}; serializeAddressObj wants JSON-shape.
   return serializeAddressObj({
     constructor: 0,
     fields: [
@@ -130,7 +129,6 @@ function vkhToEnterpriseAddr(vkh: string): string {
 }
 
 function buildOracleDatum(price: number, ts: number, expiry: number): unknown {
-  // OracleDatum = Constr 0 [GenericData (Constr 2 [Map<Int,Int>])]
   return {
     constructor: 0,
     fields: [
@@ -196,10 +194,13 @@ async function setupOracle(wallet: MeshWallet, price: number, validForMs: number
   const ownAddr = await wallet.getChangeAddress();
   const utxos = await provider().fetchAddressUTxOs(ownAddr);
 
+  // MeshBlockfrostProvider's evaluator mis-parses yaci-devkit's ogmios JSON-WSP response;
+  // omitting it makes mesh fall back to its CPU estimator.
   const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
     .setNetwork(NETWORK);
   await tx
     .txOut(oracle.address, [{ unit: "lovelace", quantity: "2000000" }])
+    // JSON-shape oracle datum (constructor/fields). Mesh-shape would be rejected by "JSON" encoder.
     .txOutInlineDatumValue(datum, "JSON")
     .changeAddress(ownAddr)
     .selectUtxosFrom(utxos)
@@ -325,6 +326,7 @@ async function winBet(
       collateral[0].output.address,
     )
     .requiredSignerHash(playerVkh)
+    // Win must happen BEFORE deadline → invalidHereafter strictly less than deadline slot.
     .invalidBefore(tipSlot - 5)
     .invalidHereafter(validToSlot)
     .changeAddress(playerAddr)
@@ -358,6 +360,7 @@ async function timeoutBet(owner: MeshWallet, createTxHash: string): Promise<stri
     await new Promise((r) => setTimeout(r, 1000));
   }
   const tipSlot = await yaciTipSlot();
+  // Timeout requires `valid_after deadline` — invalidBefore must be strictly past deadlineSlot.
   const validFromSlot = Math.max(deadlineSlot + 1, tipSlot - 5);
 
   const ownUtxos = await provider().fetchAddressUTxOs(ownerAddr);
@@ -391,6 +394,7 @@ async function timeoutBet(owner: MeshWallet, createTxHash: string): Promise<stri
 
 async function runScenario() {
   console.log("=== pricebet scenario: setup-oracle → create → join → win ; create → timeout ===");
+  // Roles: owner publishes oracle + creates bets (and reclaims on timeout); player joins and wins.
   const owner = makeWallet(MeshWallet.brew(false) as string[]);
   const player = makeWallet(MeshWallet.brew(false) as string[]);
   await fundFromFunder(await owner.getChangeAddress(), 50_000_000n);

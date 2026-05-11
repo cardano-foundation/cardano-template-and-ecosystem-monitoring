@@ -16,9 +16,9 @@ import blake2b from "blake2b";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
 // ----------------------------------------------------------------------------
-// Lottery — Evolution SDK targeting yaci-devkit.
-// Two validators (lottery_creator mint + lottery spend), Reveal1+Reveal2+Settle.
-// Scenario exercises happy path (create → reveal1 → reveal2 → settle).
+// Commit-reveal lottery. Two PlutusV3 validators (lottery_creator mint +
+// lottery spend) exercise Create -> Reveal1 -> Reveal2 -> Settle; the
+// winner is decided by parity of the two revealed nonces.
 // ----------------------------------------------------------------------------
 
 const YACI_URL = "http://localhost:8080/api/v1";
@@ -27,7 +27,8 @@ const TEST_MNEMONIC =
   "test test test test test test test test test test test test test test test test test test test test test test test sauce";
 const TOKEN_NAME = "LOTTERY_TOKEN";
 const GAME_INDEX = 19n;
-const END_REVEAL = 9_999_999_999_999n; // far-future POSIX so reveal succeeds without timeout
+// Far-future POSIX so reveals never trip the deadline in a demo run.
+const END_REVEAL = 9_999_999_999_999n;
 const DELTA = 20n;
 const BET_LOVELACE = 10_000_000n;
 const SECRET1 = "3";
@@ -54,7 +55,7 @@ async function waitForUtxosAt(
     try {
       const u = await lucid.utxosAt(address);
       if (u.length >= minCount) return;
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${address}`);
@@ -69,8 +70,8 @@ async function fundFromIndex0(targets: Array<{ address: string; lovelace: bigint
   const txHash = await signed.submit();
   console.log(`Funded ${targets.length} target(s). tx=${txHash}`);
   for (const t of targets) await waitForUtxosAt(lucid, t.address, 1, 60);
-  // Funder (account 0 = coordinator) is the next caller — wait for its own
-  // new change UTxO so lucid doesn't re-select the spent input.
+  // Funder is the next caller — wait for its own new change UTxO so lucid
+  // doesn't re-select the spent input.
   const funderAddr = await lucid.wallet().address();
   for (let i = 0; i < 60; i++) {
     const u = await lucid.utxosAt(funderAddr);
@@ -246,7 +247,7 @@ async function settle(lucid1: LucidEvolution, lucid2: LucidEvolution) {
 
 async function runScenario() {
   console.log("=== lottery scenario: create → reveal1 → reveal2 → settle ===");
-  // Use account 0 as coordinator + funder. Players are account 1, 2.
+  // account 0 = coordinator / funder ; 1 = player1 ; 2 = player2
   const coordinator = await lucidAt(0);
   const player1Lucid = await lucidAt(1);
   const player2Lucid = await lucidAt(2);

@@ -45,17 +45,15 @@ import com.bloxbean.cardano.client.transaction.spec.Asset;
 import com.bloxbean.cardano.client.util.HexUtil;
 
 /**
- * Storage — one-shot snapshot publish.
+ * One-shot snapshot publish against two validators:
+ *   storage (spend, no params)           — ALWAYS FAILS so snapshots are immutable.
+ *   mint    (mint, params seed_utxo +
+ *            storage_validator_hash)     — mints exactly 1 state token
+ *                                           (asset_name = sha2_256(snapshot_id))
+ *                                           and outputs it to storage with RegistryDatum.
  *
- * Two validators:
- *   storage (spend): no params, ALWAYS FAILS — script UTxOs are immutable.
- *   mint    (mint):  params (seed_utxo, storage_validator_hash); mints exactly 1 token
- *                    with asset_name = sha2_256(snapshot_id), output to storage validator
- *                    with RegistryDatum.
- *
- * RegistryDatum  = Constr 0 [snapshot_id, snapshot_type, commitment_hash, published_at]
- * SnapshotType   = Constr 0 [] (Daily) | Constr 1 [] (Monthly)
- * MintRedeemer   = Constr 0 [snapshot_id, snapshot_type, commitment_hash]
+ * The storage validator's permanent failure is the whole point: once a
+ * snapshot UTxO is created it can never be spent, only added to.
  */
 public class Storage {
 
@@ -69,13 +67,12 @@ public class Storage {
         static QuickTxBuilder quickTxBuilder = new QuickTxBuilder(backendService);
 
         public static void main(String[] args) throws Exception {
-                // Publish a daily snapshot. Include the wall-clock timestamp so
-                // re-runs on the same yaci-devkit session don't collide with a
-                // previously minted state token.
+                // Wall-clock suffix avoids collisions with state tokens minted by previous
+                // runs against the same yaci-devkit session.
                 String snapshotId = "snap-" + System.currentTimeMillis() + "-daily";
                 byte[] commitmentHash = sha256(("commitment-data-" + snapshotId).getBytes());
 
-                TxResult res = publish(snapshotId, /* daily */ 0, commitmentHash);
+                TxResult res = publish(snapshotId, 0, commitmentHash);
                 System.out.println("PUBLISH result: successful=" + res.isSuccessful()
                                 + " txHash=" + res.getTxHash());
                 if (!res.isSuccessful())
@@ -118,8 +115,9 @@ public class Storage {
                                 snapshotTypeConstr,
                                 BytesPlutusData.of(commitmentHash));
 
-                // CCL Asset interprets a String as UTF-8 unless prefixed with "0x".
-                // The on-chain asset name is the raw 32-byte sha256(snapshot_id), so prefix.
+                // CCL's Asset(String, ...) interprets the name as UTF-8 unless prefixed
+                // with "0x"; the on-chain asset name is the raw 32-byte sha256 digest,
+                // so the "0x" prefix forces hex decoding.
                 Asset asset = new Asset("0x" + assetNameHex, BigInteger.ONE);
 
                 ScriptTx scriptTx = new ScriptTx()
@@ -153,7 +151,6 @@ public class Storage {
                                 .filter(v -> v.getTitle().startsWith("mint."))
                                 .findFirst().orElseThrow().getCompiledCode();
 
-                // OutputReference = Constr 0 [tx_hash, idx]
                 PlutusData seedOutRef = ConstrPlutusData.of(0,
                                 BytesPlutusData.of(HexUtil.decodeHexString(seedUtxo.getTxHash())),
                                 BigIntPlutusData.of(seedUtxo.getOutputIndex()));

@@ -20,11 +20,9 @@ import {
 import { sha3_256 } from "@noble/hashes/sha3";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
-// ----------------------------------------------------------------------------
-// Upgradable proxy — Mesh.js targeting yaci-devkit.
-// Scenario: init → mint(v1) → change-version → mint(v2). Exercises stake
-// registration + script withdrawal + mint+spend.
-// ----------------------------------------------------------------------------
+// Upgradable proxy: proxy script publishes itself as a reference UTxO and delegates logic
+// via withdraw-zero to versioned logic scripts. Scenario: init → mint(v1) → swap → mint(v2).
+// Mesh quirk: omit `evaluator` so Mesh's CPU estimator is used against yaci-devkit.
 
 const YACI_URL = "http://localhost:8080/api/v1";
 const NETWORK = "preprod";
@@ -55,7 +53,7 @@ async function waitForUtxoAt(addr: string, minCount = 1, timeoutSec = 60) {
     try {
       const u = await p.fetchAddressUTxOs(addr);
       if (u.length >= minCount) return;
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${addr}`);
@@ -131,6 +129,7 @@ function encodeProxyDatum(d: ProxyDatum): unknown {
 }
 
 async function pickCollateral(wallet: MeshWallet, utxos: UTxO[]): Promise<UTxO> {
+  // yaci-devkit rejects multi-asset collateral; force a pure-ADA UTxO.
   const fromWallet = (await wallet.getCollateral()).filter(
     (u) => u.output.amount.length === 1 && u.output.amount[0].unit === "lovelace",
   );
@@ -154,7 +153,7 @@ async function findProxyUtxo(tokenUnit: string, proxyAddress: string): Promise<U
         x.output.amount.some((a) => a.unit === tokenUnit && a.quantity === "1"),
       );
       if (u) return u;
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`State UTxO with token ${tokenUnit} not found`);
@@ -187,13 +186,19 @@ async function init(wallet: MeshWallet): Promise<ProxyContext> {
   const col = await pickCollateral(wallet, utxos);
   const collateral = [col];
 
+  // MeshBlockfrostProvider's evaluator mis-parses yaci-devkit's ogmios JSON-WSP response;
+  // omitting it makes mesh fall back to its CPU estimator.
   const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
     .setNetwork(NETWORK);
   await tx
     .txIn(seedUtxo.input.txHash, seedUtxo.input.outputIndex, seedUtxo.output.amount, seedUtxo.output.address)
     .mintPlutusScriptV3()
     .mint("1", proxy.policyId, tokenNameHex)
+    // Inline minting script here (first time the proxy is used) — subsequent calls below use
+    // mintTxInReference against the reference UTxO this tx publishes via txOutReferenceScript.
     .mintingScript(proxy.script)
+    // Multiple Plutus scripts in one tx — default per-redeemer budget × N exceeds the tx limit,
+    // so set conservative explicit exUnits per call.
     .mintRedeemerValue(mConStr1([]), "Mesh", { mem: 5_000_000, steps: 2_000_000_000 })
     .registerStakeCertificate(v1.rewardAddress)
     .txOut(proxy.address, [{ unit: tokenUnit, quantity: "1" }])
@@ -249,8 +254,8 @@ async function mintToken(wallet: MeshWallet, ctx: ProxyContext) {
     .readOnlyTxInReference(proxyUtxo.input.txHash, proxyUtxo.input.outputIndex)
     .mintPlutusScriptV3()
     .mint("1", ctx.proxyPolicyId, stringToHex(PROXY_MINT_TOKEN))
-    // The proxy script is also attached to the reference UTxO; use it via
-    // reference to avoid an "ExtraneousScriptWitnesses" error.
+    // The proxy script is attached to this reference UTxO; reusing it via mintTxInReference
+    // (instead of inline mintingScript) avoids "ExtraneousScriptWitnesses" from the ledger.
     .mintTxInReference(proxyUtxo.input.txHash, proxyUtxo.input.outputIndex)
     .mintRedeemerValue(proxyMintRedeemer, "Mesh", { mem: 5_000_000, steps: 2_000_000_000 })
     .withdrawalPlutusScriptV3()
@@ -300,7 +305,8 @@ async function changeVersion(wallet: MeshWallet, ctx: ProxyContext) {
   let chain = tx
     .spendingPlutusScriptV3()
     .txIn(proxyUtxo.input.txHash, proxyUtxo.input.outputIndex, proxyUtxo.output.amount, proxyUtxo.output.address)
-    // Spend via reference script (proxy UTxO has script attached).
+    // spendingTxInReference (vs. inline txInScript) reuses the script attached to the proxy
+    // UTxO itself — required since the same UTxO carries the reference script.
     .spendingTxInReference(proxyUtxo.input.txHash, proxyUtxo.input.outputIndex)
     .txInRedeemerValue(spendRedeemer, "Mesh", { mem: 5_000_000, steps: 2_000_000_000 })
     .txInInlineDatumPresent()
@@ -331,7 +337,8 @@ async function changeVersion(wallet: MeshWallet, ctx: ProxyContext) {
 async function runScenario() {
   console.log("=== upgradable-proxy scenario: init → mint(v1) → change-version → mint(v2) ===");
   const wallet = makeWallet(MeshWallet.brew(false) as string[]);
-  // Split funding into 5 pure-ADA UTxOs so each Plutus tx has fresh collateral.
+  // Split into 5 pure-ADA UTxOs: yaci-devkit rejects multi-asset collateral, so every Plutus
+  // tx needs a clean ada-only input available as collateral without consuming the same UTxO.
   await fundFromFunder(await wallet.getChangeAddress(), 250_000_000n, 5);
 
   const ctx = await init(wallet);

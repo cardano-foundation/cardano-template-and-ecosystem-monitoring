@@ -15,8 +15,9 @@ import {
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
 // ----------------------------------------------------------------------------
-// Token-transfer — Evolution SDK targeting yaci-devkit.
-// Mint TestAsset → lock at script → unlock back to receiver.
+// Token-transfer. Parameterised PlutusV3 spend validator (receiver_vkh,
+// policy_id, asset_name); the mint side uses the trivial always-true
+// PlutusV3 script so we only need to test the spend predicate.
 // ----------------------------------------------------------------------------
 
 const YACI_URL = "http://localhost:8080/api/v1";
@@ -48,7 +49,7 @@ async function waitForUtxosAt(
     try {
       const u = await lucid.utxosAt(address);
       if (u.length >= minCount) return;
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${address}`);
@@ -95,7 +96,6 @@ async function lock(lucid: LucidEvolution, unit: string): Promise<string> {
   const policyId = validatorToScriptHash(ALWAYS_TRUE_SCRIPT);
   const { scriptAddress } = loadValidator(myVkh, policyId);
 
-  // Wait for the mint UTxO to appear in the wallet.
   let tokenUtxos: Awaited<ReturnType<LucidEvolution["utxosAtWithUnit"]>> = [];
   for (let i = 0; i < 60; i++) {
     tokenUtxos = await lucid.utxosAtWithUnit(myAddr, unit);
@@ -126,7 +126,6 @@ async function unlock(lucid: LucidEvolution) {
   const unit = policyId + fromText(ASSET_NAME);
   const { validator, scriptAddress } = loadValidator(myVkh, policyId);
 
-  // Wait for the locked UTxO to appear at the script.
   let utxo: { assets: Record<string, bigint> } | undefined;
   for (let i = 0; i < 60; i++) {
     const utxos = await lucid.utxosAt(scriptAddress);
@@ -151,8 +150,9 @@ async function unlock(lucid: LucidEvolution) {
 
 async function runScenario() {
   console.log("=== token-transfer scenario: mint → lock → unlock ===");
-  // Fresh wallet — funder (account 0) may have stale tokens from previous test
-  // runs, which would taint the unlock change output and violate the validator.
+  // Use a fresh seed so the wallet starts with no stale tokens — the
+  // validator inspects all outputs and would reject leftover assets that
+  // accumulated in account 0 from previous runs.
   const seed = generateSeedPhrase();
   const lucid = await lucidFromSeed(seed);
   const addr = await lucid.wallet().address();

@@ -15,11 +15,9 @@ import {
 import { applyParamsToScript } from "@meshsdk/core-csl";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
-// ----------------------------------------------------------------------------
-// HTLC — Mesh.js targeting yaci-devkit.
-// Validator params (secret_hash, expiration_ms, owner_vkh).
-// Spend redeemers: GUESS{answer} | WITHDRAW. Scenario exercises BOTH.
-// ----------------------------------------------------------------------------
+// HTLC: parameterized validator (secret_hash, expiration_ms, owner_vkh) with GUESS / WITHDRAW.
+// Scenario runs both paths: claimer reveals the preimage; owner refunds the second lock.
+// Mesh quirk: omit `evaluator` so Mesh's CPU estimator is used against yaci-devkit.
 
 const YACI_URL = "http://localhost:8080/api/v1";
 const NETWORK = "preprod";
@@ -60,7 +58,7 @@ async function waitForUtxoAt(addr: string, minCount = 1, timeoutSec = 60) {
     try {
       const u = await p.fetchAddressUTxOs(addr);
       if (u.length >= minCount) return;
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${addr}`);
@@ -130,6 +128,8 @@ async function init(
   const ownerAddr = await owner.getChangeAddress();
   const utxos = await provider().fetchAddressUTxOs(ownerAddr);
 
+  // MeshBlockfrostProvider's evaluator mis-parses yaci-devkit's ogmios JSON-WSP response;
+  // omitting it makes mesh fall back to its CPU estimator.
   const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
     .setNetwork(NETWORK);
   await tx
@@ -159,7 +159,6 @@ async function claim(
   const ownUtxos = await provider().fetchAddressUTxOs(claimerAddr);
   const collateral: UTxO[] = await claimer.getCollateral();
 
-  // GUESS = Constr 0 [answer_bytes]
   const redeemer = mConStr0([stringToHex(secret)]);
 
   const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
@@ -198,7 +197,6 @@ async function refund(
   const ownerAddr = await owner.getChangeAddress();
   const ownUtxos = await provider().fetchAddressUTxOs(ownerAddr);
   const collateral: UTxO[] = await owner.getCollateral();
-  // WITHDRAW = Constr 1 []
   const redeemer = mConStr1([]);
 
   const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
@@ -216,6 +214,7 @@ async function refund(
       collateral[0].output.address,
     )
     .requiredSignerHash(ownerVkh)
+    // WITHDRAW requires `valid_after expiration` — invalidBefore must be strictly past expirationSlot.
     .invalidBefore(validFromSlot)
     .invalidHereafter(validFromSlot + 120)
     .changeAddress(ownerAddr)
@@ -228,6 +227,7 @@ async function refund(
 
 async function runScenario() {
   console.log("=== htlc scenario: init×2 → claim / refund ===");
+  // Roles: owner locks + may refund after expiry; claimer reveals the secret for the first lock.
   const owner = makeWallet(MeshWallet.brew(false) as string[]);
   const claimer = makeWallet(MeshWallet.brew(false) as string[]);
   const ownerAddr = await owner.getChangeAddress();
@@ -236,13 +236,11 @@ async function runScenario() {
   await fundFromFunder(claimerAddr, 20_000_000n);
   const ownerVkh = resolvePaymentKeyHash(ownerAddr);
 
-  // Lock 1: long expiry → claimer reveals secret.
   const secret1 = "open-sesame";
   const exp1 = BigInt(Date.now() + 60 * 60 * 1000);
   const { txHash: tx1, secretHashHex: h1 } = await init(owner, ownerVkh, secret1, exp1, 10_000_000n);
   await waitForLockedUtxo(loadScript(h1, exp1, ownerVkh).scriptAddress, tx1);
 
-  // Lock 2: short expiry → owner refunds.
   const secret2 = "another-secret";
   const systemStartSec = await yaciSystemStartSec();
   const exp2Slot = (await yaciTipSlot()) + 10;

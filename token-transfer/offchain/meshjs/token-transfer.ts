@@ -13,10 +13,8 @@ import {
 import { applyParamsToScript } from "@meshsdk/core-csl";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
-// ----------------------------------------------------------------------------
-// Token-transfer — Mesh.js targeting yaci-devkit.
-// Mint TestAsset → lock at script → unlock back to receiver.
-// ----------------------------------------------------------------------------
+// Token transfer: mint TestAsset via always-true policy → lock at script → unlock to receiver.
+// Mesh quirk: omit `evaluator` so Mesh's CPU estimator is used against yaci-devkit.
 
 const YACI_URL = "http://localhost:8080/api/v1";
 const NETWORK = "preprod";
@@ -50,7 +48,7 @@ async function waitForUtxoAt(addr: string, minCount = 1, timeoutSec = 60) {
     try {
       const u = await p.fetchAddressUTxOs(addr);
       if (u.length >= minCount) return;
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${addr}`);
@@ -103,11 +101,15 @@ async function mint(wallet: MeshWallet, unit: string): Promise<void> {
   const utxos = await provider().fetchAddressUTxOs(myAddr);
   const collateral: UTxO[] = await wallet.getCollateral();
 
+  // MeshBlockfrostProvider's evaluator mis-parses yaci-devkit's ogmios JSON-WSP response;
+  // omitting it makes mesh fall back to its CPU estimator.
   const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
     .setNetwork(NETWORK);
   await tx
     .mintPlutusScriptV3()
     .mint("10", policyId, stringToHex(ASSET_NAME))
+    // Inline minting script (vs. mintTxInReference): the always-true CBOR is tiny — referencing it
+    // would mean a setup tx to publish a script that's effectively free to inline.
     .mintingScript(ALWAYS_TRUE_SCRIPT_CBOR)
     .mintRedeemerValue(mConStr0([]))
     .txOut(myAddr, [{ unit, quantity: "10" }])
@@ -209,8 +211,8 @@ async function unlock(wallet: MeshWallet, unit: string) {
 
 async function runScenario() {
   console.log("=== token-transfer scenario: mint → lock → unlock ===");
-  // Fresh wallet ensures clean pure-ADA UTxOs (no leftover tokens that would
-  // taint the unlock change output and violate the validator).
+  // Brewed wallet: starts pure-ADA. Pre-existing tokens here would land in change during unlock
+  // and violate the validator (and break collateral); yaci-devkit also rejects multi-asset collateral.
   const wallet = makeWallet(MeshWallet.brew(false) as string[]);
   await fundFromFunder(await wallet.getChangeAddress(), 30_000_000n);
 

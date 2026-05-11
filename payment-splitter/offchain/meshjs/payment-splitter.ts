@@ -13,12 +13,8 @@ import {
 import { applyParamsToScript } from "@meshsdk/core-csl";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
-// ----------------------------------------------------------------------------
-// Payment splitter — Mesh.js targeting yaci-devkit.
-// Validator parameter: list of payee VKHs. Spend rule: split locked lovelace
-// equally to all payees. The PAYER must also be a payee (otherwise its change
-// output's credential would be flagged as "additional payee").
-// ----------------------------------------------------------------------------
+// Payment splitter: parameterized by [payeeVkh]; spend rule pays each payee an equal share.
+// Mesh quirk: omit `evaluator` so Mesh's CPU estimator is used against yaci-devkit.
 
 const YACI_URL = "http://localhost:8080/api/v1";
 const NETWORK = "preprod";
@@ -49,7 +45,7 @@ async function waitForUtxoAt(addr: string, minCount = 1, timeoutSec = 60) {
     try {
       const u = await p.fetchAddressUTxOs(addr);
       if (u.length >= minCount) return;
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${addr}`);
@@ -93,6 +89,8 @@ async function lockAda(payer: MeshWallet, payeeVkhs: string[], lovelace: bigint)
   const { scriptAddress } = getScriptInfo(payeeVkhs);
 
   const utxos = await provider().fetchAddressUTxOs(myAddr);
+  // MeshBlockfrostProvider's evaluator mis-parses yaci-devkit's ogmios JSON-WSP response;
+  // omitting it makes mesh fall back to its CPU estimator.
   const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
     .setNetwork(NETWORK);
   await tx
@@ -161,8 +159,8 @@ async function payout(
 
 async function runScenario() {
   console.log("=== payment-splitter scenario: lock → payout ===");
-  // Generate 5 brewed payees; payee[0] is the payer (must be one of the
-  // payees so its change output doesn't introduce a non-payee credential).
+  // Validator forbids outputs to non-payee credentials, including change. So the payer must
+  // itself be in the payee list (here payee[0]) — otherwise its change output breaks the script.
   const payeeWallets: MeshWallet[] = [];
   const payeeAddrs: string[] = [];
   const payeeVkhs: string[] = [];
@@ -173,7 +171,6 @@ async function runScenario() {
     payeeAddrs.push(a);
     payeeVkhs.push(resolvePaymentKeyHash(a));
   }
-  // Fund payer (account 0 here = payee[0]) with enough to cover lock + fees.
   await fundFromFunder([{ addr: payeeAddrs[0], lovelace: 80_000_000n }]);
 
   await lockAda(payeeWallets[0], payeeVkhs, 50_000_000n);

@@ -11,11 +11,8 @@ import {
 import { applyParamsToScript } from "@meshsdk/core-csl";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
-// ----------------------------------------------------------------------------
-// Vesting — Mesh.js targeting yaci-devkit.
-// Spend allowed if owner signs OR (beneficiary signs AND now > lock_until).
-// Scenario exercises BOTH paths.
-// ----------------------------------------------------------------------------
+// Vesting: spend if owner signs OR (beneficiary signs AND now > lock_until). Scenario runs both.
+// Mesh quirk: omit `evaluator` so Mesh's CPU estimator is used against yaci-devkit.
 
 const YACI_URL = "http://localhost:8080/api/v1";
 const NETWORK = "preprod";
@@ -48,7 +45,8 @@ async function yaciTipSlot(): Promise<number> {
 
 async function yaciSystemStartSec(): Promise<number> {
   const block = await fetch(`${YACI_URL}/blocks/latest`).then((r) => r.json());
-  return block.time - block.slot + 600; // ERA_OFFSET = 600
+  // ERA_OFFSET = 600s: TxInfo POSIX is computed from systemStart + 600 in yaci/Babbage devnet.
+  return block.time - block.slot + 600;
 }
 
 function slotToMs(slot: number, systemStartSec: number): number {
@@ -61,7 +59,7 @@ async function waitForUtxoAt(addr: string, minCount = 1, timeoutSec = 60) {
     try {
       const u = await p.fetchAddressUTxOs(addr);
       if (u.length >= minCount) return;
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${addr}`);
@@ -74,7 +72,7 @@ async function waitForTx(txHash: string, outputIndex = 0, timeoutSec = 60): Prom
       const utxos = await p.fetchUTxOs(txHash);
       const u = utxos.find((x) => x.input.outputIndex === outputIndex);
       if (u) return u;
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Timed out waiting for ${txHash}#${outputIndex}`);
@@ -118,6 +116,8 @@ async function deposit(
   const ownerAddr = await owner.getChangeAddress();
   const { scriptAddress } = loadValidator();
   const utxos = await provider().fetchAddressUTxOs(ownerAddr);
+  // MeshBlockfrostProvider's evaluator mis-parses yaci-devkit's ogmios JSON-WSP response;
+  // omitting it makes mesh fall back to its CPU estimator.
   const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
     .setNetwork(NETWORK);
   await tx
@@ -171,8 +171,7 @@ async function withdraw(
 
 async function runScenario() {
   console.log("=== vesting scenario: deposit×2 → owner-withdraw / beneficiary-withdraw ===");
-  // Fresh owner + beneficiary wallets so each has pure-ada UTxOs (collateral
-  // requirement and avoids stray tokens).
+  // Roles: owner deposits + may always withdraw; beneficiary may only withdraw past lock_until.
   const owner = makeWallet(MeshWallet.brew(false) as string[]);
   const beneficiary = makeWallet(MeshWallet.brew(false) as string[]);
   const ownerAddr = await owner.getChangeAddress();
@@ -183,15 +182,13 @@ async function runScenario() {
   const ownerVkh = resolvePaymentKeyHash(ownerAddr);
   const benVkh = resolvePaymentKeyHash(benAddr);
 
-  // Lock 1: long lock, owner withdraws via signature path.
   const lockUntilFar = Date.now() + 60 * 60 * 1000;
   const tx1 = await deposit(owner, ownerVkh, benVkh, 5_000_000n, lockUntilFar);
-  // Wait for the owner's new change UTxO from the deposit to be indexed AND
-  // for the spent input to disappear, otherwise mesh may re-select it.
+  // Wait for the owner's change UTxO (deposit output #1) to be indexed before the next deposit —
+  // otherwise mesh may re-select the still-spent input and the second tx fails UTxO selection.
   await waitForTx(tx1, 1, 60);
   await new Promise((r) => setTimeout(r, 2000));
 
-  // Lock 2: short lock, beneficiary withdraws after expiry.
   const systemStartSec = await yaciSystemStartSec();
   const tipSlot = await yaciTipSlot();
   const lockShortSlot = tipSlot + 10;
@@ -199,11 +196,9 @@ async function runScenario() {
   const tx2 = await deposit(owner, ownerVkh, benVkh, 5_000_000n, lockUntilShort);
   await new Promise((r) => setTimeout(r, 2000));
 
-  // Owner withdraws lock 1 immediately.
   const u1 = await waitForTx(tx1, 0);
   await withdraw(owner, u1);
 
-  // Wait for chain slot past lockShortSlot.
   for (let i = 0; i < 300; i++) {
     const tip = await yaciTipSlot();
     if (tip > lockShortSlot) {
@@ -214,8 +209,7 @@ async function runScenario() {
     await new Promise((r) => setTimeout(r, 1000));
   }
 
-  // Beneficiary path requires `valid_after(validity_range, lock_until)`, i.e.,
-  // invalid-before > lockShortSlot.
+  // Beneficiary path needs `valid_after(lock_until)` — invalidBefore strictly after lockShortSlot.
   const u2 = await waitForTx(tx2, 0);
   await withdraw(beneficiary, u2, { invalidBeforeSlot: lockShortSlot + 1 });
 

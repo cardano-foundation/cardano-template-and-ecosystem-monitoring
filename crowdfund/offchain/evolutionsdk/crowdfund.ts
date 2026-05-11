@@ -13,9 +13,10 @@ import { SLOT_CONFIG_NETWORK } from "@evolution-sdk/plutus";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
 // ----------------------------------------------------------------------------
-// Crowdfund — Evolution SDK targeting yaci-devkit.
-// Params: (beneficiary_vkh, goal, deadline_ms).
-// Redeemers: DONATE | WITHDRAW | RECLAIM. Scenario exercises ALL three.
+// Crowdfund. Parameterised PlutusV3 validator (beneficiary_vkh, goal,
+// deadline_ms) with Donate / Withdraw / Reclaim redeemers. Withdraw and
+// Reclaim both demand valid_after(deadline), so the scenario blocks until
+// the chain tip rolls past the deadline before submitting.
 // ----------------------------------------------------------------------------
 
 const YACI_URL = "http://localhost:8080/api/v1";
@@ -24,6 +25,10 @@ const TEST_MNEMONIC =
   "test test test test test test test test test test test test test test test test test test test test test test test sauce";
 const ERA_OFFSET_SECONDS = 600;
 
+// yaci-devkit boots through several "instant" eras and enters Babbage at
+// relative slot/time 600s, so TxInfo POSIX = (systemStart + 600 + slot) * 1000.
+// We pre-bake that offset in SLOT_CONFIG_NETWORK so validFrom(Date.now())
+// round-trips against the validator's view of time.
 async function alignSlotConfig() {
   const block = await fetch(`${YACI_URL}/blocks/latest`).then((r) => r.json());
   const zeroTime = (block.time - block.slot + ERA_OFFSET_SECONDS) * 1000;
@@ -89,7 +94,7 @@ async function waitForUtxosAt(
     try {
       const u = await lucid.utxosAt(address);
       if (u.length >= minCount) return;
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${address}`);
@@ -104,8 +109,8 @@ async function fundFromIndex0(targets: Array<{ address: string; lovelace: bigint
   const txHash = await signed.submit();
   console.log(`Funded ${targets.length} target(s). tx=${txHash}`);
   for (const t of targets) await waitForUtxosAt(lucid, t.address, 1, 60);
-  // Funder (account 0 = owner) is the next caller — wait for its own new
-  // change UTxO so lucid doesn't re-select the spent input.
+  // Funder is the next caller — wait for its own new change UTxO so lucid
+  // doesn't re-select the spent input.
   const funderAddr = await lucid.wallet().address();
   for (let i = 0; i < 60; i++) {
     const u = await lucid.utxosAt(funderAddr);
@@ -229,9 +234,8 @@ async function reclaim(
     .validFrom(slotToMs(validFromSlot))
     .validTo(slotToMs(validFromSlot + 120));
   if (remaining > 0n) {
-    // The RECLAIM False branch reads the continuing datum as
-    // `Some(CrowdfundDatum)` — i.e., the on-chain destructuring wraps the
-    // datum in Option. Mirror that by emitting `Constr 0 [CrowdfundDatum]`.
+    // Partial reclaim: validator destructures continuing datum as
+    // Some(CrowdfundDatum), so the on-chain shape is Constr 0 [datum].
     const continuingDatum = Data.to(new Constr(0, [new Constr(0, [newWallets])]));
     txb = txb.pay.ToContract(
       scriptAddress,
@@ -249,6 +253,7 @@ async function runScenario() {
   console.log("=== crowdfund scenario: init → donate → withdraw (goal-reached path); separate campaign for reclaim ===");
   await alignSlotConfig();
 
+  // account 0 = owner / funder ; 1 = beneficiary ; 2 = donor
   const beneficiary = await lucidAt(1);
   const beneficiaryVkh = await vkhOf(1);
   const benAddr = await beneficiary.wallet().address();
@@ -260,7 +265,7 @@ async function runScenario() {
     { address: donorAddr, lovelace: 30_000_000n },
   ]);
 
-  // Campaign 1: goal=10M, deadline soon, will be funded by owner + donor and beneficiary withdraws.
+  // Campaign 1 exercises the goal-reached Withdraw path.
   const goal1 = 10_000_000n;
   const cfg = SLOT_CONFIG_NETWORK.Preview;
   let tipSlot = await yaciTipSlot();
@@ -273,7 +278,6 @@ async function runScenario() {
   await donate(donor, donorVkh, beneficiaryVkh, goal1, deadline1Ms, 5_000_000n);
   await new Promise((r) => setTimeout(r, 2000));
 
-  // Wait past deadline, then beneficiary withdraws (goal reached: 11M >= 10M).
   for (let i = 0; i < 300; i++) {
     const tip = await yaciTipSlot();
     if (tip > deadline1Slot) {
@@ -285,7 +289,7 @@ async function runScenario() {
   }
   await withdraw(beneficiary, beneficiaryVkh, goal1, deadline1Ms);
 
-  // Campaign 2: goal much higher than possible, deadline soon, single donor reclaims.
+  // Campaign 2 exercises the goal-not-reached Reclaim path.
   const goal2 = 100_000_000n;
   tipSlot = await yaciTipSlot();
   const deadline2Slot = tipSlot + 15;
@@ -304,7 +308,6 @@ async function runScenario() {
     if (i % 10 === 0) console.log(`Waiting for chain slot ${tip} → ${deadline2Slot}…`);
     await new Promise((r) => setTimeout(r, 1000));
   }
-  // Donor reclaims (partial — owner's donation stays).
   await reclaim(donor, donorVkh, beneficiaryVkh, goal2, deadline2Ms);
 
   console.log("=== Scenario complete ===");

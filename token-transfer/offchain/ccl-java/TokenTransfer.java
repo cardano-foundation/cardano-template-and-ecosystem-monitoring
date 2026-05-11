@@ -43,14 +43,22 @@ import com.bloxbean.cardano.client.quicktx.TxResult;
 import com.bloxbean.cardano.client.transaction.spec.Asset;
 import com.bloxbean.cardano.client.util.HexUtil;
 
+/**
+ * Token transfer pattern: mint native tokens under an always-true policy, then
+ * lock them at a parametrised spend validator (params: owner_pkh, policy_id,
+ * asset_name), then unlock them back to the owner. Redeemer is unit; the
+ * validator only checks must_be_signed_by(owner).
+ *
+ * mintTokens uses mergeOutputs(true) because the mint emits only one
+ * non-fee-payer output to payee1 — collapsing it with the fee-payer change
+ * keeps the tx valid; that only works when both outputs share an address.
+ */
 public class TokenTransfer {
         private static final String ASSET_NAME = "TestAsset";
         static BackendService backendService = new BFBackendService("http://localhost:8080/api/v1/", "Dummy Key");
         static UtxoSupplier utxoSupplier = new DefaultUtxoSupplier(backendService.getUtxoService());
-        // Dummy mnemonic for the example. Replace with a valid mnemonic.
         static String mnemonic = "test test test test test test test test test test test test test test test test test test test test test test test sauce";
         static QuickTxBuilder quickTxBuilder = new QuickTxBuilder(backendService);
-        // The network used for this example is Testnet
         static Network network = Networks.testnet();
 
         static Account payee1 = Account.createFromMnemonic(network, mnemonic);
@@ -62,17 +70,15 @@ public class TokenTransfer {
         public static void main(String[] args) throws CborSerializationException {
                 System.out.println("Token Transfer Example");
 
-                // Apply parameters to the validator compiled code to get the compiled code
                 PlutusScript plutusScript = createParametrizedContract();
                 Address scriptAddress = AddressProvider.getEntAddress(plutusScript, network);
                 System.out.println("Script Address: " + scriptAddress.getAddress());
 
-                // Step 1: Mint tokens to payee1's wallet (wallet outputs don't require a datum)
                 TxResult mintResult = mintTokens();
                 System.out.println("Minted Asset. TxHash: " + mintResult.getTxHash());
 
-                // Step 2: Lock the minted tokens to the script address with a datum
                 // Plutus V3 script outputs require an inline datum — use payToContract
+                // with PlutusData.unit() rather than a plain payToAddress.
                 String unit = alwaysTrueScript.getPolicyId() + HexUtil.encodeHexString(ASSET_NAME.getBytes());
                 List<Utxo> walletUtxos = utxoSupplier.getAll(payee1.baseAddress());
                 Utxo mintedUtxo = walletUtxos.stream()
@@ -93,7 +99,6 @@ public class TokenTransfer {
                                 .completeAndWait();
                 System.out.println("Locked tokens to script. TxHash: " + lockResult.getTxHash());
 
-                // Step 3: Unlock the tokens from the script address and send to payee1
                 List<Utxo> scriptUtxos = utxoSupplier.getAll(scriptAddress.getAddress());
                 Utxo scriptUtxo = scriptUtxos.get(0);
                 ScriptTx unlockTx = new ScriptTx()
@@ -112,20 +117,19 @@ public class TokenTransfer {
                 System.out.println("TxHash: " + unlockResult.getTxHash());
                 System.out.println("Transferred Asset to " + payee1.getBaseAddress().getAddress());
 
-                // Verify all transactions succeeded
                 if (!mintResult.isSuccessful() || !lockResult.isSuccessful() || !unlockResult.isSuccessful())
                         throw new AssertionError("TokenTransfer CCL test failed");
         }
 
-        /**
-         * Mints 10 TestAsset tokens to payee1's wallet using the always-succeeds
-         * Plutus script as the minting policy.
-         */
         private static TxResult mintTokens() {
                 ScriptTx mintTx = new ScriptTx()
                                 .mintAsset(alwaysTrueScript, new Asset(ASSET_NAME, BigInteger.valueOf(10)),
                                                 PlutusData.unit(), payee1.baseAddress())
                                 .withChangeAddress(payee1.baseAddress());
+                // mergeOutputs(true) folds the mint output and the fee-payer change into a
+                // single output when they share an address; without it CCL emits two
+                // outputs at payee1, which is fine but wastes min-ada. Only safe to enable
+                // when the validator does not constrain output count or layout.
                 return quickTxBuilder.compose(mintTx)
                                 .withSigner(SignerProviders.signerFrom(payee1))
                                 .withRequiredSigners(payee1.getBaseAddress())
@@ -134,10 +138,6 @@ public class TokenTransfer {
                                 .completeAndWait();
         }
 
-        /**
-         * Create a parametrized contract by applying parameters to the compiled code
-         * of the Plutus script.
-         */
         private static PlutusScript createParametrizedContract() throws CborSerializationException {
                 PlutusContractBlueprint plutusContractBlueprint = PlutusBlueprintLoader
                                 .loadBlueprint(new File("../../onchain/aiken/plutus.json"));

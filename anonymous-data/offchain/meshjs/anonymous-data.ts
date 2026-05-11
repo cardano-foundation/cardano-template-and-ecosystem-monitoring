@@ -11,13 +11,9 @@ import { applyParamsToScript } from "@meshsdk/core-csl";
 import blake2b from "blake2b";
 import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
 
-// ----------------------------------------------------------------------------
-// Anonymous-data — Mesh.js targeting yaci-devkit.
-//   ID = blake2b_256(pkh || nonce)
-// Commit mints singleton ID-named token + locks it at the script with inline
-// datum. Reveal spends it with redeemer = nonce; signer pkh + nonce must
-// reproduce ID.
-// ----------------------------------------------------------------------------
+// Anonymous-data: commit (mint singleton ID-named token + lock datum) then reveal
+// (spend with nonce as redeemer; pkh + nonce must hash to the token name).
+// Mesh quirk: we omit `evaluator` so Mesh's CPU estimator runs against yaci-devkit.
 
 const YACI_URL = "http://localhost:8080/api/v1";
 const NETWORK = "preprod";
@@ -49,7 +45,7 @@ async function waitForUtxoAt(addr: string, minCount = 1, timeoutSec = 60) {
     try {
       const u = await p.fetchAddressUTxOs(addr);
       if (u.length >= minCount) return;
-    } catch { /* transient */ }
+    } catch {}
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Timed out waiting for ≥${minCount} UTxO at ${addr}`);
@@ -100,7 +96,7 @@ function getScriptInfo() {
 }
 
 async function pickCollateral(wallet: MeshWallet, utxos: UTxO[]): Promise<UTxO> {
-  // Collateral must be pure-ADA (yaci-devkit rejects multi-asset collateral).
+  // yaci-devkit rejects multi-asset collateral; force a pure-ADA UTxO.
   const fromWallet = (await wallet.getCollateral()).filter((u) =>
     u.output.amount.length === 1 && u.output.amount[0].unit === "lovelace",
   );
@@ -123,11 +119,14 @@ async function commit(wallet: MeshWallet, nonceHex: string, dataHex: string): Pr
   const utxos = await provider().fetchAddressUTxOs(changeAddress);
   const col = await pickCollateral(wallet, utxos);
 
+  // MeshBlockfrostProvider's evaluator mis-parses yaci-devkit's ogmios JSON-WSP response;
+  // omitting it makes mesh fall back to its CPU estimator.
   const tx = new MeshTxBuilder({ fetcher: provider(), submitter: provider() })
     .setNetwork(NETWORK);
   await tx
     .mintPlutusScriptV3()
     .mint("1", policyId, idHex)
+    // Inline minting script (vs. mintTxInReference) — script is small and only used once here.
     .mintingScript(script)
     .mintRedeemerValue({ bytes: idHex }, "JSON")
     .txOut(scriptAddress, [{ unit: policyId + idHex, quantity: "1" }])
@@ -199,7 +198,7 @@ async function reveal(wallet: MeshWallet, nonceHex: string, idHex: string) {
 
 async function runScenario() {
   console.log("=== anonymous-data scenario: commit → reveal ===");
-  // Use a fresh brewed wallet so collateral is naturally pure-ADA.
+  // Brewed wallet: starts empty, so funder-deposited UTxOs are guaranteed pure-ADA for collateral.
   const wallet = makeWallet(MeshWallet.brew(false) as string[]);
   await fundFromFunder(await wallet.getChangeAddress(), 30_000_000n);
 

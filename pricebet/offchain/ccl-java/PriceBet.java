@@ -41,15 +41,11 @@ import com.bloxbean.cardano.client.quicktx.Tx;
 import com.bloxbean.cardano.client.quicktx.TxResult;
 
 /**
- * PriceBet — single spend validator (no parameters).
- * Datum: PriceBetDatum {
- *   owner: VKH, player: Option<VKH>, oracle_vkh: VKH,
- *   target_rate: Int, deadline: Int, bet_amount: Int
- * }
- * Redeemer: 0 Join | 1 Win | 2 Timeout
+ * Price bet against a single spend validator with no params. Exercises Join
+ * (Constr 0) on top of create — Win (Constr 1) and Timeout (Constr 2) require
+ * an oracle inline-datum reference, deferred to the other off-chain ports.
  *
- * Operations exercised: create + join.
- * Win/timeout deferred — Win needs an oracle inline-datum reference.
+ * Option encodes as Constr 0 [value] = Some, Constr 1 [] = None.
  */
 public class PriceBet {
 
@@ -59,6 +55,7 @@ public class PriceBet {
 
         static String mnemonic = "test test test test test test test test test test test test test test test test test test test test test test test sauce";
         static Network network = Networks.testnet();
+        // Roles: 0 = owner (funder + create), 1 = player (join), 2 = oracle (unused in this run).
         static Account owner = new Account(network, mnemonic, 0);
         static Account player = new Account(network, mnemonic, 1);
         static Account oracle = new Account(network, mnemonic, 2);
@@ -70,6 +67,8 @@ public class PriceBet {
         public static void main(String[] args) throws ApiException, InterruptedException {
                 System.out.println("Script Address: " + scriptAddress.getAddress());
                 fundAccount(player.baseAddress(), 25);
+                // Wait until the player's funder-change UTxO is indexed before they
+                // attempt to spend in JOIN.
                 waitForBalance(player.baseAddress(), 20_000_000L, 60);
 
                 byte[] ownerVkh = owner.getBaseAddress().getPaymentCredentialHash().get();
@@ -78,7 +77,7 @@ public class PriceBet {
 
                 long chainTimeMs = backendService.getBlockService()
                                 .getLatestBlock().getValue().getTime() * 1000L;
-                long deadline = chainTimeMs + 24L * 60L * 60L * 1000L; // 24h beyond chain time
+                long deadline = chainTimeMs + 24L * 60L * 60L * 1000L;
                 long betLovelace = 5_000_000L;
                 long targetRate = 1500L;
 
@@ -99,7 +98,7 @@ public class PriceBet {
 
         private static PlutusData buildDatum(byte[] ownerVkh, byte[] playerVkh, byte[] oracleVkh,
                         long targetRate, long deadline, long betAmount) {
-                // Option<VKH>: Constr 0 [vkh] = Some, Constr 1 [] = None
+                // Option<VKH>: Constr 0 [vkh] = Some, Constr 1 [] = None.
                 PlutusData playerOption = playerVkh == null
                                 ? ConstrPlutusData.of(1)
                                 : ConstrPlutusData.of(0, BytesPlutusData.of(playerVkh));
@@ -142,7 +141,6 @@ public class PriceBet {
 
                 PlutusData newDatum = buildDatum(ownerVkh, playerVkh, oracleVkh,
                                 targetRate, deadline, betLovelace);
-                // Join = Constr 0 []
                 PlutusData redeemer = ConstrPlutusData.of(0);
 
                 long slot = backendService.getBlockService().getLatestBlock().getValue().getSlot();

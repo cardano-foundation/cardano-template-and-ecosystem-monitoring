@@ -41,14 +41,13 @@ import com.bloxbean.cardano.client.quicktx.Tx;
 import com.bloxbean.cardano.client.quicktx.TxResult;
 
 /**
- * Decentralized identity. No validator parameters.
- * Datum: IdentityDatum { owner: VKH, delegates: List<{key: VKH, expires: Int}> }
- * Redeemer:
- *   TransferOwner   = Constr 0 [new_owner]
- *   AddDelegate     = Constr 1 [delegate, expires]
- *   RemoveDelegate  = Constr 2 [delegate]
+ * Decentralized identity against a single spend validator with no params.
+ * Exercises TransferOwner (Constr 0) / AddDelegate (Constr 1) /
+ * RemoveDelegate (Constr 2); the happy path runs init, add, remove.
  *
- * Happy path: init identity, add delegate, remove delegate.
+ * Delegate `expires` is derived from chain time with a 24h buffer, because
+ * yaci-devkit's latest-block time can lag the current slot significantly
+ * between transactions.
  */
 public class Identity {
 
@@ -58,9 +57,9 @@ public class Identity {
 
         static String mnemonic = "test test test test test test test test test test test test test test test test test test test test test test test sauce";
         static Network network = Networks.testnet();
+        // Roles: index 0 = owner (locks the identity datum), index 1 = delegate.
         static Account owner = Account.createFromMnemonic(network, mnemonic);
         static Address ownerAddress = owner.getBaseAddress();
-        // For the happy path we use a second derivation as the delegate.
         static Account delegate = new Account(network,
                         "test test test test test test test test test test test test test test test test test test test test test test test sauce",
                         1);
@@ -82,9 +81,6 @@ public class Identity {
                         throw new AssertionError("Identity INIT failed");
                 waitForScriptUtxoTx(initRes.getTxHash(), 60);
 
-                // Derive `expires` from chain POSIX time. block.getTime() reflects the
-                // most recent forged block, which can lag the current slot significantly
-                // on yaci-devkit between transactions, so use a generous buffer (24h).
                 long chainTimeMs = backendService.getBlockService()
                                 .getLatestBlock().getValue().getTime() * 1000L;
                 long expires = chainTimeMs + 24L * 60L * 60L * 1000L;
@@ -126,7 +122,7 @@ public class Identity {
         private static TxResult init(byte[] ownerVkh) {
                 PlutusData datum = ConstrPlutusData.of(0,
                                 BytesPlutusData.of(ownerVkh),
-                                ListPlutusData.of()); // empty delegates list
+                                ListPlutusData.of());
                 Tx tx = new Tx()
                                 .payToContract(scriptAddress.getAddress(), Amount.ada(5), datum)
                                 .withChangeAddress(ownerAddress.getAddress())
@@ -178,7 +174,7 @@ public class Identity {
 
                 PlutusData newDatum = ConstrPlutusData.of(0,
                                 BytesPlutusData.of(ownerVkh),
-                                ListPlutusData.of()); // back to empty
+                                ListPlutusData.of());
 
                 PlutusData redeemer = ConstrPlutusData.of(2,
                                 BytesPlutusData.of(delegateVkh));
