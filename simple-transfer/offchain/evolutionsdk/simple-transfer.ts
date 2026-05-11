@@ -68,6 +68,14 @@ async function fundFromIndex0(targetAddress: string, lovelace: bigint) {
   const txHash = await signed.submit();
   console.log(`Funded ${targetAddress} with ${lovelace} lovelace. tx=${txHash}`);
   await waitForUtxosAt(lucid, targetAddress, 1, 60);
+  // The funder (account 0) will be the next caller — wait for its new change
+  // UTxO to be indexed, otherwise lucid may re-select the consumed input.
+  const funderAddr = await lucid.wallet().address();
+  for (let i = 0; i < 60; i++) {
+    const u = await lucid.utxosAt(funderAddr);
+    if (u.some((x) => x.txHash === txHash)) return;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
 }
 
 async function lock(senderAccount: number, receiverAddress: string, lovelace: bigint) {
