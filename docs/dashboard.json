@@ -1,11 +1,11 @@
 {
-  "lastUpdated": "2026-05-11T11:29:51Z",
+  "lastUpdated": "2026-05-11T12:02:33Z",
   "testSummary": {
     "total": 76,
-    "passed": 72,
-    "failed": 4,
+    "passed": 73,
+    "failed": 3,
     "skipped": 0,
-    "successRate": 0.95
+    "successRate": 0.96
   },
   "frameworks": [
     {
@@ -35,7 +35,7 @@
       "aiken": "passed",
       "ccl-java": "passed",
       "meshjs": "passed",
-      "evolutionsdk": "failed"
+      "evolutionsdk": "passed"
     },
     {
       "name": "atomic-transaction",
@@ -54,7 +54,7 @@
     {
       "name": "bet",
       "aiken": "passed",
-      "ccl-java": "failed",
+      "ccl-java": "passed",
       "meshjs": "passed",
       "evolutionsdk": "passed"
     },
@@ -119,7 +119,7 @@
       "aiken": "passed",
       "ccl-java": "passed",
       "meshjs": "passed",
-      "evolutionsdk": "failed"
+      "evolutionsdk": "passed"
     },
     {
       "name": "simple-wallet",
@@ -131,7 +131,7 @@
     {
       "name": "storage",
       "aiken": "passed",
-      "ccl-java": "passed",
+      "ccl-java": "failed",
       "meshjs": "passed",
       "evolutionsdk": "passed"
     },
@@ -161,7 +161,7 @@
       "aiken": "passed",
       "ccl-java": "passed",
       "meshjs": "passed",
-      "evolutionsdk": "passed"
+      "evolutionsdk": "failed"
     }
   ],
   "versions": {
