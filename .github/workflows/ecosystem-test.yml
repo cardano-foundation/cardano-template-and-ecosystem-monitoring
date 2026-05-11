@@ -1,5 +1,15 @@
 name: Cardano Ecosystem CI
 
+# Thin orchestrator.
+#
+# Most of the work — installing toolchains, the matrix shape, the
+# upload/download artifact pattern — lives in reusable workflows under
+# .github/workflows/_*.yml and composite actions under .github/actions/.
+#
+# Adding a new framework usually means: an entry in frameworks.json
+# (picked up by the discovery script), plus a small `uses:` block here
+# pointing at one of the reusable workflows.
+
 on:
   push:
     branches:
@@ -13,14 +23,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Toolchain versions and a global cache-buster.
-# Bumping CACHE_VERSION invalidates every prepare-* cache in one shot — useful
+# Bump CACHE_VERSION to invalidate every prepare-* cache in one shot — useful
 # when a transitive download (e.g. a yaci-devkit node binary) changes outside
 # the pinned npm version.
 env:
   AIKEN_VERSION: v1.1.21
-  JDK_VERSION: '24'
-  NODE_VERSION: '20'
   CACHE_VERSION: v1
 
 jobs:
@@ -44,431 +51,82 @@ jobs:
           scripts/local-test-discovery.sh
 
   # ─────────────────────────────────────────────────────────────────────────
-  # PREPARE-* JOBS
-  #
-  # Each prepare-* job installs a toolchain *once* per workflow run and saves
-  # it to actions/cache. The downstream matrix jobs (compile-aiken,
-  # test-ccl-java, test-mesh, test-evolutionsdk) restore that cache instead
-  # of re-installing from scratch on every matrix entry.
-  #
-  # Cache keys are derived from the pinned tool version + CACHE_VERSION, so:
-  #   - First run on a new tool version: prepare-* pays the install cost
-  #     once; every matrix entry restores the warm cache from the same run.
-  #   - Later runs: prepare-* is itself a cache hit (~5s).
-  #   - Bumping CACHE_VERSION invalidates everything in one step.
+  # On-chain compile
+  # Delegates to .github/workflows/_compile-aiken.yml, which fans out across
+  # matrix entries and uploads each plutus.json as `plutus-<example>`.
   # ─────────────────────────────────────────────────────────────────────────
-
-  prepare-aiken:
-    name: Prepare Aiken toolchain
-    needs: discover
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Restore Aiken from cache
-        id: cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.aiken
-          key: aiken-${{ env.AIKEN_VERSION }}-${{ env.CACHE_VERSION }}-${{ runner.os }}
-
-      - name: Install Aiken
-        if: steps.cache.outputs.cache-hit != 'true'
-        run: |
-          curl --proto '=https' --tlsv1.2 -LsSf https://install.aiken-lang.org | sh
-          export PATH="$HOME/.aiken/bin:$PATH"
-          aikup install "${AIKEN_VERSION#v}"
-          aiken --version
-
-  prepare-jbang:
-    name: Prepare JBang toolchain
-    needs: discover
-    if: needs.discover.outputs.ccl-examples != '[]'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Restore JBang from cache
-        id: cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.jbang
-          key: jbang-${{ env.CACHE_VERSION }}-${{ runner.os }}
-
-      - name: Install JBang
-        if: steps.cache.outputs.cache-hit != 'true'
-        run: |
-          curl -Ls https://sh.jbang.dev | bash -s - app setup
-          "$HOME/.jbang/bin/jbang" version
-
-  prepare-yaci-devkit:
-    name: Prepare Yaci DevKit
-    needs: discover
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Restore Yaci DevKit from cache
-        id: cache
-        uses: actions/cache@v4
-        with:
-          # User-level prefix avoids the /usr/local sudo dance.
-          path: ~/.npm-global
-          key: yaci-devkit-${{ env.CACHE_VERSION }}-${{ runner.os }}-node${{ env.NODE_VERSION }}
-
-      - name: Install Yaci DevKit globally
-        if: steps.cache.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p "$HOME/.npm-global"
-          npm config set prefix "$HOME/.npm-global"
-          npm install -g @bloxbean/yaci-devkit
-          ls "$HOME/.npm-global/bin"
-
   compile-aiken:
-    name: Compile Aiken - ${{ matrix.example }}
-    needs: [discover, prepare-aiken]
+    needs: discover
     if: needs.discover.outputs.aiken-examples != '[]'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        example: ${{ fromJson(needs.discover.outputs.aiken-examples) }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    uses: ./.github/workflows/_compile-aiken.yml
+    with:
+      examples: ${{ needs.discover.outputs.aiken-examples }}
+      aiken-version: v1.1.21
+      cache-version: v1
 
-      - name: Restore Aiken toolchain
-        uses: actions/cache@v4
-        with:
-          path: ~/.aiken
-          key: aiken-${{ env.AIKEN_VERSION }}-${{ env.CACHE_VERSION }}-${{ runner.os }}
-
-      - name: Add Aiken to PATH
-        run: echo "$HOME/.aiken/bin" >> $GITHUB_PATH
-
-      - name: Cache per-example Aiken build dir
-        uses: actions/cache@v4
-        with:
-          path: ${{ matrix.example }}/onchain/aiken/build
-          key: aiken-build-${{ matrix.example }}-${{ hashFiles(format('{0}/onchain/aiken/aiken.toml', matrix.example)) }}
-
-      - name: Run aiken check and build
-        working-directory: ${{ matrix.example }}/onchain/aiken
-        run: |
-          aiken --version
-          aiken check
-          aiken build
-
-      - name: Verify plutus.json generated
-        run: |
-          if [ ! -f "${{ matrix.example }}/onchain/aiken/plutus.json" ]; then
-            echo "❌ plutus.json not generated"
-            exit 1
-          fi
-          echo "✅ plutus.json generated ($(wc -c < ${{ matrix.example }}/onchain/aiken/plutus.json) bytes)"
-
-      - name: Upload plutus.json artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: plutus-${{ matrix.example }}
-          path: ${{ matrix.example }}/onchain/aiken/plutus.json
-          retention-days: 1
-
+  # ─────────────────────────────────────────────────────────────────────────
+  # Off-chain tests
+  # Each framework is one block: a reusable workflow + a small inputs map.
+  # ─────────────────────────────────────────────────────────────────────────
   test-ccl-java:
-    name: Test CCL Java - ${{ matrix.example }}
-    needs: [discover, compile-aiken, prepare-jbang, prepare-yaci-devkit]
+    needs: [discover, compile-aiken]
     if: needs.discover.outputs.ccl-examples != '[]'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        example: ${{ fromJson(needs.discover.outputs.ccl-examples) }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup JDK
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: ${{ env.JDK_VERSION }}
-
-      - name: Restore JBang toolchain
-        uses: actions/cache@v4
-        with:
-          path: ~/.jbang
-          key: jbang-${{ env.CACHE_VERSION }}-${{ runner.os }}
-
-      - name: Add JBang to PATH
-        run: |
-          echo "$HOME/.jbang/bin" >> $GITHUB_PATH
-          "$HOME/.jbang/bin/jbang" version
-
-      - name: Cache JBang m2 deps per example
-        uses: actions/cache@v4
-        with:
-          path: ~/.jbang/cache
-          key: jbang-cache-${{ matrix.example }}-${{ hashFiles(format('{0}/offchain/ccl-java/*.java', matrix.example)) }}
-
-      - name: Setup Node.js (for Yaci DevKit)
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Restore Yaci DevKit toolchain
-        uses: actions/cache@v4
-        with:
-          path: ~/.npm-global
-          key: yaci-devkit-${{ env.CACHE_VERSION }}-${{ runner.os }}-node${{ env.NODE_VERSION }}
-
-      - name: Start Yaci DevKit
-        run: |
-          echo "$HOME/.npm-global/bin" >> $GITHUB_PATH
-          nohup "$HOME/.npm-global/bin/yaci-devkit" up --enable-yaci-store > yaci-devkit.log 2>&1 &
-
-      - name: Wait for Yaci DevKit
-        run: |
-          for i in {1..30}; do
-            if nc -z localhost 8080; then
-              echo "✅ Yaci DevKit ready"
-              exit 0
-            fi
-            sleep 5
-          done
-          exit 1
-
-      - name: Download plutus.json artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: plutus-${{ matrix.example }}
-          path: ${{ matrix.example }}/onchain/aiken/
-
-      - name: Run CCL Java test
-        working-directory: ${{ matrix.example }}/offchain/ccl-java
-        run: |
-          JAVA_FILE=$(ls *.java | head -1)
-          echo "Running: jbang $JAVA_FILE"
-          set +e
-          timeout 300 jbang "$JAVA_FILE" 2>&1 | tee test-output.log
-          EXIT=${PIPESTATUS[0]}
-          set -e
-          if [ "$EXIT" -eq 0 ]; then echo "success" > test-status.txt; else echo "failed" > test-status.txt; fi
-          exit "$EXIT"
-
-      - name: Upload test logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: logs-ccl-${{ matrix.example }}
-          path: |
-            ${{ matrix.example }}/offchain/ccl-java/test-output.log
-            ${{ matrix.example }}/offchain/ccl-java/test-status.txt
-          retention-days: 30
+    uses: ./.github/workflows/_test-offchain-jbang.yml
+    with:
+      framework-id: ccl-java
+      status-prefix: ccl
+      subdir: offchain/ccl-java
+      examples: ${{ needs.discover.outputs.ccl-examples }}
+      jdk-version: '24'
+      cache-version: v1
 
   test-mesh:
-    name: Test Mesh.js - ${{ matrix.example }}
-    needs: [discover, compile-aiken, prepare-yaci-devkit]
+    needs: [discover, compile-aiken]
     if: needs.discover.outputs.mesh-examples != '[]'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        example: ${{ fromJson(needs.discover.outputs.mesh-examples) }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    uses: ./.github/workflows/_test-offchain-deno.yml
+    with:
+      framework-id: meshjs
+      status-prefix: mesh
+      subdir: offchain/meshjs
+      examples: ${{ needs.discover.outputs.mesh-examples }}
+      cache-version: v1
 
-      - name: Setup Deno
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: v2.x
-
-      - name: Cache Deno dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/deno
-          key: deno-${{ matrix.example }}-${{ hashFiles(format('{0}/offchain/meshjs/deno.json', matrix.example)) }}
-
-      - name: Setup Node.js (for Yaci DevKit)
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Restore Yaci DevKit toolchain
-        uses: actions/cache@v4
-        with:
-          path: ~/.npm-global
-          key: yaci-devkit-${{ env.CACHE_VERSION }}-${{ runner.os }}-node${{ env.NODE_VERSION }}
-
-      - name: Start Yaci DevKit
-        run: |
-          echo "$HOME/.npm-global/bin" >> $GITHUB_PATH
-          nohup "$HOME/.npm-global/bin/yaci-devkit" up --enable-yaci-store > yaci-devkit.log 2>&1 &
-
-      - name: Wait for Yaci DevKit
-        run: |
-          for i in {1..30}; do
-            if nc -z localhost 8080; then
-              echo "✅ Yaci DevKit ready"
-              exit 0
-            fi
-            sleep 5
-          done
-          exit 1
-
-      - name: Download plutus.json artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: plutus-${{ matrix.example }}
-          path: ${{ matrix.example }}/onchain/aiken/
-
-      - name: Run Mesh.js test
-        working-directory: ${{ matrix.example }}/offchain/meshjs
-        run: |
-          TS_FILE=$(ls *.ts | head -1)
-          echo "Running: deno run --allow-all $TS_FILE"
-          set +e
-          timeout 300 deno run --allow-all "$TS_FILE" 2>&1 | tee test-output.log
-          EXIT=${PIPESTATUS[0]}
-          set -e
-          if [ "$EXIT" -eq 0 ]; then echo "success" > test-status.txt; else echo "failed" > test-status.txt; fi
-          exit "$EXIT"
-
-      - name: Upload test logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: logs-mesh-${{ matrix.example }}
-          path: |
-            ${{ matrix.example }}/offchain/meshjs/test-output.log
-            ${{ matrix.example }}/offchain/meshjs/test-status.txt
-          retention-days: 30
+  test-evolutionsdk:
+    needs: [discover, compile-aiken]
+    if: needs.discover.outputs.evosdk-examples != '[]'
+    uses: ./.github/workflows/_test-offchain-deno.yml
+    with:
+      framework-id: evolutionsdk
+      status-prefix: evosdk
+      subdir: offchain/evolutionsdk
+      examples: ${{ needs.discover.outputs.evosdk-examples }}
+      cache-version: v1
 
   # ─────────────────────────────────────────────────────────────────────────
   # ADDING A NEW FRAMEWORK
   #
   # The discovery script, dashboard generator, and dashboard HTML all read
-  # `frameworks.json` and add a new framework automatically. The CI workflow
-  # needs two pieces wired in: a prepare-* job (install + cache) and a
-  # test-* job (matrix, restore cache, run).
+  # `frameworks.json`. The CI side needs only an entry below.
   #
   #   1. Add an entry to `frameworks.json` at the repo root:
   #        { "id": "<id>", "label": "<Display Name>",
   #          "kind": "onchain"|"offchain",
   #          "discoveryPath": "onchain/<id>/<manifest>"  (or offchain/...),
   #          "statusPrefix": "<short-prefix>" }
-  #      Discovery + dashboard pick it up immediately.
   #
-  #   2. Add a `prepare-<tool>` job (if your toolchain isn't already prepared
-  #      above). Pattern:
-  #        - `needs: discover` so it can short-circuit when no examples use it
-  #        - actions/cache keyed by tool version + CACHE_VERSION + runner.os
-  #        - skip the install step when the cache hits
+  #   2. Add a `test-<id>` block below pointing at the right reusable:
+  #        - Deno-based (Mesh, Evolution SDK, …): _test-offchain-deno.yml
+  #        - JBang-based (CCL Java, …):           _test-offchain-jbang.yml
+  #        - New runtime class:                   add a new _test-offchain-*.yml
+  #                                               and a setup-* composite action.
   #
-  #   3. Copy one of the test-* jobs above (or compile-aiken for an on-chain
-  #      compile job) as a template, then change:
-  #        - The job name → `test-<id>` or `compile-<id>`
-  #        - `needs:` → add the prepare-* job(s) you depend on
-  #        - `matrix.example: ${{ fromJson(needs.discover.outputs.<prefix>-examples) }}`
-  #        - The `if:` guard → `needs.discover.outputs.<prefix>-examples != '[]'`
-  #        - Replace the "Install …" step with a cache restore using the same
-  #          key as the prepare-* job, then a small step to add it to PATH
-  #        - `working-directory` and the run command
-  #        - The artifact name → `logs-<prefix>-${{ matrix.example }}`
-  #        - The path globs to your test-output.log + test-status.txt
+  #   3. (Optional) If the framework adds pinned libraries, update
+  #      versions.json and the corresponding sections in
+  #      scripts/sync-versions.sh + scripts/check-library-versions.sh.
   #
-  #   4. (Optional) If your framework introduces new pinned libraries, add
-  #      them to `versions.json` and a section in `scripts/sync-versions.sh`
-  #      and `scripts/check-library-versions.sh`.
-  #
-  # The reconstruct-status step in `report-and-dashboard` is already generic
-  # (it scans every `logs-*` artifact), so no changes are needed there.
+  # The reconstruct-status step in `report-and-dashboard` is generic (it
+  # scans every `logs-*` artifact), so no changes are needed there.
   # ─────────────────────────────────────────────────────────────────────────
-
-  test-evolutionsdk:
-    name: Test Evolution SDK - ${{ matrix.example }}
-    needs: [discover, compile-aiken, prepare-yaci-devkit]
-    if: needs.discover.outputs.evosdk-examples != '[]'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        example: ${{ fromJson(needs.discover.outputs.evosdk-examples) }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Deno
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: v2.x
-
-      - name: Cache Deno dependencies
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/deno
-          key: deno-${{ matrix.example }}-${{ hashFiles(format('{0}/offchain/evolutionsdk/deno.json', matrix.example)) }}
-
-      - name: Setup Node.js (for Yaci DevKit)
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Restore Yaci DevKit toolchain
-        uses: actions/cache@v4
-        with:
-          path: ~/.npm-global
-          key: yaci-devkit-${{ env.CACHE_VERSION }}-${{ runner.os }}-node${{ env.NODE_VERSION }}
-
-      - name: Start Yaci DevKit
-        run: |
-          echo "$HOME/.npm-global/bin" >> $GITHUB_PATH
-          nohup "$HOME/.npm-global/bin/yaci-devkit" up --enable-yaci-store > yaci-devkit.log 2>&1 &
-
-      - name: Wait for Yaci DevKit
-        run: |
-          for i in {1..30}; do
-            if nc -z localhost 8080; then
-              echo "✅ Yaci DevKit ready"
-              exit 0
-            fi
-            sleep 5
-          done
-          exit 1
-
-      - name: Download plutus.json artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: plutus-${{ matrix.example }}
-          path: ${{ matrix.example }}/onchain/aiken/
-
-      - name: Run Evolution SDK test
-        working-directory: ${{ matrix.example }}/offchain/evolutionsdk
-        run: |
-          TS_FILE=$(ls *.ts | head -1)
-          echo "Running: deno run --allow-all $TS_FILE"
-          set +e
-          timeout 300 deno run --allow-all "$TS_FILE" 2>&1 | tee test-output.log
-          EXIT=${PIPESTATUS[0]}
-          set -e
-          if [ "$EXIT" -eq 0 ]; then echo "success" > test-status.txt; else echo "failed" > test-status.txt; fi
-          exit "$EXIT"
-
-      - name: Upload test logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: logs-evosdk-${{ matrix.example }}
-          path: |
-            ${{ matrix.example }}/offchain/evolutionsdk/test-output.log
-            ${{ matrix.example }}/offchain/evolutionsdk/test-status.txt
-          retention-days: 30
 
   report-and-dashboard:
     name: Report & Dashboard
@@ -532,12 +190,13 @@ jobs:
           resolve_status evosdk "Uncaught|AssertionError|TypeError:|ReferenceError:|SyntaxError:|^error:"
 
       - name: Generate markdown report
+        env:
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
         run: |
           echo "# Cardano Ecosystem Test Report" > report.md
           echo "" >> report.md
           echo "**Generated**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> report.md
-          REPO="${{ github.repository }}"
-          RUN_ID="${{ github.run_id }}"
           echo "**Workflow Run**: https://github.com/${REPO}/actions/runs/${RUN_ID}" >> report.md
           echo "" >> report.md
           echo "## Summary" >> report.md
@@ -598,10 +257,11 @@ jobs:
 
       - name: Commit dashboard.json
         if: github.event_name == 'schedule' || github.event_name == 'pull_request'
+        env:
+          BRANCH: ${{ github.head_ref || github.ref_name }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          BRANCH="${{ github.head_ref || github.ref_name }}"
           git add docs/dashboard.json
           if git diff --cached --quiet; then
             echo "No changes to dashboard.json"

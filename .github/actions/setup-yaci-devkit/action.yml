@@ -1,0 +1,75 @@
+name: 'Setup Yaci DevKit'
+description: 'Install (or restore from cache) yaci-devkit; optionally boot it and
+  wait for the Blockfrost-compatible API on :8080.'
+
+inputs:
+  cache-version:
+    description: 'Cache-buster suffix.'
+    required: false
+    default: 'v1'
+  node-version:
+    description: 'Node.js version used to install/run yaci-devkit.'
+    required: false
+    default: '20'
+  start:
+    description: 'Boot yaci-devkit after install and wait for readiness (true|false).'
+    required: false
+    default: 'true'
+  ready-port:
+    description: 'TCP port to poll for readiness when start=true.'
+    required: false
+    default: '8080'
+  ready-timeout-tries:
+    description: 'Number of 5-second poll attempts while waiting for readiness.'
+    required: false
+    default: '30'
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Restore Yaci DevKit from cache
+      id: cache
+      uses: actions/cache@v4
+      with:
+        # User-level npm prefix avoids the /usr/local sudo dance.
+        path: ~/.npm-global
+        key: yaci-devkit-${{ inputs.cache-version }}-${{ runner.os }}-node${{ inputs.node-version }}
+
+    - name: Install Yaci DevKit
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        mkdir -p "$HOME/.npm-global"
+        npm config set prefix "$HOME/.npm-global"
+        npm install -g @bloxbean/yaci-devkit
+        ls "$HOME/.npm-global/bin"
+
+    - name: Add Yaci DevKit to PATH
+      shell: bash
+      run: echo "$HOME/.npm-global/bin" >> "$GITHUB_PATH"
+
+    - name: Start Yaci DevKit
+      if: inputs.start == 'true'
+      shell: bash
+      run: |
+        nohup "$HOME/.npm-global/bin/yaci-devkit" up --enable-yaci-store > yaci-devkit.log 2>&1 &
+
+    - name: Wait for Yaci DevKit
+      if: inputs.start == 'true'
+      shell: bash
+      run: |
+        for i in $(seq 1 ${{ inputs.ready-timeout-tries }}); do
+          if nc -z localhost ${{ inputs.ready-port }}; then
+            echo "✅ Yaci DevKit ready after $i poll(s)"
+            exit 0
+          fi
+          sleep 5
+        done
+        echo "❌ Yaci DevKit did not become ready in time"
+        tail -50 yaci-devkit.log || true
+        exit 1

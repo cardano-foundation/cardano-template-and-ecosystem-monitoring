@@ -1,0 +1,77 @@
+name: Compile Aiken (reusable)
+
+# Reusable workflow: compiles every example's `onchain/aiken` project and
+# uploads each plutus.json as the artifact `plutus-<example>`, which every
+# off-chain test job downloads.
+#
+# Callers only need to forward the example list discovered upstream.
+
+on:
+  workflow_call:
+    inputs:
+      examples:
+        description: 'JSON array of example names with an onchain/aiken project.'
+        type: string
+        required: true
+      aiken-version:
+        description: 'Pinned Aiken compiler version.'
+        type: string
+        required: false
+        default: 'v1.1.21'
+      cache-version:
+        description: 'Cache-buster forwarded to setup-aiken.'
+        type: string
+        required: false
+        default: 'v1'
+
+jobs:
+  compile:
+    name: Compile Aiken - ${{ matrix.example }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        example: ${{ fromJson(inputs.examples) }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Aiken
+        uses: ./.github/actions/setup-aiken
+        with:
+          aiken-version: ${{ inputs.aiken-version }}
+          cache-version: ${{ inputs.cache-version }}
+
+      - name: Cache per-example build directory
+        uses: actions/cache@v4
+        with:
+          path: ${{ matrix.example }}/onchain/aiken/build
+          key: aiken-build-${{ matrix.example }}-${{ hashFiles(format('{0}/onchain/aiken/aiken.toml', matrix.example)) }}
+
+      - name: Run aiken check and build
+        working-directory: ${{ matrix.example }}/onchain/aiken
+        env:
+          EXAMPLE: ${{ matrix.example }}
+        run: |
+          aiken --version
+          aiken check
+          aiken build
+
+      - name: Verify plutus.json generated
+        env:
+          EXAMPLE: ${{ matrix.example }}
+        run: |
+          PJ="${EXAMPLE}/onchain/aiken/plutus.json"
+          if [ ! -f "$PJ" ]; then
+            echo "::error::plutus.json not generated for $EXAMPLE"
+            exit 1
+          fi
+          echo "plutus.json generated ($(wc -c < "$PJ") bytes)"
+
+      - name: Upload plutus.json artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: plutus-${{ matrix.example }}
+          path: ${{ matrix.example }}/onchain/aiken/plutus.json
+          retention-days: 1
