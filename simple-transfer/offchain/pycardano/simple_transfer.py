@@ -13,11 +13,9 @@ Run against a local yaci-devkit instance:
 
 import json
 import os
-import tempfile
 import time
 from fractions import Fraction
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Dict, Union
 
 import requests as http_requests
