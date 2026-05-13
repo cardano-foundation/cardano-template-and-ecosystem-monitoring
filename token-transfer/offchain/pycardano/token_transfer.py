@@ -72,9 +72,12 @@ BLUEPRINT_PATH = (
     Path(__file__).resolve().parents[2] / "onchain" / "aiken" / "plutus.json"
 )
 
-# Always-true PlutusV3 minting policy (same as evolutionsdk reference).
-# This is a minimal valid CBOR-wrapped flat UPLC script that always succeeds.
-ALWAYS_TRUE_SCRIPT = PlutusV3Script(bytes.fromhex("46450101002499"))
+# Always-true PlutusV3 minting policy.
+# Reference SDKs use the double-CBOR form "46450101002499", which they pass
+# directly into tx witness CBOR. pycardano wraps its PlutusV3Script bytes once
+# during CBOR serialization, so we pass the single-CBOR form here so the
+# resulting witness has the same double-wrap the ledger expects.
+ALWAYS_TRUE_SCRIPT = PlutusV3Script(bytes.fromhex("450101002499"))
 
 
 # ---------------------------------------------------------------------------
@@ -374,6 +377,12 @@ def mint_tokens(
         Value(2_000_000, mint_multiasset),
     )
     builder.add_output(token_output)
+    # yaci-devkit short epochs: pin validity tightly around the current tip so
+    # script evaluation can resolve slot→time arithmetic without crossing the
+    # unannounced era horizon.
+    tip = ctx.last_block_slot
+    builder.validity_start = max(0, tip - 5)
+    builder.ttl = tip + 60
     tx = builder.build_and_sign(
         signing_keys=[fresh_skey],
         change_address=fresh_addr,
@@ -486,10 +495,13 @@ def unlock_tokens(
     )
     # Validator checks receiver VKH is in tx.extra_signatories
     builder.required_signers = [fresh_addr.payment_part]
+    # Tight validity range to stay within yaci-devkit's foreseeable era horizon.
+    tip = ctx.last_block_slot
+    builder.validity_start = max(0, tip - 5)
+    builder.ttl = tip + 60
     tx = builder.build_and_sign(
         signing_keys=[fresh_skey],
         change_address=fresh_addr,
-        auto_ttl_offset=300,
     )
     submit_and_confirm(ctx, tx, fresh_addr, "UNLOCK")
 
