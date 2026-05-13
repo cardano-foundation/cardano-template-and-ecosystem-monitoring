@@ -39,6 +39,7 @@ MESH_CORE_CSL=$(jq -r '.["@meshsdk/core-csl"]' "$VERSIONS_FILE")
 MESH_COMMON=$(jq -r '.["@meshsdk/common"]' "$VERSIONS_FILE")
 LUCID_VERSION=$(jq -r '.["@evolution-sdk/lucid"]' "$VERSIONS_FILE")
 CCL_VERSION=$(jq -r '.["cardano-client-lib"]' "$VERSIONS_FILE")
+PYCARDANO_VERSION=$(jq -r '.["pycardano"]' "$VERSIONS_FILE")
 
 if [ "$CHECK_MODE" = true ]; then
   echo "Checking version consistency against $VERSIONS_FILE"
@@ -53,6 +54,7 @@ echo "  @meshsdk/core-csl:     $MESH_CORE_CSL"
 echo "  @meshsdk/common:       $MESH_COMMON"
 echo "  @evolution-sdk/lucid:  $LUCID_VERSION"
 echo "  cardano-client-lib:    $CCL_VERSION"
+echo "  pycardano:             $PYCARDANO_VERSION"
 echo ""
 
 # ── Portable in-place sed ──────────────────────────────────────────────────────
@@ -222,6 +224,39 @@ while IFS= read -r -d '' java_file; do
   update_ccl_dep "$java_file" "cardano-client-lib"               "$CCL_VERSION"
   update_ccl_dep "$java_file" "cardano-client-backend-blockfrost" "$CCL_VERSION"
 done < <(find "$REPO_ROOT" -path "*/offchain/ccl-java/*.java" -print0 | sort -z)
+
+echo ""
+
+# ── 5. PyCardano requirements.txt files ────────────────────────────────────────
+echo "=== Updating PyCardano requirements.txt files ==="
+
+update_pypi_dep() {
+  local file="$1"
+  local pkg="$2"
+  local target_ver="$3"
+
+  if ! grep -qE "^${pkg}==" "$file" 2>/dev/null; then
+    return 0
+  fi
+
+  local current_ver
+  current_ver=$(grep -E "^${pkg}==" "$file" | head -1 | sed -E "s|^${pkg}==||" | tr -d '[:space:]')
+
+  if [ "$current_ver" = "$target_ver" ]; then
+    echo -e "  ${YELLOW}[SKIP]${NC}    ${pkg} already up to date in $(basename "$file") ($file)"
+  elif [ "$CHECK_MODE" = true ]; then
+    echo -e "  ${RED}[DRIFT]${NC}   ${pkg}: has '$current_ver', want '$target_ver' in $file"
+    DRIFTED_FILES+=("$file")
+  else
+    sed_inplace "$file" \
+      "s|^(${pkg}==).*$|\1${target_ver}|"
+    echo -e "  ${GREEN}[UPDATED]${NC} ${pkg} in $(basename "$file") ($file)"
+  fi
+}
+
+while IFS= read -r -d '' req_file; do
+  update_pypi_dep "$req_file" "pycardano" "$PYCARDANO_VERSION"
+done < <(find "$REPO_ROOT" -path "*/offchain/pycardano/requirements.txt" -print0 | sort -z)
 
 echo ""
 
