@@ -1,11 +1,11 @@
 {
-  "lastUpdated": "2026-05-13T11:52:41Z",
+  "lastUpdated": "2026-05-13T12:14:30Z",
   "testSummary": {
-    "total": 78,
-    "passed": 77,
-    "failed": 1,
+    "total": 84,
+    "passed": 78,
+    "failed": 6,
     "skipped": 0,
-    "successRate": 0.99
+    "successRate": 0.93
   },
   "frameworks": [
     {
@@ -77,11 +77,11 @@
       "aiken": "passed",
       "scalus": "passed",
       "ccl-java+aiken": "passed",
-      "ccl-java+scalus": "not-implemented",
+      "ccl-java+scalus": "failed",
       "meshjs+aiken": "passed",
-      "meshjs+scalus": "not-implemented",
+      "meshjs+scalus": "failed",
       "evolutionsdk+aiken": "passed",
-      "evolutionsdk+scalus": "not-implemented"
+      "evolutionsdk+scalus": "failed"
     },
     {
       "name": "bet",
@@ -133,7 +133,7 @@
       "scalus": "not-implemented",
       "ccl-java+aiken": "passed",
       "ccl-java+scalus": "not-implemented",
-      "meshjs+aiken": "passed",
+      "meshjs+aiken": "failed",
       "meshjs+scalus": "not-implemented",
       "evolutionsdk+aiken": "passed",
       "evolutionsdk+scalus": "not-implemented"
@@ -157,7 +157,7 @@
       "ccl-java+scalus": "not-implemented",
       "meshjs+aiken": "passed",
       "meshjs+scalus": "not-implemented",
-      "evolutionsdk+aiken": "failed",
+      "evolutionsdk+aiken": "passed",
       "evolutionsdk+scalus": "not-implemented"
     },
     {
@@ -165,11 +165,11 @@
       "aiken": "passed",
       "scalus": "passed",
       "ccl-java+aiken": "passed",
-      "ccl-java+scalus": "not-implemented",
+      "ccl-java+scalus": "passed",
       "meshjs+aiken": "passed",
-      "meshjs+scalus": "not-implemented",
+      "meshjs+scalus": "passed",
       "evolutionsdk+aiken": "passed",
-      "evolutionsdk+scalus": "not-implemented"
+      "evolutionsdk+scalus": "passed"
     },
     {
       "name": "pricebet",
@@ -179,7 +179,7 @@
       "ccl-java+scalus": "not-implemented",
       "meshjs+aiken": "passed",
       "meshjs+scalus": "not-implemented",
-      "evolutionsdk+aiken": "passed",
+      "evolutionsdk+aiken": "failed",
       "evolutionsdk+scalus": "not-implemented"
     },
     {
@@ -254,7 +254,7 @@
       "scalus": "not-implemented",
       "ccl-java+aiken": "passed",
       "ccl-java+scalus": "not-implemented",
-      "meshjs+aiken": "passed",
+      "meshjs+aiken": "failed",
       "meshjs+scalus": "not-implemented",
       "evolutionsdk+aiken": "passed",
       "evolutionsdk+scalus": "not-implemented"
