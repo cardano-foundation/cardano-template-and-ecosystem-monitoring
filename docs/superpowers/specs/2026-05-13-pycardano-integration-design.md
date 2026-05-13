@@ -21,23 +21,28 @@ framework in this repository, so that:
 
 ## Scope (pilot)
 
-This PR delivers PyCardano implementations for **five** use cases —
+This PR delivers PyCardano implementations for **four** use cases —
 chosen to exercise the breadth of PyCardano features without ballooning
 the change:
 
 | Use case          | Coverage                                                 |
 | ----------------- | -------------------------------------------------------- |
 | `simple-transfer` | Parameterised PlutusV3 spend; `apply_param_to_script`; single signer check. |
-| `simple-wallet`   | No on-chain; HD wallet derivation; balance + plain payment. |
 | `vesting`         | Inline datum; time-locked unlock; slot/time conversion. |
-| `htlc`            | Hash-preimage redeemer; timeout branch; validity intervals. |
-| `token-transfer`  | Minting policy + spend; `MultiAsset` value construction. |
+| `htlc`            | Hash-preimage redeemer; multi-branch (`Constr`); validity intervals. |
+| `token-transfer`  | Minting policy + parameterised spend; `MultiAsset` value construction. |
 
-Remaining 14 use cases (anonymous-data, atomic-transaction, auction,
+(An earlier draft of this spec listed `simple-wallet` as the fifth
+pilot. Closer reading shows the existing `simple-wallet` is a
+three-validator smart-contract wallet with intent minting — too large
+a scope for a runtime smoke-test. It moves to the follow-up batch.)
+
+Remaining 15 use cases (anonymous-data, atomic-transaction, auction,
 bet, crowdfund, decentralized-identity, escrow, factory, lottery,
-payment-splitter, pricebet, storage, upgradable-proxy, vault) are
-explicitly **out of scope** for this PR and will be added incrementally
-in follow-ups, gated on the pilot infrastructure landing first.
+payment-splitter, pricebet, simple-wallet, storage, upgradable-proxy,
+vault) are explicitly **out of scope** for this PR and will be added
+incrementally in follow-ups, gated on the pilot infrastructure landing
+first.
 
 ## Non-goals
 
@@ -243,12 +248,12 @@ For the CI scaffold:
 
 ## Acceptance criteria
 
-- The five pilot scripts run to completion against `yaci-devkit` and
+- The four pilot scripts run to completion against `yaci-devkit` and
   exit 0.
-- `bash scripts/local-test-discovery.sh` lists the five pycardano
+- `bash scripts/local-test-discovery.sh` lists the four pycardano
   examples under "PyCardano examples".
 - `bash scripts/generate-dashboard.sh` produces a `docs/dashboard.json`
-  with a `pycardano` status column populated for the five pilot use
+  with a `pycardano` status column populated for the four pilot use
   cases and `not-implemented` for the rest.
 - `bash scripts/sync-versions.sh --check` reports no drift after a fresh
   sync.
