@@ -10,7 +10,7 @@ For test:
 sbt test
 ```
 
-To generate plutus.json 
+To generate plutus.json:
 
 ```
 sbt run

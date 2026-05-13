@@ -8,6 +8,13 @@
       "statusPrefix": "aiken"
     },
     {
+      "id": "scalus",
+      "label": "Scalus",
+      "kind": "onchain",
+      "discoveryPath": "onchain/scalus/build.sbt",
+      "statusPrefix": "scalus"
+    },
+    {
       "id": "ccl-java",
       "label": "CCL Java",
       "kind": "offchain",

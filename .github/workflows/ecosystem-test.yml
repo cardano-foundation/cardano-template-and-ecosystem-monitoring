@@ -6,9 +6,22 @@ name: Cardano Ecosystem CI
 # upload/download artifact pattern — lives in reusable workflows under
 # .github/workflows/_*.yml and composite actions under .github/actions/.
 #
-# Adding a new framework usually means: an entry in frameworks.json
-# (picked up by the discovery script), plus a small `uses:` block here
-# pointing at one of the reusable workflows.
+# Off-chain tests run in a cross-product: each off-chain framework is tested
+# against every on-chain framework that has compiled a plutus.json artifact.
+# Artifact and log naming: plutus-<onchain>-<example> / logs-<prefix>-<onchain>-<example>
+# so the dashboard generator can correlate them automatically.
+#
+# Adding a new on-chain framework:
+#   1. Add it to frameworks.json (kind: onchain).
+#   2. Add a compile-<id> job below pointing at the right reusable compile workflow.
+#   3. Add test-<offchain>-vs-<id> blocks for each off-chain framework.
+#   4. Add the new onchain id to the compute-cross-matrix intersections.
+#   5. Add compile-<id> and test-*-vs-<id> to the report-and-dashboard needs list.
+#
+# Adding a new off-chain framework:
+#   1. Add it to frameworks.json (kind: offchain).
+#   2. Add test-<id>-vs-aiken and test-<id>-vs-scalus blocks below.
+#   3. Add those jobs to the report-and-dashboard needs list.
 
 on:
   push:
@@ -23,22 +36,24 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Bump CACHE_VERSION to invalidate every prepare-* cache in one shot — useful
-# when a transitive download (e.g. a yaci-devkit node binary) changes outside
-# the pinned npm version.
 env:
   AIKEN_VERSION: v1.1.21
+  SCALUS_JAVA_VERSION: '21'
   CACHE_VERSION: v1
 
 jobs:
+  # ───────────────────────────────────────────────────────────────────────────
+  # Discovery
+  # ───────────────────────────────────────────────────────────────────────────
   discover:
     name: Discover Examples
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      aiken-examples: ${{ steps.discovery.outputs.aiken-examples }}
-      ccl-examples: ${{ steps.discovery.outputs.ccl-examples }}
-      mesh-examples: ${{ steps.discovery.outputs.mesh-examples }}
+      aiken-examples:  ${{ steps.discovery.outputs.aiken-examples }}
+      scalus-examples: ${{ steps.discovery.outputs.scalus-examples }}
+      ccl-examples:    ${{ steps.discovery.outputs.ccl-examples }}
+      mesh-examples:   ${{ steps.discovery.outputs.mesh-examples }}
       evosdk-examples: ${{ steps.discovery.outputs.evosdk-examples }}
     steps:
       - name: Checkout repository
@@ -50,14 +65,38 @@ jobs:
           chmod +x scripts/local-test-discovery.sh
           scripts/local-test-discovery.sh
 
-  # ─────────────────────────────────────────────────────────────────────────
+  # ───────────────────────────────────────────────────────────────────────────
+  # Cross-matrix: compute offchain ∩ scalus for each off-chain framework
+  # ───────────────────────────────────────────────────────────────────────────
+  compute-cross-matrix:
+    name: Compute cross-product example lists
+    needs: discover
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      ccl-x-scalus:    ${{ steps.compute.outputs.ccl-x-scalus }}
+      mesh-x-scalus:   ${{ steps.compute.outputs.mesh-x-scalus }}
+      evosdk-x-scalus: ${{ steps.compute.outputs.evosdk-x-scalus }}
+    steps:
+      - name: Compute intersections
+        id: compute
+        env:
+          CCL:    ${{ needs.discover.outputs.ccl-examples }}
+          MESH:   ${{ needs.discover.outputs.mesh-examples }}
+          EVOSDK: ${{ needs.discover.outputs.evosdk-examples }}
+          SCALUS: ${{ needs.discover.outputs.scalus-examples }}
+        run: |
+          intersect() {
+            jq -n --argjson a "$1" --argjson b "$2" \
+              '[$a[] | . as $x | if ($b | index($x)) != null then $x else empty end]'
+          }
+          echo "ccl-x-scalus=$(intersect    "$CCL"    "$SCALUS")" >> "$GITHUB_OUTPUT"
+          echo "mesh-x-scalus=$(intersect   "$MESH"   "$SCALUS")" >> "$GITHUB_OUTPUT"
+          echo "evosdk-x-scalus=$(intersect "$EVOSDK" "$SCALUS")" >> "$GITHUB_OUTPUT"
+
+  # ───────────────────────────────────────────────────────────────────────────
   # Toolchain prepare
-  # Runs once per workflow run, warms the actions/cache for each toolchain
-  # the discovered examples will need. Downstream matrix jobs then hit the
-  # warm cache instead of each re-installing on cold cache (which would
-  # both waste time and risk GitHub API rate limits — aikup in particular
-  # fetches release metadata from the GitHub API).
-  # ─────────────────────────────────────────────────────────────────────────
+  # ───────────────────────────────────────────────────────────────────────────
   prepare-toolchains:
     name: Prepare toolchains
     needs: discover
@@ -72,6 +111,13 @@ jobs:
         uses: ./.github/actions/setup-aiken
         with:
           aiken-version: ${{ env.AIKEN_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+
+      - name: Setup SBT
+        if: needs.discover.outputs.scalus-examples != '[]'
+        uses: ./.github/actions/setup-sbt
+        with:
+          java-version: ${{ env.SCALUS_JAVA_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
 
       - name: Setup JBang + Java
@@ -90,87 +136,121 @@ jobs:
           start: 'false'
           cache-version: ${{ env.CACHE_VERSION }}
 
-  # ─────────────────────────────────────────────────────────────────────────
+  # ───────────────────────────────────────────────────────────────────────────
   # On-chain compile
-  # Delegates to .github/workflows/_compile-aiken.yml, which fans out across
-  # matrix entries and uploads each plutus.json as `plutus-<example>`.
-  # ─────────────────────────────────────────────────────────────────────────
+  # ───────────────────────────────────────────────────────────────────────────
   compile-aiken:
     needs: [discover, prepare-toolchains]
     if: needs.discover.outputs.aiken-examples != '[]'
     uses: ./.github/workflows/_compile-aiken.yml
     with:
-      examples: ${{ needs.discover.outputs.aiken-examples }}
+      examples:      ${{ needs.discover.outputs.aiken-examples }}
       aiken-version: v1.1.21
       cache-version: v1
 
-  # ─────────────────────────────────────────────────────────────────────────
-  # Off-chain tests
-  # Each framework is one block: a reusable workflow + a small inputs map.
-  # ─────────────────────────────────────────────────────────────────────────
-  test-ccl-java:
+  compile-scalus:
+    needs: [discover, prepare-toolchains]
+    if: needs.discover.outputs.scalus-examples != '[]'
+    uses: ./.github/workflows/_compile-scalus.yml
+    with:
+      examples:     ${{ needs.discover.outputs.scalus-examples }}
+      java-version: '21'
+      cache-version: v1
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Off-chain tests — Aiken on-chain
+  # ───────────────────────────────────────────────────────────────────────────
+  test-ccl-vs-aiken:
     needs: [discover, prepare-toolchains, compile-aiken]
     if: needs.discover.outputs.ccl-examples != '[]'
     uses: ./.github/workflows/_test-offchain-jbang.yml
     with:
-      framework-id: ccl-java
-      status-prefix: ccl
-      subdir: offchain/ccl-java
-      examples: ${{ needs.discover.outputs.ccl-examples }}
-      jdk-version: '24'
-      cache-version: v1
+      framework-id:      ccl-java
+      status-prefix:     ccl
+      subdir:            offchain/ccl-java
+      examples:          ${{ needs.discover.outputs.ccl-examples }}
+      onchain-framework: aiken
+      jdk-version:       '24'
+      cache-version:     v1
 
-  test-mesh:
+  test-mesh-vs-aiken:
     needs: [discover, prepare-toolchains, compile-aiken]
     if: needs.discover.outputs.mesh-examples != '[]'
     uses: ./.github/workflows/_test-offchain-deno.yml
     with:
-      framework-id: meshjs
-      status-prefix: mesh
-      subdir: offchain/meshjs
-      examples: ${{ needs.discover.outputs.mesh-examples }}
-      cache-version: v1
+      framework-id:      meshjs
+      status-prefix:     mesh
+      subdir:            offchain/meshjs
+      examples:          ${{ needs.discover.outputs.mesh-examples }}
+      onchain-framework: aiken
+      cache-version:     v1
 
-  test-evolutionsdk:
+  test-evosdk-vs-aiken:
     needs: [discover, prepare-toolchains, compile-aiken]
     if: needs.discover.outputs.evosdk-examples != '[]'
     uses: ./.github/workflows/_test-offchain-deno.yml
     with:
-      framework-id: evolutionsdk
-      status-prefix: evosdk
-      subdir: offchain/evolutionsdk
-      examples: ${{ needs.discover.outputs.evosdk-examples }}
-      cache-version: v1
+      framework-id:      evolutionsdk
+      status-prefix:     evosdk
+      subdir:            offchain/evolutionsdk
+      examples:          ${{ needs.discover.outputs.evosdk-examples }}
+      onchain-framework: aiken
+      cache-version:     v1
 
-  # ─────────────────────────────────────────────────────────────────────────
-  # ADDING A NEW FRAMEWORK
-  #
-  # The discovery script, dashboard generator, and dashboard HTML all read
-  # `frameworks.json`. The CI side needs only an entry below.
-  #
-  #   1. Add an entry to `frameworks.json` at the repo root:
-  #        { "id": "<id>", "label": "<Display Name>",
-  #          "kind": "onchain"|"offchain",
-  #          "discoveryPath": "onchain/<id>/<manifest>"  (or offchain/...),
-  #          "statusPrefix": "<short-prefix>" }
-  #
-  #   2. Add a `test-<id>` block below pointing at the right reusable:
-  #        - Deno-based (Mesh, Evolution SDK, …): _test-offchain-deno.yml
-  #        - JBang-based (CCL Java, …):           _test-offchain-jbang.yml
-  #        - New runtime class:                   add a new _test-offchain-*.yml
-  #                                               and a setup-* composite action.
-  #
-  #   3. (Optional) If the framework adds pinned libraries, update
-  #      versions.json and the corresponding sections in
-  #      scripts/sync-versions.sh + scripts/check-library-versions.sh.
-  #
-  # The reconstruct-status step in `report-and-dashboard` is generic (it
-  # scans every `logs-*` artifact), so no changes are needed there.
-  # ─────────────────────────────────────────────────────────────────────────
+  # ───────────────────────────────────────────────────────────────────────────
+  # Off-chain tests — Scalus on-chain (cross-check)
+  # ───────────────────────────────────────────────────────────────────────────
+  test-ccl-vs-scalus:
+    needs: [compute-cross-matrix, prepare-toolchains, compile-scalus]
+    if: needs.compute-cross-matrix.outputs.ccl-x-scalus != '[]'
+    uses: ./.github/workflows/_test-offchain-jbang.yml
+    with:
+      framework-id:      ccl-java
+      status-prefix:     ccl
+      subdir:            offchain/ccl-java
+      examples:          ${{ needs.compute-cross-matrix.outputs.ccl-x-scalus }}
+      onchain-framework: scalus
+      jdk-version:       '24'
+      cache-version:     v1
 
+  test-mesh-vs-scalus:
+    needs: [compute-cross-matrix, prepare-toolchains, compile-scalus]
+    if: needs.compute-cross-matrix.outputs.mesh-x-scalus != '[]'
+    uses: ./.github/workflows/_test-offchain-deno.yml
+    with:
+      framework-id:      meshjs
+      status-prefix:     mesh
+      subdir:            offchain/meshjs
+      examples:          ${{ needs.compute-cross-matrix.outputs.mesh-x-scalus }}
+      onchain-framework: scalus
+      cache-version:     v1
+
+  test-evosdk-vs-scalus:
+    needs: [compute-cross-matrix, prepare-toolchains, compile-scalus]
+    if: needs.compute-cross-matrix.outputs.evosdk-x-scalus != '[]'
+    uses: ./.github/workflows/_test-offchain-deno.yml
+    with:
+      framework-id:      evolutionsdk
+      status-prefix:     evosdk
+      subdir:            offchain/evolutionsdk
+      examples:          ${{ needs.compute-cross-matrix.outputs.evosdk-x-scalus }}
+      onchain-framework: scalus
+      cache-version:     v1
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Report & Dashboard
+  # ───────────────────────────────────────────────────────────────────────────
   report-and-dashboard:
     name: Report & Dashboard
-    needs: [compile-aiken, test-ccl-java, test-mesh, test-evolutionsdk]
+    needs:
+      - compile-aiken
+      - compile-scalus
+      - test-ccl-vs-aiken
+      - test-mesh-vs-aiken
+      - test-evosdk-vs-aiken
+      - test-ccl-vs-scalus
+      - test-mesh-vs-scalus
+      - test-evosdk-vs-scalus
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -194,25 +274,28 @@ jobs:
         run: |
           mkdir -p .local-test-results
 
+          # Onchain compile status: plutus-<onchain>-<example> → <onchain>-<example>-status.txt
           for d in artifacts/plutus-*/; do
             [ -d "$d" ] || continue
-            example=$(basename "$d" | sed 's/^plutus-//')
+            # Strip "plutus-" prefix → e.g. "aiken-payment-splitter" or "scalus-auction"
+            rest=$(basename "$d" | sed 's/^plutus-//')
             if [ -f "$d/plutus.json" ]; then
-              echo "success" > ".local-test-results/aiken-${example}-status.txt"
+              echo "success" > ".local-test-results/${rest}-status.txt"
             else
-              echo "failed" > ".local-test-results/aiken-${example}-status.txt"
+              echo "failed"  > ".local-test-results/${rest}-status.txt"
             fi
           done
 
-          # Helper: prefer test-status.txt (written by the test step from actual exit code).
-          # Fall back to grepping the log if status file is missing (e.g., step failed
-          # before writing it, or older artifacts from before this convention).
+          # Off-chain test status from logs-<prefix>-<onchain>-<example> artifacts.
+          # The example name is everything after "logs-<prefix>-", so it naturally
+          # becomes "<onchain>-<example>" which is what generate-dashboard.sh expects.
           resolve_status() {
             local prefix="$1" log_pattern="$2"
             for d in artifacts/logs-${prefix}-*/; do
               [ -d "$d" ] || continue
-              local example=$(basename "$d" | sed "s/^logs-${prefix}-//")
-              local out=".local-test-results/${prefix}-${example}-status.txt"
+              local rest
+              rest=$(basename "$d" | sed "s/^logs-${prefix}-//")
+              local out=".local-test-results/${prefix}-${rest}-status.txt"
               if [ -f "$d/test-status.txt" ]; then
                 cp "$d/test-status.txt" "$out"
               elif [ -f "$d/test-output.log" ] && grep -qE "$log_pattern" "$d/test-output.log" 2>/dev/null; then
@@ -231,7 +314,7 @@ jobs:
 
       - name: Generate markdown report
         env:
-          REPO: ${{ github.repository }}
+          REPO:   ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
         run: |
           echo "# Cardano Ecosystem Test Report" > report.md
@@ -241,14 +324,16 @@ jobs:
           echo "" >> report.md
           echo "## Summary" >> report.md
           echo "" >> report.md
-          AIKEN_COUNT=$(find artifacts -name "plutus-*" -type d 2>/dev/null | wc -l)
-          CCL_COUNT=$(find artifacts -name "logs-ccl-*" -type d 2>/dev/null | wc -l)
-          MESH_COUNT=$(find artifacts -name "logs-mesh-*" -type d 2>/dev/null | wc -l)
+          AIKEN_COUNT=$(find artifacts -name "plutus-aiken-*"  -type d 2>/dev/null | wc -l)
+          SCALUS_COUNT=$(find artifacts -name "plutus-scalus-*" -type d 2>/dev/null | wc -l)
+          CCL_COUNT=$(find artifacts -name "logs-ccl-*"    -type d 2>/dev/null | wc -l)
+          MESH_COUNT=$(find artifacts -name "logs-mesh-*"   -type d 2>/dev/null | wc -l)
           EVOSDK_COUNT=$(find artifacts -name "logs-evosdk-*" -type d 2>/dev/null | wc -l)
-          echo "- **Aiken Examples Compiled**: $AIKEN_COUNT" >> report.md
-          echo "- **CCL Java Tests**: $CCL_COUNT" >> report.md
-          echo "- **Mesh.js Tests**: $MESH_COUNT" >> report.md
-          echo "- **Evolution SDK Tests**: $EVOSDK_COUNT" >> report.md
+          echo "- **Aiken Examples Compiled**: $AIKEN_COUNT"   >> report.md
+          echo "- **Scalus Examples Compiled**: $SCALUS_COUNT" >> report.md
+          echo "- **CCL Java Tests**: $CCL_COUNT"              >> report.md
+          echo "- **Mesh.js Tests**: $MESH_COUNT"              >> report.md
+          echo "- **Evolution SDK Tests**: $EVOSDK_COUNT"      >> report.md
           echo "" >> report.md
           echo "All test logs and build artifacts are available in the workflow artifacts." >> report.md
 
@@ -306,16 +391,12 @@ jobs:
             exit 0
           fi
 
-          # dashboard.json carries a `lastUpdated` timestamp that bumps on every
-          # run, so a plain `git diff` always reports a change. Compare the
-          # *content-without-lastUpdated* against HEAD's version and only
-          # commit when something meaningful actually changed.
           CURR=$(jq -S 'del(.lastUpdated)' docs/dashboard.json)
           PREV=$(git show HEAD:docs/dashboard.json 2>/dev/null \
                    | jq -S 'del(.lastUpdated)' 2>/dev/null || echo '')
 
           if [ "$CURR" = "$PREV" ]; then
-            echo "No meaningful changes to dashboard.json (only timestamp differs) — skipping commit"
+            echo "No meaningful changes to dashboard.json — skipping commit"
             exit 0
           fi
 
