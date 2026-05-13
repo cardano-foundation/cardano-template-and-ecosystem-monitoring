@@ -87,7 +87,7 @@ jobs:
           SCALUS: ${{ needs.discover.outputs.scalus-examples }}
         run: |
           intersect() {
-            jq -n --argjson a "$1" --argjson b "$2" \
+            jq -cn --argjson a "$1" --argjson b "$2" \
               '[$a[] | . as $x | if ($b | index($x)) != null then $x else empty end]'
           }
           echo "ccl-x-scalus=$(intersect    "$CCL"    "$SCALUS")" >> "$GITHUB_OUTPUT"
