@@ -1,11 +1,11 @@
 {
-  "lastUpdated": "2026-05-13T11:41:55Z",
+  "lastUpdated": "2026-05-13T12:20:13Z",
   "testSummary": {
     "total": 76,
-    "passed": 75,
-    "failed": 1,
+    "passed": 73,
+    "failed": 3,
     "skipped": 0,
-    "successRate": 0.99
+    "successRate": 0.96
   },
   "frameworks": [
     {
@@ -48,7 +48,7 @@
       "aiken": "passed",
       "ccl-java": "passed",
       "meshjs": "passed",
-      "evolutionsdk": "passed",
+      "evolutionsdk": "failed",
       "pycardano": "not-implemented"
     },
     {
@@ -104,7 +104,7 @@
       "aiken": "passed",
       "ccl-java": "passed",
       "meshjs": "passed",
-      "evolutionsdk": "passed",
+      "evolutionsdk": "failed",
       "pycardano": "not-implemented"
     },
     {
@@ -112,7 +112,7 @@
       "aiken": "passed",
       "ccl-java": "passed",
       "meshjs": "passed",
-      "evolutionsdk": "failed",
+      "evolutionsdk": "passed",
       "pycardano": "not-implemented"
     },
     {
@@ -184,7 +184,7 @@
       "aiken": "passed",
       "ccl-java": "passed",
       "meshjs": "passed",
-      "evolutionsdk": "passed",
+      "evolutionsdk": "failed",
       "pycardano": "not-implemented"
     }
   ],
