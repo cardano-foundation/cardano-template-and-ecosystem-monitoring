@@ -22,7 +22,12 @@ inputs:
   ready-timeout-tries:
     description: 'Number of 5-second poll attempts while waiting for readiness.'
     required: false
-    default: '30'
+    default: '60'
+  ready-min-block-height:
+    description: 'Minimum block height required before declaring readiness. Ensures
+      the chain has advanced past genesis so funder UTxOs and chain time are usable.'
+    required: false
+    default: '2'
 
 runs:
   using: composite
@@ -62,14 +67,67 @@ runs:
     - name: Wait for Yaci DevKit
       if: inputs.start == 'true'
       shell: bash
+      env:
+        PORT: ${{ inputs.ready-port }}
+        TRIES: ${{ inputs.ready-timeout-tries }}
+        MIN_HEIGHT: ${{ inputs.ready-min-block-height }}
       run: |
-        for i in $(seq 1 ${{ inputs.ready-timeout-tries }}); do
-          if nc -z localhost ${{ inputs.ready-port }}; then
-            echo "✅ Yaci DevKit ready after $i poll(s)"
-            exit 0
+        # Readiness has three phases. A bare TCP check is not enough: yaci-devkit
+        # opens :8080 well before yaci-store has indexed protocol params and
+        # before the chain has produced its first non-genesis block. Off-chain
+        # tests then hit half-populated endpoints — protocol params with null
+        # fields (BigInt(undefined) crash), empty funder UTxO sets
+        # (InputSelectionError), or stale chain time (Plutus validity-range
+        # failures). Each phase below maps to one of those observed failure
+        # modes; bypassing any of them re-introduces the flake.
+        API="http://localhost:${PORT}/api/v1"
+
+        echo "── Phase 1: TCP socket on :${PORT} ──"
+        for i in $(seq 1 "$TRIES"); do
+          if nc -z localhost "$PORT"; then
+            echo "TCP open after ${i} poll(s)"
+            break
+          fi
+          if [ "$i" -eq "$TRIES" ]; then
+            echo "❌ TCP socket never opened"
+            tail -100 yaci-devkit.log || true
+            exit 1
           fi
           sleep 5
         done
-        echo "❌ Yaci DevKit did not become ready in time"
-        tail -50 yaci-devkit.log || true
-        exit 1
+
+        echo "── Phase 2: chain producing blocks (height ≥ ${MIN_HEIGHT}) ──"
+        for i in $(seq 1 "$TRIES"); do
+          BODY=$(curl -fsS "${API}/blocks/latest" 2>/dev/null || true)
+          HEIGHT=$(printf '%s' "$BODY" | jq -r '.height // 0' 2>/dev/null || echo 0)
+          if [ -n "$HEIGHT" ] && [ "$HEIGHT" -ge "$MIN_HEIGHT" ] 2>/dev/null; then
+            echo "Chain at height ${HEIGHT} after ${i} poll(s)"
+            break
+          fi
+          if [ "$i" -eq "$TRIES" ]; then
+            echo "❌ Chain never reached height ${MIN_HEIGHT}. Last body: ${BODY}"
+            tail -100 yaci-devkit.log || true
+            exit 1
+          fi
+          sleep 5
+        done
+
+        echo "── Phase 3: protocol parameters fully populated ──"
+        # key_deposit is the field that has caused the Evolution SDK BigInt
+        # crash. If it's present and numeric, the rest of the param block has
+        # been indexed too.
+        for i in $(seq 1 "$TRIES"); do
+          BODY=$(curl -fsS "${API}/epochs/latest/parameters" 2>/dev/null || true)
+          KD=$(printf '%s' "$BODY" | jq -r '.key_deposit // empty' 2>/dev/null || true)
+          if [ -n "$KD" ] && [ "$KD" != "null" ]; then
+            echo "Protocol params indexed (key_deposit=${KD}) after ${i} poll(s)"
+            echo "✅ Yaci DevKit fully ready"
+            exit 0
+          fi
+          if [ "$i" -eq "$TRIES" ]; then
+            echo "❌ Protocol params never populated. Last body: ${BODY}"
+            tail -100 yaci-devkit.log || true
+            exit 1
+          fi
+          sleep 5
+        done

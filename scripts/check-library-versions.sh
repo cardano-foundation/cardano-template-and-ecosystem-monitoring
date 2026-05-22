@@ -39,6 +39,7 @@ PINNED_MESH_CORE_CSL=$(jq -r '.["@meshsdk/core-csl"]'     "$VERSIONS_FILE")
 PINNED_MESH_COMMON=$(jq -r '.["@meshsdk/common"]'         "$VERSIONS_FILE")
 PINNED_LUCID=$(jq -r '.["@evolution-sdk/lucid"]'          "$VERSIONS_FILE")
 PINNED_CCL=$(jq -r '.["cardano-client-lib"]'              "$VERSIONS_FILE")
+PINNED_PYCARDANO=$(jq -r '.["pycardano"]'                "$VERSIONS_FILE")
 
 echo -e "${BLUE}Checking upstream versions against $VERSIONS_FILE${NC}"
 echo ""
@@ -75,6 +76,25 @@ fetch_npm_latest() {
 
   local ver
   ver=$(printf '%s' "$response" | jq -r '.version // empty' 2>/dev/null) || true
+
+  if [ -z "$ver" ] || [ "$ver" = "null" ]; then
+    echo "unknown"
+  else
+    echo "$ver"
+  fi
+}
+
+# ── PyPI registry helper ────────────────────────────────────────────────────────
+# Usage: fetch_pypi_latest <package>
+# Prints the latest version string, or "unknown" on failure.
+fetch_pypi_latest() {
+  local pkg="$1"
+  local response
+  response=$(curl -s --max-time 10 \
+    "https://pypi.org/pypi/${pkg}/json" 2>/dev/null) || true
+
+  local ver
+  ver=$(printf '%s' "$response" | jq -r '.info.version // empty' 2>/dev/null) || true
 
   if [ -z "$ver" ] || [ "$ver" = "null" ]; then
     echo "unknown"
@@ -178,12 +198,13 @@ LATEST_MESH_CORE_CSL=$(fetch_npm_latest "@meshsdk/core-csl")
 LATEST_MESH_COMMON=$(fetch_npm_latest "@meshsdk/common")
 LATEST_LUCID=$(fetch_npm_latest "@evolution-sdk/lucid")
 LATEST_CCL=$(fetch_maven_latest "com/bloxbean/cardano" "cardano-client-lib")
+LATEST_PYCARDANO=$(fetch_pypi_latest "pycardano")
 
 echo ""
 
 # ── Compare and build report data ───────────────────────────────────────────────
 OUTDATED_COUNT=0
-TOTAL_COUNT=8
+TOTAL_COUNT=9
 HAS_MAJOR=false
 
 # compare_entry <name> <pinned> <latest>
@@ -251,6 +272,9 @@ ENTRY_LUCID="$ENTRY_JSON"
 compare_entry "cardano-client-lib"  "$PINNED_CCL"             "$LATEST_CCL"
 ENTRY_CCL="$ENTRY_JSON"
 
+compare_entry "pycardano"            "$PINNED_PYCARDANO"       "$LATEST_PYCARDANO"
+ENTRY_PYCARDANO="$ENTRY_JSON"
+
 echo ""
 
 UP_TO_DATE_COUNT=$((TOTAL_COUNT - OUTDATED_COUNT))
@@ -270,7 +294,8 @@ cat > "$JSON_FILE" <<EOF
     ${ENTRY_MESH_CORE_CSL},
     ${ENTRY_MESH_COMMON},
     ${ENTRY_LUCID},
-    ${ENTRY_CCL}
+    ${ENTRY_CCL},
+    ${ENTRY_PYCARDANO}
   },
   "summary": {
     "total": ${TOTAL_COUNT},
@@ -327,6 +352,7 @@ MD_FILE="$RESULTS_DIR/version-report.md"
   print_md_row "@meshsdk/common"      "$PINNED_MESH_COMMON"     "$LATEST_MESH_COMMON"
   print_md_row "@evolution-sdk/lucid" "$PINNED_LUCID"           "$LATEST_LUCID"
   print_md_row "cardano-client-lib"   "$PINNED_CCL"             "$LATEST_CCL"
+  print_md_row "pycardano"            "$PINNED_PYCARDANO"       "$LATEST_PYCARDANO"
 
   echo ""
   echo "---"

@@ -55,6 +55,7 @@ jobs:
       ccl-examples:    ${{ steps.discovery.outputs.ccl-examples }}
       mesh-examples:   ${{ steps.discovery.outputs.mesh-examples }}
       evosdk-examples: ${{ steps.discovery.outputs.evosdk-examples }}
+      pycardano-examples: ${{ steps.discovery.outputs.pycardano-examples }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -130,7 +131,8 @@ jobs:
         if: |
           needs.discover.outputs.ccl-examples != '[]' ||
           needs.discover.outputs.mesh-examples != '[]' ||
-          needs.discover.outputs.evosdk-examples != '[]'
+          needs.discover.outputs.evosdk-examples != '[]' ||
+          needs.discover.outputs.pycardano-examples != '[]'
         uses: ./.github/actions/setup-yaci-devkit
         with:
           start: 'false'
@@ -197,6 +199,18 @@ jobs:
       onchain-framework: aiken
       cache-version:     v1
 
+  test-pycardano:
+    needs: [discover, prepare-toolchains, compile-aiken]
+    if: needs.discover.outputs.pycardano-examples != '[]'
+    uses: ./.github/workflows/_test-offchain-python.yml
+    with:
+      framework-id:      pycardano
+      status-prefix:     pycardano
+      subdir:            offchain/pycardano
+      examples:          ${{ needs.discover.outputs.pycardano-examples }}
+      onchain-framework: aiken
+      cache-version:     v1
+
   # ───────────────────────────────────────────────────────────────────────────
   # Off-chain tests — Scalus on-chain (cross-check)
   # ───────────────────────────────────────────────────────────────────────────
@@ -248,6 +262,7 @@ jobs:
       - test-ccl-vs-aiken
       - test-mesh-vs-aiken
       - test-evosdk-vs-aiken
+      - test-pycardano
       - test-ccl-vs-scalus
       - test-mesh-vs-scalus
       - test-evosdk-vs-scalus
@@ -308,9 +323,10 @@ jobs:
             done
           }
 
-          resolve_status ccl    "AssertionError|BUILD FAILED|Exception in thread"
-          resolve_status mesh   "Uncaught|AssertionError|TypeError:|ReferenceError:|SyntaxError:|^error:"
-          resolve_status evosdk "Uncaught|AssertionError|TypeError:|ReferenceError:|SyntaxError:|^error:"
+          resolve_status ccl       "AssertionError|BUILD FAILED|Exception in thread"
+          resolve_status mesh      "Uncaught|AssertionError|TypeError:|ReferenceError:|SyntaxError:|^error:"
+          resolve_status evosdk    "Uncaught|AssertionError|TypeError:|ReferenceError:|SyntaxError:|^error:"
+          resolve_status pycardano "Traceback|Error:|Exception:"
 
       - name: Generate markdown report
         env:
@@ -329,11 +345,13 @@ jobs:
           CCL_COUNT=$(find artifacts -name "logs-ccl-*"    -type d 2>/dev/null | wc -l)
           MESH_COUNT=$(find artifacts -name "logs-mesh-*"   -type d 2>/dev/null | wc -l)
           EVOSDK_COUNT=$(find artifacts -name "logs-evosdk-*" -type d 2>/dev/null | wc -l)
+          PYCARDANO_COUNT=$(find artifacts -name "logs-pycardano-*" -type d 2>/dev/null | wc -l)
           echo "- **Aiken Examples Compiled**: $AIKEN_COUNT"   >> report.md
           echo "- **Scalus Examples Compiled**: $SCALUS_COUNT" >> report.md
           echo "- **CCL Java Tests**: $CCL_COUNT"              >> report.md
           echo "- **Mesh.js Tests**: $MESH_COUNT"              >> report.md
           echo "- **Evolution SDK Tests**: $EVOSDK_COUNT"      >> report.md
+          echo "- **PyCardano Tests**: $PYCARDANO_COUNT"       >> report.md
           echo "" >> report.md
           echo "All test logs and build artifacts are available in the workflow artifacts." >> report.md
 
