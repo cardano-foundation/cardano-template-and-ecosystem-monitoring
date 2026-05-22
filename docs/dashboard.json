@@ -1,11 +1,11 @@
 {
-  "lastUpdated": "2026-05-13T12:20:13Z",
+  "lastUpdated": "2026-05-22T11:30:36Z",
   "testSummary": {
-    "total": 76,
-    "passed": 73,
+    "total": 57,
+    "passed": 54,
     "failed": 3,
     "skipped": 0,
-    "successRate": 0.96
+    "successRate": 0.95
   },
   "frameworks": [
     {
@@ -37,7 +37,7 @@
   "useCases": [
     {
       "name": "anonymous-data",
-      "aiken": "passed",
+      "aiken": "not-implemented",
       "ccl-java": "passed",
       "meshjs": "passed",
       "evolutionsdk": "passed",
@@ -45,7 +45,7 @@
     },
     {
       "name": "atomic-transaction",
-      "aiken": "passed",
+      "aiken": "not-implemented",
       "ccl-java": "passed",
       "meshjs": "passed",
       "evolutionsdk": "failed",
@@ -53,7 +53,7 @@
     },
     {
       "name": "auction",
-      "aiken": "passed",
+      "aiken": "not-implemented",
       "ccl-java": "passed",
       "meshjs": "passed",
       "evolutionsdk": "passed",
@@ -61,7 +61,7 @@
     },
     {
       "name": "bet",
-      "aiken": "passed",
+      "aiken": "not-implemented",
       "ccl-java": "passed",
       "meshjs": "passed",
       "evolutionsdk": "passed",
@@ -69,7 +69,7 @@
     },
     {
       "name": "crowdfund",
-      "aiken": "passed",
+      "aiken": "not-implemented",
       "ccl-java": "passed",
       "meshjs": "passed",
       "evolutionsdk": "passed",
@@ -77,7 +77,7 @@
     },
     {
       "name": "decentralized-identity",
-      "aiken": "passed",
+      "aiken": "not-implemented",
       "ccl-java": "passed",
       "meshjs": "passed",
       "evolutionsdk": "passed",
@@ -85,7 +85,7 @@
     },
     {
       "name": "escrow",
-      "aiken": "passed",
+      "aiken": "not-implemented",
       "ccl-java": "passed",
       "meshjs": "passed",
       "evolutionsdk": "passed",
@@ -93,7 +93,7 @@
     },
     {
       "name": "factory",
-      "aiken": "passed",
+      "aiken": "not-implemented",
       "ccl-java": "passed",
       "meshjs": "passed",
       "evolutionsdk": "passed",
@@ -101,7 +101,7 @@
     },
     {
       "name": "htlc",
-      "aiken": "passed",
+      "aiken": "not-implemented",
       "ccl-java": "passed",
       "meshjs": "passed",
       "evolutionsdk": "failed",
@@ -109,7 +109,7 @@
     },
     {
       "name": "lottery",
-      "aiken": "passed",
+      "aiken": "not-implemented",
       "ccl-java": "passed",
       "meshjs": "passed",
       "evolutionsdk": "passed",
@@ -117,7 +117,7 @@
     },
     {
       "name": "payment-splitter",
-      "aiken": "passed",
+      "aiken": "not-implemented",
       "ccl-java": "passed",
       "meshjs": "passed",
       "evolutionsdk": "passed",
@@ -125,7 +125,7 @@
     },
     {
       "name": "pricebet",
-      "aiken": "passed",
+      "aiken": "not-implemented",
       "ccl-java": "passed",
       "meshjs": "passed",
       "evolutionsdk": "passed",
@@ -133,7 +133,7 @@
     },
     {
       "name": "simple-transfer",
-      "aiken": "passed",
+      "aiken": "not-implemented",
       "ccl-java": "passed",
       "meshjs": "passed",
       "evolutionsdk": "passed",
@@ -141,7 +141,7 @@
     },
     {
       "name": "simple-wallet",
-      "aiken": "passed",
+      "aiken": "not-implemented",
       "ccl-java": "passed",
       "meshjs": "passed",
       "evolutionsdk": "passed",
@@ -149,7 +149,7 @@
     },
     {
       "name": "storage",
-      "aiken": "passed",
+      "aiken": "not-implemented",
       "ccl-java": "passed",
       "meshjs": "passed",
       "evolutionsdk": "passed",
@@ -157,7 +157,7 @@
     },
     {
       "name": "token-transfer",
-      "aiken": "passed",
+      "aiken": "not-implemented",
       "ccl-java": "passed",
       "meshjs": "passed",
       "evolutionsdk": "passed",
@@ -165,7 +165,7 @@
     },
     {
       "name": "upgradable-proxy",
-      "aiken": "passed",
+      "aiken": "not-implemented",
       "ccl-java": "passed",
       "meshjs": "passed",
       "evolutionsdk": "passed",
@@ -173,7 +173,7 @@
     },
     {
       "name": "vault",
-      "aiken": "passed",
+      "aiken": "not-implemented",
       "ccl-java": "passed",
       "meshjs": "passed",
       "evolutionsdk": "passed",
@@ -181,7 +181,7 @@
     },
     {
       "name": "vesting",
-      "aiken": "passed",
+      "aiken": "not-implemented",
       "ccl-java": "passed",
       "meshjs": "passed",
       "evolutionsdk": "failed",
@@ -201,16 +201,21 @@
       "pycardano": "0.19.2"
     },
     "latest": {
-      "aiken-compiler": "v1.1.21",
+      "aiken-compiler": "v1.1.22",
       "aiken-lang/stdlib": "v3.1.0",
       "sidan-lab/vodka": "0.1.23",
-      "@meshsdk/core": "1.9.0-beta.102",
-      "@meshsdk/core-csl": "1.9.0-beta.102",
-      "@meshsdk/common": "1.9.0-beta.102",
+      "@meshsdk/core": "1.9.0-beta.103",
+      "@meshsdk/core-csl": "1.9.0-beta.103",
+      "@meshsdk/common": "1.9.0-beta.103",
       "@evolution-sdk/lucid": "2.0.1",
       "cardano-client-lib": "0.8.0-pre4",
       "pycardano": "0.19.2"
     },
-    "outdated": []
+    "outdated": [
+      "aiken-compiler",
+      "@meshsdk/core",
+      "@meshsdk/core-csl",
+      "@meshsdk/common"
+    ]
   }
 }
