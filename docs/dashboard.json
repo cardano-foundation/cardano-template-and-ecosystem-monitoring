@@ -1,11 +1,11 @@
 {
-  "lastUpdated": "2026-05-22T11:37:12Z",
+  "lastUpdated": "2026-05-22T11:41:50Z",
   "testSummary": {
     "total": 76,
-    "passed": 75,
-    "failed": 1,
+    "passed": 76,
+    "failed": 0,
     "skipped": 0,
-    "successRate": 0.99
+    "successRate": 1.00
   },
   "frameworks": [
     {
@@ -183,7 +183,7 @@
       "name": "vesting",
       "aiken": "passed",
       "ccl-java": "passed",
-      "meshjs": "failed",
+      "meshjs": "passed",
       "evolutionsdk": "passed",
       "pycardano": "not-implemented"
     }
