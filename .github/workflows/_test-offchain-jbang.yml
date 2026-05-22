@@ -78,11 +78,22 @@ jobs:
           SUBDIR: ${{ inputs.subdir }}
         run: |
           JAVA_FILE=$(ls *.java | head -1)
-          echo "Running jbang on $EXAMPLE/$SUBDIR/$JAVA_FILE"
-          set +e
-          timeout 300 jbang "$JAVA_FILE" 2>&1 | tee test-output.log
-          EXIT=${PIPESTATUS[0]}
-          set -e
+          # Retry once with a 15s pause. Same rationale as the Deno variant:
+          # mempool/indexer gaps and tx propagation can flake even after
+          # yaci-devkit's readiness probe passes.
+          EXIT=1
+          for ATTEMPT in 1 2; do
+            echo "Running jbang on $EXAMPLE/$SUBDIR/$JAVA_FILE (attempt $ATTEMPT/2)"
+            set +e
+            timeout 300 jbang "$JAVA_FILE" 2>&1 | tee test-output.log
+            EXIT=${PIPESTATUS[0]}
+            set -e
+            if [ "$EXIT" -eq 0 ]; then break; fi
+            if [ "$ATTEMPT" -eq 1 ]; then
+              echo "::warning::$EXAMPLE attempt $ATTEMPT failed with exit $EXIT — retrying after 15s"
+              sleep 15
+            fi
+          done
           if [ "$EXIT" -eq 0 ]; then echo success > test-status.txt; else echo failed > test-status.txt; fi
           exit "$EXIT"
 

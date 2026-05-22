@@ -67,11 +67,23 @@ jobs:
           SUBDIR: ${{ inputs.subdir }}
         run: |
           TS_FILE=$(ls *.ts | head -1)
-          echo "Running deno on $EXAMPLE/$SUBDIR/$TS_FILE"
-          set +e
-          timeout 300 deno run --allow-all "$TS_FILE" 2>&1 | tee test-output.log
-          EXIT=${PIPESTATUS[0]}
-          set -e
+          # Retry once with a 15s pause. Yaci's readiness probe covers the
+          # bulk of startup flake, but tx submission can still hit short-lived
+          # mempool/indexer gaps. test-output.log captures the last attempt's
+          # output so the dashboard reflects the result we report.
+          EXIT=1
+          for ATTEMPT in 1 2; do
+            echo "Running deno on $EXAMPLE/$SUBDIR/$TS_FILE (attempt $ATTEMPT/2)"
+            set +e
+            timeout 300 deno run --allow-all "$TS_FILE" 2>&1 | tee test-output.log
+            EXIT=${PIPESTATUS[0]}
+            set -e
+            if [ "$EXIT" -eq 0 ]; then break; fi
+            if [ "$ATTEMPT" -eq 1 ]; then
+              echo "::warning::$EXAMPLE attempt $ATTEMPT failed with exit $EXIT — retrying after 15s"
+              sleep 15
+            fi
+          done
           if [ "$EXIT" -eq 0 ]; then echo success > test-status.txt; else echo failed > test-status.txt; fi
           exit "$EXIT"
 
