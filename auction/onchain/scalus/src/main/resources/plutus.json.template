@@ -11,6 +11,17 @@
   },
   "validators": [
     {
+      "title": "auction.mint",
+      "redeemer": {
+        "title": "_redeemer",
+        "schema": {
+          "$ref": "#/definitions/Action"
+        }
+      },
+      "compiledCode": "$compiledCode",
+      "hash": "$hash"
+    },
+    {
       "title": "auction.spend",
       "datum": {
         "title": "_datum",

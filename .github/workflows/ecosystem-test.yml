@@ -75,25 +75,28 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      ccl-x-scalus:    ${{ steps.compute.outputs.ccl-x-scalus }}
-      mesh-x-scalus:   ${{ steps.compute.outputs.mesh-x-scalus }}
-      evosdk-x-scalus: ${{ steps.compute.outputs.evosdk-x-scalus }}
+      ccl-x-scalus:       ${{ steps.compute.outputs.ccl-x-scalus }}
+      mesh-x-scalus:      ${{ steps.compute.outputs.mesh-x-scalus }}
+      evosdk-x-scalus:    ${{ steps.compute.outputs.evosdk-x-scalus }}
+      pycardano-x-scalus: ${{ steps.compute.outputs.pycardano-x-scalus }}
     steps:
       - name: Compute intersections
         id: compute
         env:
-          CCL:    ${{ needs.discover.outputs.ccl-examples }}
-          MESH:   ${{ needs.discover.outputs.mesh-examples }}
-          EVOSDK: ${{ needs.discover.outputs.evosdk-examples }}
-          SCALUS: ${{ needs.discover.outputs.scalus-examples }}
+          CCL:       ${{ needs.discover.outputs.ccl-examples }}
+          MESH:      ${{ needs.discover.outputs.mesh-examples }}
+          EVOSDK:    ${{ needs.discover.outputs.evosdk-examples }}
+          PYCARDANO: ${{ needs.discover.outputs.pycardano-examples }}
+          SCALUS:    ${{ needs.discover.outputs.scalus-examples }}
         run: |
           intersect() {
             jq -cn --argjson a "$1" --argjson b "$2" \
               '[$a[] | . as $x | if ($b | index($x)) != null then $x else empty end]'
           }
-          echo "ccl-x-scalus=$(intersect    "$CCL"    "$SCALUS")" >> "$GITHUB_OUTPUT"
-          echo "mesh-x-scalus=$(intersect   "$MESH"   "$SCALUS")" >> "$GITHUB_OUTPUT"
-          echo "evosdk-x-scalus=$(intersect "$EVOSDK" "$SCALUS")" >> "$GITHUB_OUTPUT"
+          echo "ccl-x-scalus=$(intersect       "$CCL"       "$SCALUS")" >> "$GITHUB_OUTPUT"
+          echo "mesh-x-scalus=$(intersect      "$MESH"      "$SCALUS")" >> "$GITHUB_OUTPUT"
+          echo "evosdk-x-scalus=$(intersect    "$EVOSDK"    "$SCALUS")" >> "$GITHUB_OUTPUT"
+          echo "pycardano-x-scalus=$(intersect "$PYCARDANO" "$SCALUS")" >> "$GITHUB_OUTPUT"
 
   # ───────────────────────────────────────────────────────────────────────────
   # Toolchain prepare
@@ -199,7 +202,7 @@ jobs:
       onchain-framework: aiken
       cache-version:     v1
 
-  test-pycardano:
+  test-pycardano-vs-aiken:
     needs: [discover, prepare-toolchains, compile-aiken]
     if: needs.discover.outputs.pycardano-examples != '[]'
     uses: ./.github/workflows/_test-offchain-python.yml
@@ -251,6 +254,18 @@ jobs:
       onchain-framework: scalus
       cache-version:     v1
 
+  test-pycardano-vs-scalus:
+    needs: [compute-cross-matrix, prepare-toolchains, compile-scalus]
+    if: needs.compute-cross-matrix.outputs.pycardano-x-scalus != '[]'
+    uses: ./.github/workflows/_test-offchain-python.yml
+    with:
+      framework-id:      pycardano
+      status-prefix:     pycardano
+      subdir:            offchain/pycardano
+      examples:          ${{ needs.compute-cross-matrix.outputs.pycardano-x-scalus }}
+      onchain-framework: scalus
+      cache-version:     v1
+
   # ───────────────────────────────────────────────────────────────────────────
   # Report & Dashboard
   # ───────────────────────────────────────────────────────────────────────────
@@ -262,10 +277,11 @@ jobs:
       - test-ccl-vs-aiken
       - test-mesh-vs-aiken
       - test-evosdk-vs-aiken
-      - test-pycardano
+      - test-pycardano-vs-aiken
       - test-ccl-vs-scalus
       - test-mesh-vs-scalus
       - test-evosdk-vs-scalus
+      - test-pycardano-vs-scalus
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10

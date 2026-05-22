@@ -572,6 +572,48 @@
       font-weight: 500;
     }
 
+    /* Supported Frameworks chips — driven entirely from data.technologies
+       so adding an entry to frameworks.json shows up here automatically. */
+    .tech-strip {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 6px;
+    }
+
+    .tech-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-light);
+      border-radius: 999px;
+      padding: 5px 12px;
+      font-size: 0.8rem;
+      color: var(--text);
+      transition: border-color 0.15s ease, transform 0.15s ease;
+    }
+
+    .tech-chip:hover { border-color: var(--accent-light); transform: translateY(-1px); }
+
+    .tech-chip .kind-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .tech-chip .kind-dot.onchain  { background: var(--accent-light); }
+    .tech-chip .kind-dot.offchain { background: var(--purple); }
+
+    .tech-chip .kind-tag {
+      font-size: 0.65rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      margin-left: 2px;
+    }
+
     /* Outdated banner */
     #outdated-banner {
       background: linear-gradient(135deg, var(--amber-bg) 0%, rgba(110, 76, 0, 0.15) 100%);
@@ -769,6 +811,13 @@
         </div>
       </div>
     </div>
+  </section>
+
+  <!-- Supported Frameworks — dynamic from frameworks.json via dashboard.json.
+       Adding a new framework to frameworks.json adds a chip here automatically. -->
+  <section id="tech-section" class="hidden">
+    <h2>Supported Frameworks</h2>
+    <div id="tech-strip" class="tech-strip"></div>
   </section>
 
   <!-- Ecosystem Readiness Matrix -->
@@ -1053,10 +1102,42 @@
     updateFilterCounts();
     rebuildMatrix();
 
+    renderTechnologies(data);
     renderVersions(data);
 
     document.getElementById('loading').classList.add('hidden');
     document.getElementById('dashboard').classList.remove('hidden');
+  }
+
+  // Chip strip for underlying technologies. Falls back to deriving onchain
+  // tech from data.frameworks when `technologies` is absent (older dashboard.json
+  // snapshots predate the field), so the UI still renders something useful.
+  function renderTechnologies(data) {
+    const section = document.getElementById('tech-section');
+    const strip = document.getElementById('tech-strip');
+    strip.textContent = '';
+
+    let techs = Array.isArray(data.technologies) ? data.technologies : null;
+    if (!techs) {
+      techs = (Array.isArray(data.frameworks) ? data.frameworks : [])
+        .filter(f => f.kind === 'onchain' || f.kind === 'offchain');
+    }
+    if (!techs || techs.length === 0) {
+      section.classList.add('hidden');
+      return;
+    }
+    section.classList.remove('hidden');
+
+    techs.forEach(t => {
+      const chip = el('span', {
+        className: 'tech-chip',
+        'data-tip': (t.kind === 'onchain' ? 'On-chain framework' : 'Off-chain framework'),
+      });
+      chip.appendChild(el('span', { className: 'kind-dot ' + (t.kind || '') }));
+      chip.appendChild(document.createTextNode(t.label || t.id));
+      chip.appendChild(el('span', { className: 'kind-tag', textContent: t.kind || '' }));
+      strip.appendChild(chip);
+    });
   }
 
   function renderVersions(data) {

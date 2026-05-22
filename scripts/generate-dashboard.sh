@@ -57,6 +57,12 @@ mkdir -p "$OUTPUT_DIR"
 ONCHAIN_FRAMEWORKS=$(jq -c  '[.frameworks[] | select(.kind == "onchain")]'  "$FRAMEWORKS_FILE")
 OFFCHAIN_FRAMEWORKS=$(jq -c '[.frameworks[] | select(.kind == "offchain")]' "$FRAMEWORKS_FILE")
 
+# Flat technology list (kind preserved) — emitted as `technologies` so the
+# frontend can render a chip strip of underlying technologies separately from
+# the cross-product matrix columns. New frameworks added to frameworks.json
+# appear in the strip automatically.
+TECHNOLOGIES_JSON=$(jq -c '[.frameworks[] | {id, label, kind}]' "$FRAMEWORKS_FILE")
+
 # All status-file prefixes (for example-name extraction from file names)
 ALL_ONCHAIN_PREFIXES=$(jq -r '.[] | .statusPrefix' <<<"$ONCHAIN_FRAMEWORKS")
 ALL_OFFCHAIN_PREFIXES=$(jq -r '.[] | .statusPrefix' <<<"$OFFCHAIN_FRAMEWORKS")
@@ -261,6 +267,7 @@ jq -n \
   --argjson  skipped         "$SKIPPED" \
   --argjson  successRate     "$SUCCESS_RATE" \
   --argjson  frameworks      "$COLUMNS_JSON" \
+  --argjson  technologies    "$TECHNOLOGIES_JSON" \
   --argjson  useCases        "$USE_CASES_JSON" \
   --argjson  currentVersions "$CURRENT_JSON" \
   --argjson  latestVersions  "$LATEST_JSON" \
@@ -274,8 +281,9 @@ jq -n \
       skipped:     $skipped,
       successRate: $successRate
     },
-    frameworks: $frameworks,
-    useCases:   $useCases,
+    frameworks:   $frameworks,
+    technologies: $technologies,
+    useCases:     $useCases,
     versions: {
       current:  $currentVersions,
       latest:   $latestVersions,

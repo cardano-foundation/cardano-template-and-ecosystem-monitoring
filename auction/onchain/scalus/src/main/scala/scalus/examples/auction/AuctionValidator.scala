@@ -10,7 +10,7 @@ import scalus.ledger.api.v1.{Credential, PolicyId}
 import scalus.ledger.api.v2.TxOut
 import scalus.ledger.api.v2.OutputDatum.{NoOutputDatum, OutputDatum}
 import scalus.ledger.api.v3.{PubKeyHash, TxInfo, TxOutRef}
-import scalus.prelude.*
+import scalus.prelude.{*, given}
 
 case class AuctionDatum(
   seller: PubKeyHash,
@@ -26,9 +26,17 @@ enum Action derives FromData, ToData:
   case WITHDRAW
   case END
 
+// Multi-purpose validator. The Aiken counterpart (auction.auction.{mint,spend})
+// produces a single script that dispatches on ScriptContext purpose, and the
+// off-chain code grabs `validators[0]` from plutus.json and uses the same
+// compiled bytes for both the minting policy AND the spending validator.
+// Extending `Validator` here gives us the same dispatcher (`validate`) so the
+// emitted script handles MintingScript and SpendingScript contexts; otherwise
+// the spend-only script crashes with `InvalidReturnValue` when invoked in a
+// minting context.
 @Compile
-object AuctionValidator:
-  inline def spend(
+object AuctionValidator extends Validator:
+  override def spend(
     datum: Option[Data],
     redeemer: Data,
     tx: TxInfo,
@@ -96,7 +104,7 @@ object AuctionValidator:
         // Not implemented: forbid for safety until full refund logic exists
         require(false, "WITHDRAW not implemented")
 
-  inline def mint(
+  override def mint(
     redeemer: Data,
     policyId: PolicyId,
     tx: TxInfo

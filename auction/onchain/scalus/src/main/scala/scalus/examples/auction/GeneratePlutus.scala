@@ -9,7 +9,10 @@ import scala.io.Source
 
 object GeneratePlutus:
   def main(args: Array[String]): Unit =
-    val sir     = scalus.Compiler.compile(AuctionValidator.spend)
+    // Compile the multi-purpose dispatcher (`validate`), not just `spend`.
+    // This produces a script that handles both Mint and Spend contexts, matching
+    // the Aiken-compiled blueprint shape that off-chain code expects.
+    val sir     = scalus.Compiler.compile(AuctionValidator.validate)
     val program = sir.toUplc(generateErrorTraces = true)
     val doubleCborHex = program.plutusV3.doubleCborHex
 
