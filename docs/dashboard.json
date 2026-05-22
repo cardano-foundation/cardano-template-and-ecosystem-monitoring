@@ -1,11 +1,11 @@
 {
-  "lastUpdated": "2026-05-22T12:26:43Z",
+  "lastUpdated": "2026-05-22T12:32:33Z",
   "testSummary": {
-    "total": 96,
-    "passed": 96,
-    "failed": 0,
+    "total": 105,
+    "passed": 101,
+    "failed": 4,
     "skipped": 0,
-    "successRate": 1.00
+    "successRate": 0.96
   },
   "frameworks": [
     {
@@ -121,15 +121,15 @@
     {
       "name": "auction",
       "aiken": "passed",
-      "scalus": "not-implemented",
+      "scalus": "passed",
       "ccl-java+aiken": "passed",
-      "ccl-java+scalus": "not-implemented",
+      "ccl-java+scalus": "failed",
       "meshjs+aiken": "passed",
-      "meshjs+scalus": "not-implemented",
+      "meshjs+scalus": "failed",
       "evolutionsdk+aiken": "passed",
-      "evolutionsdk+scalus": "not-implemented",
+      "evolutionsdk+scalus": "failed",
       "pycardano+aiken": "passed",
-      "pycardano+scalus": "not-implemented"
+      "pycardano+scalus": "failed"
     },
     {
       "name": "bet",
@@ -227,13 +227,13 @@
       "aiken": "passed",
       "scalus": "passed",
       "ccl-java+aiken": "passed",
-      "ccl-java+scalus": "not-implemented",
+      "ccl-java+scalus": "passed",
       "meshjs+aiken": "passed",
-      "meshjs+scalus": "not-implemented",
+      "meshjs+scalus": "passed",
       "evolutionsdk+aiken": "passed",
-      "evolutionsdk+scalus": "not-implemented",
+      "evolutionsdk+scalus": "passed",
       "pycardano+aiken": "passed",
-      "pycardano+scalus": "not-implemented"
+      "pycardano+scalus": "passed"
     },
     {
       "name": "pricebet",
