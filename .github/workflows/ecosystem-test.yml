@@ -40,6 +40,7 @@ jobs:
       ccl-examples: ${{ steps.discovery.outputs.ccl-examples }}
       mesh-examples: ${{ steps.discovery.outputs.mesh-examples }}
       evosdk-examples: ${{ steps.discovery.outputs.evosdk-examples }}
+      pycardano-examples: ${{ steps.discovery.outputs.pycardano-examples }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -84,7 +85,8 @@ jobs:
         if: |
           needs.discover.outputs.ccl-examples != '[]' ||
           needs.discover.outputs.mesh-examples != '[]' ||
-          needs.discover.outputs.evosdk-examples != '[]'
+          needs.discover.outputs.evosdk-examples != '[]' ||
+          needs.discover.outputs.pycardano-examples != '[]'
         uses: ./.github/actions/setup-yaci-devkit
         with:
           start: 'false'
@@ -142,6 +144,17 @@ jobs:
       examples: ${{ needs.discover.outputs.evosdk-examples }}
       cache-version: v1
 
+  test-pycardano:
+    needs: [discover, prepare-toolchains, compile-aiken]
+    if: needs.discover.outputs.pycardano-examples != '[]'
+    uses: ./.github/workflows/_test-offchain-python.yml
+    with:
+      framework-id: pycardano
+      status-prefix: pycardano
+      subdir: offchain/pycardano
+      examples: ${{ needs.discover.outputs.pycardano-examples }}
+      cache-version: v1
+
   # ─────────────────────────────────────────────────────────────────────────
   # ADDING A NEW FRAMEWORK
   #
@@ -170,7 +183,7 @@ jobs:
 
   report-and-dashboard:
     name: Report & Dashboard
-    needs: [compile-aiken, test-ccl-java, test-mesh, test-evolutionsdk]
+    needs: [compile-aiken, test-ccl-java, test-mesh, test-evolutionsdk, test-pycardano]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -245,10 +258,12 @@ jobs:
           CCL_COUNT=$(find artifacts -name "logs-ccl-*" -type d 2>/dev/null | wc -l)
           MESH_COUNT=$(find artifacts -name "logs-mesh-*" -type d 2>/dev/null | wc -l)
           EVOSDK_COUNT=$(find artifacts -name "logs-evosdk-*" -type d 2>/dev/null | wc -l)
+          PYCARDANO_COUNT=$(find artifacts -name "logs-pycardano-*" -type d 2>/dev/null | wc -l)
           echo "- **Aiken Examples Compiled**: $AIKEN_COUNT" >> report.md
           echo "- **CCL Java Tests**: $CCL_COUNT" >> report.md
           echo "- **Mesh.js Tests**: $MESH_COUNT" >> report.md
           echo "- **Evolution SDK Tests**: $EVOSDK_COUNT" >> report.md
+          echo "- **PyCardano Tests**: $PYCARDANO_COUNT" >> report.md
           echo "" >> report.md
           echo "All test logs and build artifacts are available in the workflow artifacts." >> report.md
 

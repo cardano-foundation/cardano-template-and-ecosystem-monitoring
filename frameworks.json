@@ -27,6 +27,13 @@
       "kind": "offchain",
       "discoveryPath": "offchain/evolutionsdk/deno.json",
       "statusPrefix": "evosdk"
+    },
+    {
+      "id": "pycardano",
+      "label": "PyCardano",
+      "kind": "offchain",
+      "discoveryPath": "offchain/pycardano/requirements.txt",
+      "statusPrefix": "pycardano"
     }
   ]
 }
