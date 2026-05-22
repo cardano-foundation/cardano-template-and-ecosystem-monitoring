@@ -6,10 +6,13 @@ import scalus.builtin.Data
 import scalus.builtin.Data.FromData
 import scalus.builtin.Data.ToData
 import scalus.builtin.ToData.*
-import scalus.ledger.api.v1.{Credential, PolicyId}
+import scalus.ledger.api.v1.Credential
 import scalus.ledger.api.v2.TxOut
 import scalus.ledger.api.v2.OutputDatum.{NoOutputDatum, OutputDatum}
-import scalus.ledger.api.v3.{PubKeyHash, TxInfo, TxOutRef}
+// `PolicyId` is the v3 alias used by `Validator.mint`; the v1 one has the
+// same underlying ByteString shape but a different path, and Scalus 0.14
+// rejects overrides that don't match the exact declared path.
+import scalus.ledger.api.v3.{PolicyId, PubKeyHash, TxInfo, TxOutRef}
 import scalus.prelude.{*, given}
 
 case class AuctionDatum(
@@ -36,7 +39,11 @@ enum Action derives FromData, ToData:
 // minting context.
 @Compile
 object AuctionValidator extends Validator:
-  override def spend(
+  // `Validator.spend` and `Validator.mint` are declared `inline` in Scalus
+  // 0.14, so overrides have to carry the `inline` modifier too — otherwise
+  // the compiler refuses with "is not inline, cannot implement an inline
+  // method" (E164).
+  inline override def spend(
     datum: Option[Data],
     redeemer: Data,
     tx: TxInfo,
@@ -104,7 +111,7 @@ object AuctionValidator extends Validator:
         // Not implemented: forbid for safety until full refund logic exists
         require(false, "WITHDRAW not implemented")
 
-  override def mint(
+  inline override def mint(
     redeemer: Data,
     policyId: PolicyId,
     tx: TxInfo
