@@ -1,8 +1,8 @@
 {
-  "lastUpdated": "2026-06-01T12:26:59Z",
+  "lastUpdated": "2026-06-01T12:41:26Z",
   "testSummary": {
-    "total": 104,
-    "passed": 104,
+    "total": 105,
+    "passed": 105,
     "failed": 0,
     "skipped": 0,
     "successRate": 1.00
@@ -115,7 +115,7 @@
       "meshjs+scalus": "not-implemented",
       "evolutionsdk+aiken": "passed",
       "evolutionsdk+scalus": "not-implemented",
-      "pycardano+aiken": "not-implemented",
+      "pycardano+aiken": "passed",
       "pycardano+scalus": "not-implemented"
     },
     {
