@@ -391,6 +391,73 @@
       font-variant-numeric: tabular-nums;
     }
 
+    /* On-chain pivot selector */
+    .pivot-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+
+    .pivot-label {
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+    }
+
+    .pivot-group {
+      display: inline-flex;
+      gap: 2px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      padding: 3px;
+    }
+
+    .pivot-btn {
+      background: transparent;
+      border: none;
+      padding: 6px 14px;
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      cursor: pointer;
+      border-radius: 6px;
+      font-family: inherit;
+      transition: background 0.15s, color 0.15s;
+    }
+
+    .pivot-btn:hover { color: var(--text); }
+
+    .pivot-btn.active {
+      background: var(--accent-glow);
+      color: var(--text);
+      box-shadow: inset 0 0 0 1px var(--accent-light);
+    }
+
+    /* Grouped header (the "All" pivot): super-header per on-chain language with
+       off-chain sub-columns, separated by vertical dividers so each group reads
+       as a block even as more languages are added. */
+    thead th.grp {
+      text-align: center;
+      border-left: 2px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      color: var(--text);
+    }
+    thead th.grp .grp-dot {
+      display: inline-block;
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--accent-light);
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+    thead th.sub-first { border-left: 2px solid var(--border); }
+    thead th.sub-compile { color: var(--text-muted); font-style: italic; }
+    tbody td.grp-first { border-left: 2px solid var(--border); }
+
     .search {
       position: relative;
       flex: 1;
@@ -823,6 +890,14 @@
   <!-- Ecosystem Readiness Matrix -->
   <section>
     <h2>Ecosystem Readiness Matrix</h2>
+    <!-- On-chain pivot: collapses the multiplicative (off-chain × on-chain)
+         column explosion into a chooser. Picking one on-chain language shows a
+         narrow use-case × off-chain table; "All" shows a grouped overview.
+         Buttons are injected from the on-chain framework list at render(). -->
+    <div class="pivot-bar">
+      <span class="pivot-label">On-chain</span>
+      <div class="pivot-group" id="pivot-group" role="tablist"></div>
+    </div>
     <div class="toolbar">
       <div class="filter-group" id="filter-group" role="tablist">
         <button class="filter-btn active" data-filter="all">All <span class="count" id="count-all">0</span></button>
@@ -837,15 +912,9 @@
     </div>
     <div class="table-wrapper">
       <table>
-        <!-- Header columns are populated dynamically from data.frameworks
-             so adding an entry to frameworks.json adds a column automatically. -->
-        <thead id="matrix-head">
-          <tr>
-            <th>Use Case</th>
-            <!-- framework columns inserted here at render() -->
-            <th class="th-center">Health</th>
-          </tr>
-        </thead>
+        <!-- Header is rebuilt by buildMatrixHead() on every render/pivot change:
+             one row for a single on-chain pivot, two grouped rows for "All". -->
+        <thead id="matrix-head"></thead>
         <tbody id="matrix-body"></tbody>
       </table>
     </div>
@@ -915,16 +984,41 @@
     return cell;
   }
 
-  // ── Use-case health calc ─────────────────────────────────
-  // Health = passed / total frameworks. Not-implemented entries count as misses.
-  // FRAMEWORK_LIST is populated at render() from dashboard.json's `frameworks`
-  // field — array of { id, label, kind }. Adding a framework to frameworks.json
-  // automatically extends the matrix here.
+  // ── Matrix dimensions ────────────────────────────────────
+  // The cross-check matrix is 3-D: use-case × off-chain lib × on-chain lang.
+  // FRAMEWORK_LIST is the full flat column list (every on-chain compile column +
+  // every off-chain×on-chain cross column) — used for global stats. ONCHAIN_LIST
+  // and OFFCHAIN_LIST are the two cross axes, derived in render() from the
+  // dashboard's `technologies`/`frameworks`. `activePivot` chooses the view:
+  // 'all' → grouped overview; an on-chain id → a narrow use-case × off-chain table.
+  // All are populated at render() from dashboard.json, so new frameworks appear
+  // with no HTML change.
   let FRAMEWORK_LIST = [];
-  function useCaseHealth(uc) {
+  let ONCHAIN_LIST = [];
+  let OFFCHAIN_LIST = [];
+  let activePivot = 'all';
+
+  // Column descriptors {id, label} shown under the current pivot. The `id` keys
+  // straight into a use-case's status fields (on-chain compile id, or the
+  // `<off>+<on>` cross id). Drives both rendering and health so a narrowed view
+  // scores only what it shows.
+  function visibleColumns() {
+    if (activePivot === 'all') {
+      return FRAMEWORK_LIST.map(f => ({ id: f.id, label: f.label }));
+    }
+    const on = activePivot;
+    const cols = [{ id: on, label: 'compile' }];
+    OFFCHAIN_LIST.forEach(o => cols.push({ id: o.id + '+' + on, label: o.label }));
+    return cols;
+  }
+
+  // ── Use-case health calc ─────────────────────────────────
+  // Health = passed / total visible columns. Not-implemented entries count as misses.
+  function useCaseHealth(uc, columns) {
+    columns = columns || visibleColumns();
     let implemented = 0, passed = 0, missing = 0;
-    FRAMEWORK_LIST.forEach(f => {
-      const v = uc[f.id];
+    columns.forEach(c => {
+      const v = uc[c.id];
       if (!v || v === 'not-implemented') {
         missing++;
       } else {
@@ -932,7 +1026,7 @@
         if (v === 'passed') passed++;
       }
     });
-    const total = FRAMEWORK_LIST.length;
+    const total = columns.length;
     return { total, implemented, passed, missing, rate: total ? passed / total : 0 };
   }
 
@@ -942,6 +1036,57 @@
     if (h.passed === h.implemented) return 'passing';
     if (h.passed === 0) return 'failing';
     return 'partial';
+  }
+
+  // ── Pivot control + dynamic header ───────────────────────
+  function buildPivot() {
+    const group = document.getElementById('pivot-group');
+    group.textContent = '';
+    const mk = (id, label) => el('button', {
+      className: 'pivot-btn' + (activePivot === id ? ' active' : ''),
+      'data-pivot': id,
+      textContent: label,
+    });
+    ONCHAIN_LIST.forEach(on => group.appendChild(mk(on.id, on.label)));
+    group.appendChild(mk('all', 'All'));
+  }
+
+  function buildMatrixHead() {
+    const head = document.getElementById('matrix-head');
+    head.textContent = '';
+
+    if (activePivot === 'all') {
+      // Two rows: on-chain super-header spanning its off-chain sub-columns.
+      const r1 = el('tr');
+      r1.appendChild(el('th', { rowspan: '2', textContent: 'Use Case' }));
+      ONCHAIN_LIST.forEach(on => {
+        const th = el('th', { className: 'grp', colspan: String(1 + OFFCHAIN_LIST.length) });
+        th.appendChild(el('span', { className: 'grp-dot' }));
+        th.appendChild(document.createTextNode(on.label));
+        r1.appendChild(th);
+      });
+      r1.appendChild(el('th', { className: 'th-center', rowspan: '2', textContent: 'Health' }));
+      head.appendChild(r1);
+
+      const r2 = el('tr');
+      ONCHAIN_LIST.forEach(on => {
+        r2.appendChild(el('th', {
+          className: 'th-center sub-first sub-compile',
+          textContent: 'compile',
+          'data-tip': on.label + ' on-chain compile',
+        }));
+        OFFCHAIN_LIST.forEach(o => r2.appendChild(el('th', { className: 'th-center', textContent: o.label })));
+      });
+      head.appendChild(r2);
+    } else {
+      const on = ONCHAIN_LIST.find(x => x.id === activePivot) || { id: activePivot, label: activePivot };
+      const r = el('tr');
+      r.appendChild(el('th', { textContent: 'Use Case' }));
+      r.appendChild(el('th', { className: 'th-center sub-compile', textContent: 'compile', 'data-tip': on.label + ' on-chain compile' }));
+      OFFCHAIN_LIST.forEach(o => r.appendChild(el('th', { className: 'th-center', textContent: o.label })));
+      r.appendChild(el('th', { className: 'th-center', textContent: 'Health' }));
+      head.appendChild(r);
+    }
   }
 
   // ── Animated number counter ──────────────────────────────
@@ -988,10 +1133,14 @@
       return classifyUseCase(uc) === activeFilter;
     });
 
+    const dataColCount = (activePivot === 'all')
+      ? ONCHAIN_LIST.length * (1 + OFFCHAIN_LIST.length)
+      : (1 + OFFCHAIN_LIST.length);
+
     if (filtered.length === 0) {
       const emptyRow = tr({ className: 'empty-row' });
-      // 1 (Use Case) + N (frameworks) + 1 (Health)
-      const emptyCell = td({ colspan: String(2 + FRAMEWORK_LIST.length) });
+      // 1 (Use Case) + data columns + 1 (Health)
+      const emptyCell = td({ colspan: String(2 + dataColCount) });
       emptyCell.textContent = allUseCases.length === 0
         ? 'No use-case data available yet.'
         : 'No use cases match the current filter.';
@@ -1007,9 +1156,27 @@
       const nameCell = td({});
       nameCell.appendChild(el('span', { className: 'row-name', textContent: String(uc.name) }));
 
+      const cells = [nameCell];
+
+      // Data cells: per on-chain group (compile + each off-chain cross). The
+      // compile cell starts each group and carries the divider border.
+      const onchains = (activePivot === 'all')
+        ? ONCHAIN_LIST
+        : [ONCHAIN_LIST.find(x => x.id === activePivot) || { id: activePivot, label: activePivot }];
+
+      onchains.forEach(on => {
+        const compileCell = statusTd(uc[on.id], on.label + ' on-chain compile');
+        if (activePivot === 'all') compileCell.classList.add('grp-first');
+        cells.push(compileCell);
+        OFFCHAIN_LIST.forEach(o => {
+          const id = o.id + '+' + on.id;
+          cells.push(statusTd(uc[id], o.label + ' × ' + on.label));
+        });
+      });
+
       const healthCell = td({
         className: 'td-center',
-        'data-tip': h.passed + ' / ' + h.total + ' frameworks passing'
+        'data-tip': h.passed + ' / ' + h.total + ' checks passing'
           + (h.missing > 0 ? ' (' + h.missing + ' not implemented)' : ''),
       });
       const bar = el('span', { className: 'health-bar' });
@@ -1017,10 +1184,8 @@
       fill.style.width = (h.rate * 100) + '%';
       bar.appendChild(fill);
       healthCell.appendChild(bar);
-
-      const cells = [nameCell];
-      FRAMEWORK_LIST.forEach(f => cells.push(statusTd(uc[f.id], f.label)));
       cells.push(healthCell);
+
       matrixBody.appendChild(tr({}, ...cells));
     });
   }
@@ -1060,18 +1225,30 @@
     // → dashboard.json so adding a framework adds a column with no HTML change.
     FRAMEWORK_LIST = Array.isArray(data.frameworks) ? data.frameworks : [];
 
-    // Render the matrix header from the framework list (between "Use Case" and "Health").
-    const headRow = document.querySelector('#matrix-head tr');
-    if (headRow) {
-      // Remove any previously-injected framework header cells (everything between
-      // "Use Case" at index 0 and the trailing "Health" cell).
-      while (headRow.children.length > 2) headRow.removeChild(headRow.children[1]);
-      const healthTh = headRow.lastElementChild;
-      FRAMEWORK_LIST.forEach(f => {
-        const th = el('th', { className: 'th-center', textContent: f.label });
-        headRow.insertBefore(th, healthTh);
+    // Derive the two cross axes. Prefer the explicit `technologies` list; fall
+    // back to the flat framework list (older dashboard.json snapshots) so the
+    // pivot still works.
+    const techs = Array.isArray(data.technologies) ? data.technologies : [];
+    ONCHAIN_LIST = techs.filter(t => t.kind === 'onchain').map(t => ({ id: t.id, label: t.label }));
+    if (ONCHAIN_LIST.length === 0) {
+      ONCHAIN_LIST = FRAMEWORK_LIST.filter(f => f.kind === 'onchain').map(f => ({ id: f.id, label: f.label }));
+    }
+    OFFCHAIN_LIST = techs.filter(t => t.kind === 'offchain').map(t => ({ id: t.id, label: t.label }));
+    if (OFFCHAIN_LIST.length === 0) {
+      // Derive from cross ids: `<off>+<on>` with label `<Off> × <On>`.
+      const seen = {};
+      FRAMEWORK_LIST.filter(f => f.kind === 'cross').forEach(f => {
+        const off = String(f.id).split('+')[0];
+        const offLabel = String(f.label || '').split(' × ')[0] || off;
+        if (!seen[off]) { seen[off] = true; OFFCHAIN_LIST.push({ id: off, label: offLabel }); }
       });
     }
+
+    // Keep the pivot valid if the selected on-chain disappeared between loads.
+    if (activePivot !== 'all' && !ONCHAIN_LIST.some(o => o.id === activePivot)) activePivot = 'all';
+
+    buildPivot();
+    buildMatrixHead();
 
     // Count not-implemented across all use cases × frameworks
     const useCases = data.useCases || [];
@@ -1204,6 +1381,17 @@
 
   document.getElementById('matrix-search').addEventListener('input', (e) => {
     searchTerm = e.target.value;
+    rebuildMatrix();
+  });
+
+  // On-chain pivot: switch which on-chain language the matrix is sliced by.
+  document.getElementById('pivot-group').addEventListener('click', (e) => {
+    const btn = e.target.closest('.pivot-btn');
+    if (!btn) return;
+    activePivot = btn.dataset.pivot;
+    document.querySelectorAll('#pivot-group .pivot-btn').forEach(b => b.classList.toggle('active', b === btn));
+    buildMatrixHead();
+    updateFilterCounts();
     rebuildMatrix();
   });
 

@@ -13,7 +13,15 @@ import {
   type Validator,
 } from "@evolution-sdk/lucid";
 import { SLOT_CONFIG_NETWORK } from "@evolution-sdk/plutus";
-import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
+
+// PLUTUS_JSON lets the cross-check runner point this same off-chain flow at a
+// different on-chain implementation's blueprint (e.g. scalus) without code edits.
+// Falls back to the local Aiken blueprint for standalone runs. Loaded dynamically
+// (not a static import) so the path can vary at runtime.
+const BLUEPRINT_PATH =
+  Deno.env.get("PLUTUS_JSON") ??
+  new URL("../../onchain/aiken/plutus.json", import.meta.url).pathname;
+const blueprint = JSON.parse(Deno.readTextFileSync(BLUEPRINT_PATH));
 
 // ----------------------------------------------------------------------------
 // English auction. Single PlutusV3 validator with mint (init the NFT lot)

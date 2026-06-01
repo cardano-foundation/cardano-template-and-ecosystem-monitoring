@@ -227,8 +227,14 @@ public class Auction {
         }
 
         private static PlutusScript loadPlutusScript() {
-                Path plutusJson = Paths.get(System.getProperty("user.dir"),
-                                "..", "..", "onchain", "aiken", "plutus.json");
+                // PLUTUS_JSON lets the cross-check runner point this same off-chain flow at
+                // a different on-chain implementation's blueprint (e.g. scalus) without code
+                // edits. Falls back to the local Aiken blueprint for standalone runs.
+                String override = System.getenv("PLUTUS_JSON");
+                Path plutusJson = (override != null && !override.isBlank())
+                                ? Paths.get(override)
+                                : Paths.get(System.getProperty("user.dir"),
+                                                "..", "..", "onchain", "aiken", "plutus.json");
                 PlutusContractBlueprint blueprint = PlutusBlueprintLoader.loadBlueprint(plutusJson.toFile());
                 String compiledCode = blueprint.getValidators().getFirst().getCompiledCode();
                 return PlutusBlueprintUtil.getPlutusScriptFromCompiledCode(compiledCode, PlutusVersion.v3);
