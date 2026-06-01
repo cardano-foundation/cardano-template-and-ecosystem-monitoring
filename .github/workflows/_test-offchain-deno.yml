@@ -24,6 +24,11 @@ on:
         description: 'JSON array of example names to run.'
         type: string
         required: true
+      onchain-framework:
+        description: 'Onchain framework whose plutus.json artifact to download (e.g. aiken, scalus).'
+        type: string
+        required: false
+        default: 'aiken'
       cache-version:
         description: 'Cache-buster forwarded to setup-* actions.'
         type: string
@@ -57,7 +62,7 @@ jobs:
       - name: Download plutus.json artifact
         uses: actions/download-artifact@v4
         with:
-          name: plutus-${{ matrix.example }}
+          name: plutus-${{ inputs.onchain-framework }}-${{ matrix.example }}
           path: ${{ matrix.example }}/onchain/aiken/
 
       - name: Run off-chain test
@@ -91,7 +96,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: logs-${{ inputs.status-prefix }}-${{ matrix.example }}
+          name: logs-${{ inputs.status-prefix }}-${{ inputs.onchain-framework }}-${{ matrix.example }}
           path: |
             ${{ matrix.example }}/${{ inputs.subdir }}/test-output.log
             ${{ matrix.example }}/${{ inputs.subdir }}/test-status.txt

@@ -1,0 +1,31 @@
+name: 'Setup SBT'
+description: 'Set up a JDK and SBT for Scalus compilation, with ivy2 cache.'
+
+inputs:
+  java-version:
+    description: 'JDK major version (temurin distribution).'
+    required: false
+    default: '21'
+  cache-version:
+    description: 'Cache-buster suffix. Bump to invalidate all consumers at once.'
+    required: false
+    default: 'v1'
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: ${{ inputs.java-version }}
+
+    - name: Set up SBT
+      uses: sbt/setup-sbt@v1
+
+    - name: Cache ivy2
+      uses: actions/cache@v4
+      with:
+        path: ~/.ivy2/cache
+        key: sbt-ivy2-${{ inputs.cache-version }}-${{ runner.os }}
+        restore-keys: sbt-ivy2-${{ inputs.cache-version }}-

@@ -1,0 +1,65 @@
+{
+  "preamble": {
+    "title": "cardano-foundation/cardano-blueprint-and-ecosystem-monitoring",
+    "description": "Scalus contracts for project 'cardano-foundation/cardano-blueprint-and-ecosystem-monitoring/auction'",
+    "version": "0.1.0",
+    "plutusVersion": "v3",
+    "compiler": {
+      "name": "Scalus",
+      "version": "0.14.1"
+    }
+  },
+  "validators": [
+    {
+      "title": "auction.auction.mint",
+      "redeemer": {
+        "title": "_redeemer",
+        "schema": {
+          "$ref": "#/definitions/Action"
+        }
+      },
+      "compiledCode": "$compiledCode",
+      "hash": "$hash"
+    },
+    {
+      "title": "auction.auction.spend",
+      "datum": {
+        "title": "_datum",
+        "schema": {
+          "$ref": "#/definitions/AuctionDatum"
+        }
+      },
+      "redeemer": {
+        "title": "_redeemer",
+        "schema": {
+          "$ref": "#/definitions/Action"
+        }
+      },
+      "compiledCode": "$compiledCode",
+      "hash": "$hash"
+    }
+  ],
+  "definitions": {
+    "AuctionDatum": {
+      "title": "AuctionDatum",
+      "dataType": "constructor",
+      "index": 0,
+      "fields": [
+        { "title": "seller",          "dataType": "bytes" },
+        { "title": "highest_bidder",  "dataType": "bytes" },
+        { "title": "highest_bid",     "dataType": "integer" },
+        { "title": "expiration",      "dataType": "integer" },
+        { "title": "asset_policy",    "dataType": "bytes" },
+        { "title": "asset_name",      "dataType": "bytes" }
+      ]
+    },
+    "Action": {
+      "title": "Action",
+      "anyOf": [
+        { "title": "BID",      "dataType": "constructor", "index": 0, "fields": [] },
+        { "title": "WITHDRAW", "dataType": "constructor", "index": 1, "fields": [] },
+        { "title": "END",      "dataType": "constructor", "index": 2, "fields": [] }
+      ]
+    }
+  }
+}

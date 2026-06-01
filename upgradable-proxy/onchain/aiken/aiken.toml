@@ -1,6 +1,6 @@
 name = "cardano-foundation/cardano-template-and-ecosystem-monitoring"
 version = "0.2.0"
-compiler = "v1.1.21"
+compiler = "v1.1.22"
 plutus = "v3"
 description = "Aiken contracts for project 'cardano-foundation/cardano-template-and-ecosystem-monitoring/bet'"
 

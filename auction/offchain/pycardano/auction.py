@@ -66,8 +66,14 @@ TEST_MNEMONIC = (
     "test test test test test test test test test test test test "
     "test test test test test test test test test test test sauce"
 )
-BLUEPRINT_PATH = (
-    Path(__file__).resolve().parents[2] / "onchain" / "aiken" / "plutus.json"
+# PLUTUS_JSON lets the cross-check runner point this same off-chain flow at a
+# different on-chain implementation's blueprint (e.g. scalus) without code edits.
+# Falls back to the local Aiken blueprint for standalone runs.
+BLUEPRINT_PATH = Path(
+    os.environ.get(
+        "PLUTUS_JSON",
+        Path(__file__).resolve().parents[2] / "onchain" / "aiken" / "plutus.json",
+    )
 )
 
 ASSET_NAME = b"auction_nft"

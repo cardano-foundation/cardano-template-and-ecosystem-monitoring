@@ -7,7 +7,7 @@ import scalus.utils.Utils
 object AuctionMain:
   def main(args: Array[String]): Unit =
     println("=== Auction Smart Contract Compiled ===")
-    val compiled = scalus.Compiler.compile(AuctionValidator.spend)
+    val compiled = scalus.Compiler.compile(AuctionValidator.validate)
     val program = compiled.toUplc(generateErrorTraces = true)
     val cborHex = program.plutusV3.doubleCborHex
     println(s"Plutus V3 CBOR (${cborHex.length} chars):")
