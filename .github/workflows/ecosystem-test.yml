@@ -307,13 +307,13 @@ jobs:
           BRANCH: ${{ github.head_ref || github.ref_name }}
         run: |
           set -e
-          if [ ! -f docs/dashboard.json ]; then
-            echo "docs/dashboard.json missing — nothing to commit"
+          if [ ! -f dashboard/dashboard.json ]; then
+            echo "dashboard/dashboard.json missing — nothing to commit"
             exit 0
           fi
 
-          CURR=$(jq -S 'del(.lastUpdated)' docs/dashboard.json)
-          PREV=$(git show HEAD:docs/dashboard.json 2>/dev/null \
+          CURR=$(jq -S 'del(.lastUpdated)' dashboard/dashboard.json)
+          PREV=$(git show HEAD:dashboard/dashboard.json 2>/dev/null \
                    | jq -S 'del(.lastUpdated)' 2>/dev/null || echo '')
 
           if [ "$CURR" = "$PREV" ]; then
@@ -323,7 +323,7 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add docs/dashboard.json
+          git add dashboard/dashboard.json
           git commit -m "chore: update dashboard.json [skip ci]"
           git push origin "HEAD:${BRANCH}"
 
