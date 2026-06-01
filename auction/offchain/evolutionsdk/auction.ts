@@ -110,7 +110,12 @@ async function fundFromIndex0(targets: Array<{ address: string; lovelace: bigint
 }
 
 function setup() {
-  const compiledCode = blueprint.validators[0].compiledCode;
+  // Look up the validator BY TITLE (fall back to index 0) so a blueprint that
+  // orders its validators differently can't silently break the cross-check.
+  const v =
+    blueprint.validators.find((x: { title: string }) => x.title === "auction.auction.mint") ??
+    blueprint.validators[0];
+  const compiledCode = v.compiledCode;
   const validator: Validator = { type: "PlutusV3", script: compiledCode };
   return { validator, scriptAddress: validatorToAddress(NETWORK, validator) };
 }

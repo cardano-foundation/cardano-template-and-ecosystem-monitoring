@@ -236,7 +236,13 @@ public class Auction {
                                 : Paths.get(System.getProperty("user.dir"),
                                                 "..", "..", "onchain", "aiken", "plutus.json");
                 PlutusContractBlueprint blueprint = PlutusBlueprintLoader.loadBlueprint(plutusJson.toFile());
-                String compiledCode = blueprint.getValidators().getFirst().getCompiledCode();
+                // Look up the validator BY TITLE (fall back to index 0) so a blueprint that
+                // orders its validators differently can't silently break the cross-check.
+                String compiledCode = blueprint.getValidators().stream()
+                                .filter(v -> "auction.auction.mint".equals(v.getTitle()))
+                                .findFirst()
+                                .orElse(blueprint.getValidators().getFirst())
+                                .getCompiledCode();
                 return PlutusBlueprintUtil.getPlutusScriptFromCompiledCode(compiledCode, PlutusVersion.v3);
         }
 

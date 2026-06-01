@@ -102,7 +102,12 @@ async function fundFromFunder(targets: Array<{ addr: string; lovelace: bigint }>
 }
 
 function getScriptInfo() {
-  const compiled = applyParamsToScript(blueprint.validators[0].compiledCode, [], "JSON");
+  // Look up the validator BY TITLE (fall back to index 0) so a blueprint that
+  // orders its validators differently can't silently break the cross-check.
+  const v =
+    blueprint.validators.find((x: { title: string }) => x.title === "auction.auction.mint") ??
+    blueprint.validators[0];
+  const compiled = applyParamsToScript(v.compiledCode, [], "JSON");
   const policyId = resolveScriptHash(compiled, "V3");
   const { address: scriptAddress } = serializePlutusScript(
     { code: compiled, version: "V3" },

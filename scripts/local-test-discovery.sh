@@ -78,6 +78,43 @@ while IFS= read -r framework; do
   echo ""
 done < <(jq -c '.frameworks[]' "$REGISTRY")
 
+# ── Off-chain × on-chain test matrix ──────────────────────────────────────────
+# Emit one matrix row per (off-chain framework × on-chain framework) combo whose
+# example sets intersect. Each row carries everything the generic reusable test
+# workflow needs, so ecosystem-test.yml can run a single matrix-driven job and a
+# new framework needs no new YAML — only its frameworks.json entry.
+echo -e "${YELLOW}Building off-chain × on-chain matrix...${NC}"
+examples_json() { jq -R -s -c 'split("\n") | map(select(length > 0))' < ".local-test-results/${1}-examples.txt" 2>/dev/null || echo '[]'; }
+
+MATRIX='[]'
+while IFS= read -r off; do
+  off_id=$(printf '%s' "$off"     | jq -r '.id')
+  off_pfx=$(printf '%s' "$off"    | jq -r '.statusPrefix')
+  off_sub=$(printf '%s' "$off"    | jq -r '.subdir // (.discoveryPath | sub("/[^/]+$";""))')
+  off_rt=$(printf '%s' "$off"     | jq -r '.runtime // ""')
+  off_list=$(examples_json "$off_pfx")
+
+  while IFS= read -r on; do
+    on_id=$(printf '%s' "$on"   | jq -r '.id')
+    on_pfx=$(printf '%s' "$on"  | jq -r '.statusPrefix')
+    on_list=$(examples_json "$on_pfx")
+    inter=$(jq -cn --argjson a "$off_list" --argjson b "$on_list" \
+      '[$a[] | select(. as $x | ($b | index($x)) != null)]')
+    [ "$(jq 'length' <<<"$inter")" -gt 0 ] || continue
+    MATRIX=$(jq -cn --argjson m "$MATRIX" \
+      --arg fid "$off_id" --arg pfx "$off_pfx" --arg sub "$off_sub" \
+      --arg rt "$off_rt" --arg on "$on_id" --argjson ex "$inter" \
+      '$m + [{"framework-id":$fid,"status-prefix":$pfx,"subdir":$sub,"runtime":$rt,"onchain":$on,"examples":$ex}]')
+  done < <(jq -c '.frameworks[] | select(.kind == "onchain")' "$REGISTRY")
+done < <(jq -c '.frameworks[] | select(.kind == "offchain")' "$REGISTRY")
+
+echo "$MATRIX" | jq '.' > .local-test-results/offchain-matrix.json 2>/dev/null || echo "$MATRIX" > .local-test-results/offchain-matrix.json
+echo "  $(jq 'length' <<<"$MATRIX") off-chain × on-chain combo(s)"
+if [ -n "${GITHUB_OUTPUT:-}" ]; then
+  printf 'offchain-matrix=%s\n' "$MATRIX" >> "$GITHUB_OUTPUT"
+fi
+echo ""
+
 # Print summary (one line per framework, in registry order).
 echo -e "${GREEN}========================================"
 echo "Discovery Summary"

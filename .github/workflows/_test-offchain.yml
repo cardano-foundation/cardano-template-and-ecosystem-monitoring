@@ -1,0 +1,156 @@
+name: Test off-chain (reusable, runtime-generic)
+
+# One reusable workflow for every off-chain framework, regardless of language.
+# The caller passes `runtime` (deno | jbang | python) and the toolchain setup,
+# install, and run command branch on it. This replaces the former per-runtime
+# workflows (_test-offchain-deno/-jbang/-python.yml) so adding a framework on an
+# existing runtime needs no new workflow — just a frameworks.json entry that
+# flows through the discover job's `offchain-matrix`.
+#
+# Behaviour parity with the old per-runtime workflows is preserved: the chosen
+# on-chain plutus.json is downloaded over `onchain/aiken/` (the off-chain code's
+# default blueprint path), deno/jbang retry once, logs upload as
+# logs-<prefix>-<onchain>-<example>.
+
+on:
+  workflow_call:
+    inputs:
+      framework-id:
+        description: 'Identifier matching frameworks.json (e.g. meshjs, ccl-java).'
+        type: string
+        required: true
+      status-prefix:
+        description: 'Short prefix used in the log artifact names (e.g. mesh, ccl).'
+        type: string
+        required: true
+      subdir:
+        description: 'Path under the example dir containing the entrypoint.'
+        type: string
+        required: true
+      runtime:
+        description: 'Toolchain: deno | jbang | python.'
+        type: string
+        required: true
+      examples:
+        description: 'JSON array of example names to run.'
+        type: string
+        required: true
+      onchain-framework:
+        description: 'On-chain framework whose plutus.json artifact to download.'
+        type: string
+        required: false
+        default: 'aiken'
+      jdk-version:
+        type: string
+        required: false
+        default: '24'
+      python-version:
+        type: string
+        required: false
+        default: '3.11'
+      cache-version:
+        type: string
+        required: false
+        default: 'v1'
+
+jobs:
+  test:
+    name: ${{ inputs.framework-id }} × ${{ inputs.onchain-framework }} - ${{ matrix.example }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        example: ${{ fromJson(inputs.examples) }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── Toolchain setup (branches on runtime) ──────────────────────────────
+      - name: Setup Deno
+        if: inputs.runtime == 'deno'
+        uses: ./.github/actions/setup-deno
+        with:
+          example: ${{ matrix.example }}
+          subdir: ${{ inputs.subdir }}
+
+      - name: Setup JBang + Java
+        if: inputs.runtime == 'jbang'
+        uses: ./.github/actions/setup-jbang-java
+        with:
+          jdk-version: ${{ inputs.jdk-version }}
+          cache-version: ${{ inputs.cache-version }}
+
+      - name: Cache JBang m2 deps per example
+        if: inputs.runtime == 'jbang'
+        uses: actions/cache@v4
+        with:
+          path: ~/.jbang/cache
+          key: jbang-cache-${{ matrix.example }}-${{ hashFiles(format('{0}/{1}/*.java', matrix.example, inputs.subdir)) }}
+
+      - name: Setup Python
+        if: inputs.runtime == 'python'
+        uses: ./.github/actions/setup-python
+        with:
+          python-version: ${{ inputs.python-version }}
+          example: ${{ matrix.example }}
+          subdir: ${{ inputs.subdir }}
+
+      - name: Setup Yaci DevKit
+        uses: ./.github/actions/setup-yaci-devkit
+        with:
+          cache-version: ${{ inputs.cache-version }}
+
+      - name: Download plutus.json artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: plutus-${{ inputs.onchain-framework }}-${{ matrix.example }}
+          path: ${{ matrix.example }}/onchain/aiken/
+
+      - name: Install Python dependencies
+        if: inputs.runtime == 'python'
+        working-directory: ${{ matrix.example }}/${{ inputs.subdir }}
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run off-chain test
+        working-directory: ${{ matrix.example }}/${{ inputs.subdir }}
+        env:
+          EXAMPLE: ${{ matrix.example }}
+          SUBDIR: ${{ inputs.subdir }}
+          RUNTIME: ${{ inputs.runtime }}
+        run: |
+          case "$RUNTIME" in
+            deno)   ENTRY=$(ls *.ts   | head -1); CMD=(deno run --allow-all "$ENTRY") ;;
+            jbang)  ENTRY=$(ls *.java | head -1); CMD=(jbang "$ENTRY") ;;
+            python) ENTRY=$(ls *.py   | head -1); CMD=(python "$ENTRY") ;;
+            *) echo "unknown runtime: $RUNTIME" >&2; exit 2 ;;
+          esac
+          # Retry once with a 15s pause: yaci's readiness probe covers most
+          # startup flake, but tx submission can still hit mempool/indexer gaps.
+          EXIT=1
+          for ATTEMPT in 1 2; do
+            echo "Running $RUNTIME on $EXAMPLE/$SUBDIR/$ENTRY (attempt $ATTEMPT/2)"
+            set +e
+            timeout 300 "${CMD[@]}" 2>&1 | tee test-output.log
+            EXIT=${PIPESTATUS[0]}
+            set -e
+            if [ "$EXIT" -eq 0 ]; then break; fi
+            if [ "$ATTEMPT" -eq 1 ]; then
+              echo "::warning::$EXAMPLE attempt $ATTEMPT failed with exit $EXIT — retrying after 15s"
+              sleep 15
+            fi
+          done
+          if [ "$EXIT" -eq 0 ]; then echo success > test-status.txt; else echo failed > test-status.txt; fi
+          exit "$EXIT"
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-${{ inputs.status-prefix }}-${{ inputs.onchain-framework }}-${{ matrix.example }}
+          path: |
+            ${{ matrix.example }}/${{ inputs.subdir }}/test-output.log
+            ${{ matrix.example }}/${{ inputs.subdir }}/test-status.txt
+          retention-days: 30

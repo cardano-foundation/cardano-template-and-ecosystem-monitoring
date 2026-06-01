@@ -5,42 +5,64 @@
       "label": "Aiken",
       "kind": "onchain",
       "discoveryPath": "onchain/aiken/aiken.toml",
-      "statusPrefix": "aiken"
+      "statusPrefix": "aiken",
+      "build": "aiken"
     },
     {
       "id": "scalus",
       "label": "Scalus",
       "kind": "onchain",
       "discoveryPath": "onchain/scalus/build.sbt",
-      "statusPrefix": "scalus"
+      "statusPrefix": "scalus",
+      "build": "scalus"
     },
     {
       "id": "ccl-java",
       "label": "CCL Java",
       "kind": "offchain",
       "discoveryPath": "offchain/ccl-java/*.java",
-      "statusPrefix": "ccl"
+      "statusPrefix": "ccl",
+      "subdir": "offchain/ccl-java",
+      "entryGlob": "*.java",
+      "runtime": "jbang",
+      "versionFile": "offchain/ccl-java/*.java",
+      "packages": ["cardano-client-lib"]
     },
     {
       "id": "meshjs",
       "label": "Mesh.js",
       "kind": "offchain",
       "discoveryPath": "offchain/meshjs/deno.json",
-      "statusPrefix": "mesh"
+      "statusPrefix": "mesh",
+      "subdir": "offchain/meshjs",
+      "entryGlob": "*.ts",
+      "runtime": "deno",
+      "versionFile": "offchain/meshjs/deno.json",
+      "packages": ["@meshsdk/core", "@meshsdk/core-csl", "@meshsdk/common"]
     },
     {
       "id": "evolutionsdk",
       "label": "Evolution SDK",
       "kind": "offchain",
       "discoveryPath": "offchain/evolutionsdk/deno.json",
-      "statusPrefix": "evosdk"
+      "statusPrefix": "evosdk",
+      "subdir": "offchain/evolutionsdk",
+      "entryGlob": "*.ts",
+      "runtime": "deno",
+      "versionFile": "offchain/evolutionsdk/deno.json",
+      "packages": ["@evolution-sdk/lucid"]
     },
     {
       "id": "pycardano",
       "label": "PyCardano",
       "kind": "offchain",
       "discoveryPath": "offchain/pycardano/requirements.txt",
-      "statusPrefix": "pycardano"
+      "statusPrefix": "pycardano",
+      "subdir": "offchain/pycardano",
+      "entryGlob": "*.py",
+      "runtime": "python",
+      "versionFile": "offchain/pycardano/requirements.txt",
+      "packages": ["pycardano"]
     }
   ]
 }

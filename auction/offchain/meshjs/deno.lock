@@ -1,10 +1,10 @@
 {
   "version": "5",
   "specifiers": {
-    "npm:@meshsdk/common@1.9.0-beta.102": "1.9.0-beta.102",
-    "npm:@meshsdk/core-csl@1.9.0-beta.102": "1.9.0-beta.102",
-    "npm:@meshsdk/core-cst@^1.9.0-beta.94": "1.9.0-beta.102_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.0",
-    "npm:@meshsdk/core@1.9.0-beta.102": "1.9.0-beta.102_@bufbuild+protobuf@1.10.1_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.0",
+    "npm:@meshsdk/common@1.9.0": "1.9.0",
+    "npm:@meshsdk/core-csl@1.9.0": "1.9.0",
+    "npm:@meshsdk/core-cst@^1.9.0-beta.94": "1.9.0_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.0",
+    "npm:@meshsdk/core@1.9.0": "1.9.0_@bufbuild+protobuf@1.10.1_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.0",
     "npm:bech32@*": "2.0.0"
   },
   "npm": {
@@ -261,6 +261,15 @@
         "uint8arraylist"
       ]
     },
+    "@meshsdk/common@1.9.0": {
+      "integrity": "sha512-FBS1j5eALPZ4WXjzH23do3GQr6VgzcFJ7vUzemDYGjeUtf+E6a/J14Vf1YFFIqVcjINLjeU/xl3Pjm46j4DgUg==",
+      "dependencies": [
+        "bech32",
+        "bip39",
+        "blake2b",
+        "blakejs"
+      ]
+    },
     "@meshsdk/common@1.9.0-beta.100": {
       "integrity": "sha512-H3ktKR9eheRKZupg7DLdUr8A9dsefJbu7Wc+I1suwrv+oAZWiJ2wCuF3bX2QQo3LyWrSkVCE7WEiKFfQmukIww==",
       "dependencies": [
@@ -270,25 +279,17 @@
         "blakejs"
       ]
     },
-    "@meshsdk/common@1.9.0-beta.102": {
-      "integrity": "sha512-21qkpcGEe3EYpsmCF8uRUj3vM31MeO1y9vWMllKOFPCOYcOIbTfP+EE/HUSbAi7TAFKNd075BqPVgnvb6LA+hA==",
+    "@meshsdk/core-csl@1.9.0": {
+      "integrity": "sha512-CdEEVanE1H7texWTNlriXYzF1Wxxl0yMRpISqx9UIqb9n9l6bioV+L387XzohZvxdmFhmoIy4sMhk/tVd2FSVQ==",
       "dependencies": [
-        "bech32",
-        "bip39",
-        "blake2b",
-        "blakejs"
-      ]
-    },
-    "@meshsdk/core-csl@1.9.0-beta.102": {
-      "integrity": "sha512-ZPRisFi/if9sEKfcWYtiUSasXP1zS+Pxrnm1mOIJSgBHk6zqh+6Na6zUIx6RmPNck2xSSS2sd5tuNbr9z3/L8g==",
-      "dependencies": [
-        "@meshsdk/common@1.9.0-beta.102",
+        "@meshsdk/common@1.9.0",
         "@sidan-lab/whisky-js-browser",
         "@sidan-lab/whisky-js-nodejs",
         "@types/base32-encoding",
         "base32-encoding",
         "bech32",
-        "json-bigint"
+        "json-bigint",
+        "whisky-evaluator"
       ]
     },
     "@meshsdk/core-cst@1.9.0-beta.100_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.0": {
@@ -309,11 +310,11 @@
         "blakejs",
         "bn.js",
         "hash.js",
-        "scalus"
+        "scalus@0.14.2"
       ]
     },
-    "@meshsdk/core-cst@1.9.0-beta.102_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.0": {
-      "integrity": "sha512-PEIfq1c+Rls84giMpCyaGpnWRnjHEKrbDjCBOsL6meVXAARbX85zwSgpGryQL36dU/W6xkc7idNHcKyLW+HvLg==",
+    "@meshsdk/core-cst@1.9.0_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.0": {
+      "integrity": "sha512-2M0oZ5lRTnNfgTy65SEdp/i16CMqm31UNHKq7W7FvTIbIg2k8L8BNB2tq55ARBtXPqO6dYICzXEvHI4pfM6NAQ==",
       "dependencies": [
         "@cardano-sdk/core",
         "@cardano-sdk/crypto",
@@ -323,28 +324,28 @@
         "@harmoniclabs/pair",
         "@harmoniclabs/plutus-data",
         "@harmoniclabs/uplc",
-        "@meshsdk/common@1.9.0-beta.102",
+        "@meshsdk/common@1.9.0",
         "@types/base32-encoding",
         "base32-encoding",
         "bech32",
         "blakejs",
         "bn.js",
-        "hash.js",
-        "scalus"
+        "hash.js"
       ]
     },
-    "@meshsdk/core@1.9.0-beta.102_@bufbuild+protobuf@1.10.1_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.0": {
-      "integrity": "sha512-ZpF5ZnmLoNZ+/8jcgXH3AK3VPacah9Gf31GCJE4udS3Dz16Stbg9+fSIFWkgmZTu/U8cRbr6PcYtNE+mVvq1jg==",
+    "@meshsdk/core@1.9.0_@bufbuild+protobuf@1.10.1_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.0": {
+      "integrity": "sha512-6YTH9EhWOYjEgkUfEzKqOiHjZrtOzbB/tx15lDPx/bBITAuxKUe2LByHZjmzUYbMhd1LnkoJ9v6WrCqiWS7juA==",
       "dependencies": [
-        "@meshsdk/common@1.9.0-beta.102",
-        "@meshsdk/core-cst@1.9.0-beta.102_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.0",
+        "@meshsdk/common@1.9.0",
+        "@meshsdk/core-cst@1.9.0_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.0",
         "@meshsdk/provider",
         "@meshsdk/transaction",
-        "@meshsdk/wallet"
+        "@meshsdk/wallet",
+        "scalus@0.17.0"
       ]
     },
-    "@meshsdk/provider@1.9.0-beta.100_@bufbuild+protobuf@1.10.1_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.0": {
-      "integrity": "sha512-930tN8ZxK/pOXCSlvLxWIUbP5KyEO7EloacuPjSNnRP9rVJlt/AoiW30CSV8l9ZegA9VH30pev9Svv0Qj/kjRQ==",
+    "@meshsdk/provider@1.9.0-beta.101_@bufbuild+protobuf@1.10.1_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.0": {
+      "integrity": "sha512-xbb0pCDpeHk8WEzgZCUlwy1CLpOPSPNn3TPtuLuMNnebCO8lZhvP3NYZqX/CUnTkOjXP4dxu5Zbf7ipZ43V4RQ==",
       "dependencies": [
         "@meshsdk/common@1.9.0-beta.100",
         "@meshsdk/core-cst@1.9.0-beta.100_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.0",
@@ -354,22 +355,22 @@
         "cbor"
       ]
     },
-    "@meshsdk/transaction@1.9.0-beta.102_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.0": {
-      "integrity": "sha512-YW2LF/mzrs/hWw7+F4psfmSELQL37TgYDG+3y8krg+mUClDntYYVftpEDFAuX+YLjxDiGA2bqcAQaW/l28A+aw==",
+    "@meshsdk/transaction@1.9.0_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.0": {
+      "integrity": "sha512-1PxLGoH88A5jUQDV/cUaBh1KvT3sjWwp0DFRP6ASBzwYmhDWr8SNuYQtDB0MLDM7sGXY4VVYq5N46r15TIcB1Q==",
       "dependencies": [
         "@cardano-sdk/core",
         "@cardano-sdk/input-selection",
         "@cardano-sdk/util",
-        "@meshsdk/common@1.9.0-beta.102",
-        "@meshsdk/core-cst@1.9.0-beta.102_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.0",
+        "@meshsdk/common@1.9.0",
+        "@meshsdk/core-cst@1.9.0_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.0",
         "json-bigint"
       ]
     },
-    "@meshsdk/wallet@1.9.0-beta.102_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.0": {
-      "integrity": "sha512-e0Ba4XZ+XQcxQqA211BryIPZ4xkefhlRoAJKp37ZcuTfmiK1IyrDkaBGA3yuEgi1GnUPhNiCrY4aEBfdRrY1YQ==",
+    "@meshsdk/wallet@1.9.0_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.0": {
+      "integrity": "sha512-yu84c5Ao6/8AI76HKq1TqxNZFVwqO/yahufgI8o8IAikG3zaqQpdIl3UwFLFcUeStlbFi1zpYQNNybjmffHvqw==",
       "dependencies": [
-        "@meshsdk/common@1.9.0-beta.102",
-        "@meshsdk/core-cst@1.9.0-beta.102_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.0",
+        "@meshsdk/common@1.9.0",
+        "@meshsdk/core-cst@1.9.0_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.0",
         "@meshsdk/transaction",
         "@simplewebauthn/browser"
       ]
@@ -464,6 +465,12 @@
     "abort-error@1.0.2": {
       "integrity": "sha512-lVgvB2NyPLqbXXhVmXcYFTC1x5K7CiVdPgdY7LGgFQWC8506oN01sPN3i9cl9ynuwF4iJ0TS9exnR7cZ9FuX4w=="
     },
+    "agent-base@6.0.2": {
+      "integrity": "sha512-RZNwNclF7+MS/8bDg70amg32dyeZGZxiDuQmZxKLAlQjr3jGyLx+4Kkk58UO7D2QdgFIQCovuSuZESne6RG6XQ==",
+      "dependencies": [
+        "debug"
+      ]
+    },
     "asynckit@0.4.0": {
       "integrity": "sha512-Oei9OH4tRh0YqU3GxhX79dM/mwVgvbZJaSNaRk+bshkj0S5cfHcgYakreBjrHwatXKbz+IoIdYLxrKim2MjW0Q=="
     },
@@ -473,11 +480,12 @@
         "possible-typed-array-names"
       ]
     },
-    "axios@1.16.0": {
-      "integrity": "sha512-6hp5CwvTPlN2A31g5dxnwAX0orzM7pmCRDLnZSX772mv8WDqICwFjowHuPs04Mc8deIld1+ejhtaMn5vp6b+1w==",
+    "axios@1.16.1": {
+      "integrity": "sha512-caYkukvroVPO8KrzuJEb50Hm07KwfBZPEC3VeFHTsqWHvKTsy54hjJz9BS/cdaypROE2rH6xvm9mHX4fgWkr3A==",
       "dependencies": [
         "follow-redirects",
         "form-data",
+        "https-proxy-agent",
         "proxy-from-env"
       ]
     },
@@ -625,6 +633,12 @@
       "integrity": "sha512-Q+xVJLoGOeIMXZmbUK4HYk+69cQH6LudR0Vu/pRm2YlU/hDV9CiS0gKUMaWY5f2NeUH9C1nV3bsTlCo0FsTV1Q==",
       "dependencies": [
         "node-fetch"
+      ]
+    },
+    "debug@4.4.3": {
+      "integrity": "sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA==",
+      "dependencies": [
+        "ms"
       ]
     },
     "define-data-property@1.1.4": {
@@ -788,6 +802,13 @@
         "function-bind"
       ]
     },
+    "https-proxy-agent@5.0.1": {
+      "integrity": "sha512-dFcAjpTQFgoLMzC2VwU+C/CbS7uRL0lWmxDITmqm7C+7F0Odmj6s9l6alZc6AELXhrnggM2CeWSXHGOdX2YtwA==",
+      "dependencies": [
+        "agent-base",
+        "debug"
+      ]
+    },
     "i@0.3.7": {
       "integrity": "sha512-FYz4wlXgkQwIPqhzC5TdNMLSE5+GS1IIDJZY/1ZiEPCT2S3COUVZeT5OW4BmW4r5LHLQuOosSwsvnroG9GR59Q=="
     },
@@ -910,6 +931,9 @@
     "minimalistic-assert@1.0.1": {
       "integrity": "sha512-UtJcAD4yEaGtjPezWuO9wC4nwUnVH/8/Im3yEHQP4b67cXlD/Qr9hdITCU1xDbSEXg2XKNaP8jsReV7vQd00/A=="
     },
+    "ms@2.1.3": {
+      "integrity": "sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA=="
+    },
     "multiformats@13.4.2": {
       "integrity": "sha512-eh6eHCrRi1+POZ3dA+Dq1C6jhP1GNtr9CRINMb67OKzqW9I5DUuZM/3jLPlzhgpGeiNUlEGEbkCYChXMCc/8DQ=="
     },
@@ -1021,6 +1045,9 @@
     },
     "scalus@0.14.2": {
       "integrity": "sha512-dobDMIUDUVhtxoX3ceGlaykKQGkph4HOE9hjkLsmwVgYf24fIik6YrZzVFrZSNCTvI2WN7hjEknehIrEJo1CMQ=="
+    },
+    "scalus@0.17.0": {
+      "integrity": "sha512-74mD4wL1vw4GVh2ECemQhoB3q5Smwj5S8W7OG1j7OWuLkwJ0Mvz4LFhZPA9rZjpNvanZoKiDqc3S/qGD65uRYg=="
     },
     "serialize-error@8.1.0": {
       "integrity": "sha512-3NnuWfM6vBYoy5gZFvHiYsVbafvI9vZv/+jlIigFn4oP4zjNPK3LhcY0xSCgeb1a5L8jO71Mit9LlNoi2UfDDQ==",
@@ -1169,6 +1196,9 @@
         "has-tostringtag"
       ]
     },
+    "whisky-evaluator@0.1.1": {
+      "integrity": "sha512-SdW1Q5FMDHxKnt0o+YgtMidv/PhNqKM4DDDYGoXUdQ44sUkedS/dGZN1u9UfDoIFARdcoE61F0qOP8OoekEj7Q=="
+    },
     "ws@7.5.10": {
       "integrity": "sha512-+dbF1tHwZpXcbOJdVOkzLDxZP1ailvSxM6ZweXTegylPny803bFhA+vqBYw4s31NSAk4S2Qz+AKXK9a4wkdjcQ=="
     }
@@ -1176,10 +1206,10 @@
   "workspace": {
     "dependencies": [
       "jsr:@std/assert@1",
-      "npm:@meshsdk/common@1.9.0-beta.102",
-      "npm:@meshsdk/core-csl@1.9.0-beta.102",
+      "npm:@meshsdk/common@1.9.0",
+      "npm:@meshsdk/core-csl@1.9.0",
       "npm:@meshsdk/core-cst@^1.9.0-beta.94",
-      "npm:@meshsdk/core@1.9.0-beta.102"
+      "npm:@meshsdk/core@1.9.0"
     ]
   }
 }
