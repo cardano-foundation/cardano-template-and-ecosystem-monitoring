@@ -1,0 +1,368 @@
+{
+  "lastUpdated": "2026-06-01T13:34:18Z",
+  "testSummary": {
+    "total": 105,
+    "passed": 104,
+    "failed": 1,
+    "skipped": 0,
+    "successRate": 0.99
+  },
+  "frameworks": [
+    {
+      "id": "aiken",
+      "label": "Aiken",
+      "kind": "onchain"
+    },
+    {
+      "id": "scalus",
+      "label": "Scalus",
+      "kind": "onchain"
+    },
+    {
+      "id": "ccl-java+aiken",
+      "label": "CCL Java × Aiken",
+      "kind": "cross"
+    },
+    {
+      "id": "ccl-java+scalus",
+      "label": "CCL Java × Scalus",
+      "kind": "cross"
+    },
+    {
+      "id": "meshjs+aiken",
+      "label": "Mesh.js × Aiken",
+      "kind": "cross"
+    },
+    {
+      "id": "meshjs+scalus",
+      "label": "Mesh.js × Scalus",
+      "kind": "cross"
+    },
+    {
+      "id": "evolutionsdk+aiken",
+      "label": "Evolution SDK × Aiken",
+      "kind": "cross"
+    },
+    {
+      "id": "evolutionsdk+scalus",
+      "label": "Evolution SDK × Scalus",
+      "kind": "cross"
+    },
+    {
+      "id": "pycardano+aiken",
+      "label": "PyCardano × Aiken",
+      "kind": "cross"
+    },
+    {
+      "id": "pycardano+scalus",
+      "label": "PyCardano × Scalus",
+      "kind": "cross"
+    }
+  ],
+  "technologies": [
+    {
+      "id": "aiken",
+      "label": "Aiken",
+      "kind": "onchain"
+    },
+    {
+      "id": "scalus",
+      "label": "Scalus",
+      "kind": "onchain"
+    },
+    {
+      "id": "ccl-java",
+      "label": "CCL Java",
+      "kind": "offchain"
+    },
+    {
+      "id": "meshjs",
+      "label": "Mesh.js",
+      "kind": "offchain"
+    },
+    {
+      "id": "evolutionsdk",
+      "label": "Evolution SDK",
+      "kind": "offchain"
+    },
+    {
+      "id": "pycardano",
+      "label": "PyCardano",
+      "kind": "offchain"
+    }
+  ],
+  "useCases": [
+    {
+      "name": "anonymous-data",
+      "aiken": "passed",
+      "scalus": "not-implemented",
+      "ccl-java+aiken": "passed",
+      "ccl-java+scalus": "not-implemented",
+      "meshjs+aiken": "passed",
+      "meshjs+scalus": "not-implemented",
+      "evolutionsdk+aiken": "passed",
+      "evolutionsdk+scalus": "not-implemented",
+      "pycardano+aiken": "passed",
+      "pycardano+scalus": "not-implemented"
+    },
+    {
+      "name": "atomic-transaction",
+      "aiken": "passed",
+      "scalus": "not-implemented",
+      "ccl-java+aiken": "passed",
+      "ccl-java+scalus": "not-implemented",
+      "meshjs+aiken": "passed",
+      "meshjs+scalus": "not-implemented",
+      "evolutionsdk+aiken": "passed",
+      "evolutionsdk+scalus": "not-implemented",
+      "pycardano+aiken": "passed",
+      "pycardano+scalus": "not-implemented"
+    },
+    {
+      "name": "auction",
+      "aiken": "passed",
+      "scalus": "passed",
+      "ccl-java+aiken": "passed",
+      "ccl-java+scalus": "passed",
+      "meshjs+aiken": "passed",
+      "meshjs+scalus": "passed",
+      "evolutionsdk+aiken": "passed",
+      "evolutionsdk+scalus": "passed",
+      "pycardano+aiken": "passed",
+      "pycardano+scalus": "passed"
+    },
+    {
+      "name": "bet",
+      "aiken": "passed",
+      "scalus": "not-implemented",
+      "ccl-java+aiken": "passed",
+      "ccl-java+scalus": "not-implemented",
+      "meshjs+aiken": "failed",
+      "meshjs+scalus": "not-implemented",
+      "evolutionsdk+aiken": "passed",
+      "evolutionsdk+scalus": "not-implemented",
+      "pycardano+aiken": "passed",
+      "pycardano+scalus": "not-implemented"
+    },
+    {
+      "name": "crowdfund",
+      "aiken": "passed",
+      "scalus": "not-implemented",
+      "ccl-java+aiken": "passed",
+      "ccl-java+scalus": "not-implemented",
+      "meshjs+aiken": "passed",
+      "meshjs+scalus": "not-implemented",
+      "evolutionsdk+aiken": "passed",
+      "evolutionsdk+scalus": "not-implemented",
+      "pycardano+aiken": "passed",
+      "pycardano+scalus": "not-implemented"
+    },
+    {
+      "name": "decentralized-identity",
+      "aiken": "passed",
+      "scalus": "not-implemented",
+      "ccl-java+aiken": "passed",
+      "ccl-java+scalus": "not-implemented",
+      "meshjs+aiken": "passed",
+      "meshjs+scalus": "not-implemented",
+      "evolutionsdk+aiken": "passed",
+      "evolutionsdk+scalus": "not-implemented",
+      "pycardano+aiken": "passed",
+      "pycardano+scalus": "not-implemented"
+    },
+    {
+      "name": "escrow",
+      "aiken": "passed",
+      "scalus": "not-implemented",
+      "ccl-java+aiken": "passed",
+      "ccl-java+scalus": "not-implemented",
+      "meshjs+aiken": "passed",
+      "meshjs+scalus": "not-implemented",
+      "evolutionsdk+aiken": "passed",
+      "evolutionsdk+scalus": "not-implemented",
+      "pycardano+aiken": "passed",
+      "pycardano+scalus": "not-implemented"
+    },
+    {
+      "name": "factory",
+      "aiken": "passed",
+      "scalus": "not-implemented",
+      "ccl-java+aiken": "passed",
+      "ccl-java+scalus": "not-implemented",
+      "meshjs+aiken": "passed",
+      "meshjs+scalus": "not-implemented",
+      "evolutionsdk+aiken": "passed",
+      "evolutionsdk+scalus": "not-implemented",
+      "pycardano+aiken": "passed",
+      "pycardano+scalus": "not-implemented"
+    },
+    {
+      "name": "htlc",
+      "aiken": "passed",
+      "scalus": "not-implemented",
+      "ccl-java+aiken": "passed",
+      "ccl-java+scalus": "not-implemented",
+      "meshjs+aiken": "passed",
+      "meshjs+scalus": "not-implemented",
+      "evolutionsdk+aiken": "passed",
+      "evolutionsdk+scalus": "not-implemented",
+      "pycardano+aiken": "passed",
+      "pycardano+scalus": "not-implemented"
+    },
+    {
+      "name": "lottery",
+      "aiken": "passed",
+      "scalus": "not-implemented",
+      "ccl-java+aiken": "passed",
+      "ccl-java+scalus": "not-implemented",
+      "meshjs+aiken": "passed",
+      "meshjs+scalus": "not-implemented",
+      "evolutionsdk+aiken": "passed",
+      "evolutionsdk+scalus": "not-implemented",
+      "pycardano+aiken": "passed",
+      "pycardano+scalus": "not-implemented"
+    },
+    {
+      "name": "payment-splitter",
+      "aiken": "passed",
+      "scalus": "passed",
+      "ccl-java+aiken": "passed",
+      "ccl-java+scalus": "passed",
+      "meshjs+aiken": "passed",
+      "meshjs+scalus": "passed",
+      "evolutionsdk+aiken": "passed",
+      "evolutionsdk+scalus": "passed",
+      "pycardano+aiken": "passed",
+      "pycardano+scalus": "passed"
+    },
+    {
+      "name": "pricebet",
+      "aiken": "passed",
+      "scalus": "not-implemented",
+      "ccl-java+aiken": "passed",
+      "ccl-java+scalus": "not-implemented",
+      "meshjs+aiken": "passed",
+      "meshjs+scalus": "not-implemented",
+      "evolutionsdk+aiken": "passed",
+      "evolutionsdk+scalus": "not-implemented",
+      "pycardano+aiken": "passed",
+      "pycardano+scalus": "not-implemented"
+    },
+    {
+      "name": "simple-transfer",
+      "aiken": "passed",
+      "scalus": "not-implemented",
+      "ccl-java+aiken": "passed",
+      "ccl-java+scalus": "not-implemented",
+      "meshjs+aiken": "passed",
+      "meshjs+scalus": "not-implemented",
+      "evolutionsdk+aiken": "passed",
+      "evolutionsdk+scalus": "not-implemented",
+      "pycardano+aiken": "passed",
+      "pycardano+scalus": "not-implemented"
+    },
+    {
+      "name": "simple-wallet",
+      "aiken": "passed",
+      "scalus": "not-implemented",
+      "ccl-java+aiken": "passed",
+      "ccl-java+scalus": "not-implemented",
+      "meshjs+aiken": "passed",
+      "meshjs+scalus": "not-implemented",
+      "evolutionsdk+aiken": "passed",
+      "evolutionsdk+scalus": "not-implemented",
+      "pycardano+aiken": "passed",
+      "pycardano+scalus": "not-implemented"
+    },
+    {
+      "name": "storage",
+      "aiken": "passed",
+      "scalus": "not-implemented",
+      "ccl-java+aiken": "passed",
+      "ccl-java+scalus": "not-implemented",
+      "meshjs+aiken": "passed",
+      "meshjs+scalus": "not-implemented",
+      "evolutionsdk+aiken": "passed",
+      "evolutionsdk+scalus": "not-implemented",
+      "pycardano+aiken": "passed",
+      "pycardano+scalus": "not-implemented"
+    },
+    {
+      "name": "token-transfer",
+      "aiken": "passed",
+      "scalus": "not-implemented",
+      "ccl-java+aiken": "passed",
+      "ccl-java+scalus": "not-implemented",
+      "meshjs+aiken": "passed",
+      "meshjs+scalus": "not-implemented",
+      "evolutionsdk+aiken": "passed",
+      "evolutionsdk+scalus": "not-implemented",
+      "pycardano+aiken": "passed",
+      "pycardano+scalus": "not-implemented"
+    },
+    {
+      "name": "upgradable-proxy",
+      "aiken": "passed",
+      "scalus": "not-implemented",
+      "ccl-java+aiken": "passed",
+      "ccl-java+scalus": "not-implemented",
+      "meshjs+aiken": "passed",
+      "meshjs+scalus": "not-implemented",
+      "evolutionsdk+aiken": "passed",
+      "evolutionsdk+scalus": "not-implemented",
+      "pycardano+aiken": "passed",
+      "pycardano+scalus": "not-implemented"
+    },
+    {
+      "name": "vault",
+      "aiken": "passed",
+      "scalus": "not-implemented",
+      "ccl-java+aiken": "passed",
+      "ccl-java+scalus": "not-implemented",
+      "meshjs+aiken": "passed",
+      "meshjs+scalus": "not-implemented",
+      "evolutionsdk+aiken": "passed",
+      "evolutionsdk+scalus": "not-implemented",
+      "pycardano+aiken": "passed",
+      "pycardano+scalus": "not-implemented"
+    },
+    {
+      "name": "vesting",
+      "aiken": "passed",
+      "scalus": "not-implemented",
+      "ccl-java+aiken": "passed",
+      "ccl-java+scalus": "not-implemented",
+      "meshjs+aiken": "passed",
+      "meshjs+scalus": "not-implemented",
+      "evolutionsdk+aiken": "passed",
+      "evolutionsdk+scalus": "not-implemented",
+      "pycardano+aiken": "passed",
+      "pycardano+scalus": "not-implemented"
+    }
+  ],
+  "versions": {
+    "current": {
+      "aiken-compiler": "v1.1.22",
+      "aiken-lang/stdlib": "v3.1.0",
+      "sidan-lab/vodka": "0.1.23",
+      "@meshsdk/core": "1.9.0",
+      "@meshsdk/core-csl": "1.9.0",
+      "@meshsdk/common": "1.9.0",
+      "@evolution-sdk/lucid": "2.0.1",
+      "cardano-client-lib": "0.8.0-pre4",
+      "pycardano": "0.19.2"
+    },
+    "latest": {
+      "aiken-compiler": "v1.1.22",
+      "aiken-lang/stdlib": "v3.1.0",
+      "sidan-lab/vodka": "0.1.23",
+      "@meshsdk/core": "1.9.0",
+      "@meshsdk/core-csl": "1.9.0",
+      "@meshsdk/common": "1.9.0",
+      "@evolution-sdk/lucid": "2.0.1",
+      "cardano-client-lib": "0.8.0-pre4",
+      "pycardano": "0.19.2"
+    },
+    "outdated": []
+  }
+}
