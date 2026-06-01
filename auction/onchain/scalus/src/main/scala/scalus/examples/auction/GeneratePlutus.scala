@@ -14,13 +14,24 @@ object GeneratePlutus:
     // the Aiken-compiled blueprint shape that off-chain code expects.
     val sir     = scalus.Compiler.compile(AuctionValidator.validate)
     val program = sir.toUplc(generateErrorTraces = true)
-    val doubleCborHex = program.plutusV3.doubleCborHex
+    val uplc    = program.plutusV3
+
+    // Two different encodings for two different consumers:
+    //   * `doubleCborHex` (CBOR-of-CBOR-of-flat) is what `PlutusV3Script.builder`
+    //     expects, so the script hash is computed from that.
+    //   * `cborEncoded` (single CBOR layer wrapping the flat UPLC) is what goes
+    //     into the blueprint's `compiledCode` field — off-chain libraries
+    //     re-wrap it in CBOR when building the script. Writing the double form
+    //     here yields "TooMuchSpace" at deserialisation time on chain.
+    //     payment-splitter's `GenUplc.scala` is the working reference.
+    val doubleCborHex   = uplc.doubleCborHex
+    val singleCborHex   = HexUtil.encodeHexString(uplc.cborEncoded)
 
     val script     = PlutusV3Script.builder().cborHex(doubleCborHex).build()
     val scriptHash = HexUtil.encodeHexString(script.getScriptHash)
 
     val template = readResource("/plutus.json.template")
-    val output   = template.replace("$compiledCode", doubleCborHex).replace("$hash", scriptHash)
+    val output   = template.replace("$compiledCode", singleCborHex).replace("$hash", scriptHash)
     writeFile("plutus.json", output)
     println(s"plutus.json written (hash=$scriptHash)")
 
