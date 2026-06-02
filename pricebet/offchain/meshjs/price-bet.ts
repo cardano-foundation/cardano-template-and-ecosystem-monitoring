@@ -14,7 +14,12 @@ import {
   type UTxO,
 } from "@meshsdk/core";
 import { applyParamsToScript } from "@meshsdk/core-csl";
-import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
+// PLUTUS_JSON lets the cross-check runner point this flow at any on-chain
+// blueprint (aiken, scalus, …); falls back to the local Aiken blueprint.
+const BLUEPRINT_PATH =
+  Deno.env.get("PLUTUS_JSON") ??
+  new URL("../../onchain/aiken/plutus.json", import.meta.url).pathname;
+const blueprint = JSON.parse(Deno.readTextFileSync(BLUEPRINT_PATH)) as { validators: any[] };
 
 // Pricebet: validator referencing an oracle UTxO at an always-true PlutusV3 address.
 // Scenario: setup-oracle → create → join → win ; second flow: create → wait → timeout.

@@ -11,7 +11,7 @@
 const BLUEPRINT_PATH =
   Deno.env.get("PLUTUS_JSON") ??
   new URL("../../onchain/aiken/plutus.json", import.meta.url).pathname;
-const blueprint = JSON.parse(Deno.readTextFileSync(BLUEPRINT_PATH));
+const blueprint = JSON.parse(Deno.readTextFileSync(BLUEPRINT_PATH)) as { validators: any[] };
 
 // Load the validator BY TITLE (not by array index) so a blueprint that lists
 // its validators in a different order can never silently break the cross-check.

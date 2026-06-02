@@ -21,7 +21,7 @@ import { SLOT_CONFIG_NETWORK } from "@evolution-sdk/plutus";
 const BLUEPRINT_PATH =
   Deno.env.get("PLUTUS_JSON") ??
   new URL("../../onchain/aiken/plutus.json", import.meta.url).pathname;
-const blueprint = JSON.parse(Deno.readTextFileSync(BLUEPRINT_PATH));
+const blueprint = JSON.parse(Deno.readTextFileSync(BLUEPRINT_PATH)) as { validators: any[] };
 
 // ----------------------------------------------------------------------------
 // English auction. Single PlutusV3 validator with mint (init the NFT lot)

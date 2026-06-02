@@ -9,7 +9,12 @@ import {
   type UTxO,
 } from "@meshsdk/core";
 import { applyParamsToScript } from "@meshsdk/core-csl";
-import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
+// PLUTUS_JSON lets the cross-check runner point this flow at any on-chain
+// blueprint (aiken, scalus, …); falls back to the local Aiken blueprint.
+const BLUEPRINT_PATH =
+  Deno.env.get("PLUTUS_JSON") ??
+  new URL("../../onchain/aiken/plutus.json", import.meta.url).pathname;
+const blueprint = JSON.parse(Deno.readTextFileSync(BLUEPRINT_PATH)) as { validators: any[] };
 
 // Simple transfer: parameterized validator (receiver_vkh); only the recipient may claim.
 // Mesh quirk: omit `evaluator` so Mesh's CPU estimator is used against yaci-devkit.

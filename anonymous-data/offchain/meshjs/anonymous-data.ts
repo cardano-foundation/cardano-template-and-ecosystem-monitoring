@@ -9,7 +9,12 @@ import {
 } from "@meshsdk/core";
 import { applyParamsToScript } from "@meshsdk/core-csl";
 import blake2b from "blake2b";
-import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
+// PLUTUS_JSON lets the cross-check runner point this flow at any on-chain
+// blueprint (aiken, scalus, …); falls back to the local Aiken blueprint.
+const BLUEPRINT_PATH =
+  Deno.env.get("PLUTUS_JSON") ??
+  new URL("../../onchain/aiken/plutus.json", import.meta.url).pathname;
+const blueprint = JSON.parse(Deno.readTextFileSync(BLUEPRINT_PATH)) as { validators: any[] };
 
 // Anonymous-data: commit (mint singleton ID-named token + lock datum) then reveal
 // (spend with nonce as redeemer; pkh + nonce must hash to the token name).

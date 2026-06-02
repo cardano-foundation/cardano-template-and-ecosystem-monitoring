@@ -21,7 +21,7 @@ import { applyParamsToScript } from "@meshsdk/core-csl";
 const BLUEPRINT_PATH =
   Deno.env.get("PLUTUS_JSON") ??
   new URL("../../onchain/aiken/plutus.json", import.meta.url).pathname;
-const blueprint = JSON.parse(Deno.readTextFileSync(BLUEPRINT_PATH));
+const blueprint = JSON.parse(Deno.readTextFileSync(BLUEPRINT_PATH)) as { validators: any[] };
 
 // Auction: a single PlutusV3 script handling START (mint), BID, and END (spend).
 // Scenario walks init → bid → bid → end with three brewed wallets.

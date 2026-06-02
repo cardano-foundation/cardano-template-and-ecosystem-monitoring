@@ -20,7 +20,12 @@ import {
   type Value,
 } from "@meshsdk/core";
 import { applyParamsToScript } from "@meshsdk/core-csl";
-import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
+// PLUTUS_JSON lets the cross-check runner point this flow at any on-chain
+// blueprint (aiken, scalus, …); falls back to the local Aiken blueprint.
+const BLUEPRINT_PATH =
+  Deno.env.get("PLUTUS_JSON") ??
+  new URL("../../onchain/aiken/plutus.json", import.meta.url).pathname;
+const blueprint = JSON.parse(Deno.readTextFileSync(BLUEPRINT_PATH)) as { validators: any[] };
 
 // Escrow: two-party trade — Initiation → ActiveEscrow → CompleteTrade, plus a Cancel path.
 // Mesh quirk: omit `evaluator` so Mesh's CPU estimator is used against yaci-devkit.
