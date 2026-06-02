@@ -1,11 +1,11 @@
 {
-  "lastUpdated": "2026-06-01T13:34:18Z",
+  "lastUpdated": "2026-06-01T12:41:26Z",
   "testSummary": {
     "total": 105,
-    "passed": 104,
-    "failed": 1,
+    "passed": 105,
+    "failed": 0,
     "skipped": 0,
-    "successRate": 0.99
+    "successRate": 1.00
   },
   "frameworks": [
     {
@@ -137,7 +137,7 @@
       "scalus": "not-implemented",
       "ccl-java+aiken": "passed",
       "ccl-java+scalus": "not-implemented",
-      "meshjs+aiken": "failed",
+      "meshjs+aiken": "passed",
       "meshjs+scalus": "not-implemented",
       "evolutionsdk+aiken": "passed",
       "evolutionsdk+scalus": "not-implemented",
