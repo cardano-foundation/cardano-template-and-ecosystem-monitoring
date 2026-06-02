@@ -170,8 +170,7 @@ public class Vault {
         }
 
         private static PlutusScript getParametrisedPlutusScript() {
-                Path plutusJson = Paths.get(System.getProperty("user.dir"),
-                                "..", "..", "onchain", "aiken", "plutus.json");
+                Path plutusJson = Paths.get(System.getenv("PLUTUS_JSON") != null && !System.getenv("PLUTUS_JSON").isBlank() ? System.getenv("PLUTUS_JSON") : "../../onchain/aiken/plutus.json");
                 PlutusContractBlueprint blueprint = PlutusBlueprintLoader.loadBlueprint(plutusJson.toFile());
                 String compiledCode = blueprint.getValidators().getFirst().getCompiledCode();
 

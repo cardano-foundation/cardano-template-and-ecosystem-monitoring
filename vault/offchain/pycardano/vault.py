@@ -70,8 +70,13 @@ TEST_MNEMONIC = (
     "test test test test test test test test test test test test "
     "test test test test test test test test test test test sauce"
 )
-BLUEPRINT_PATH = (
-    Path(__file__).resolve().parents[2] / "onchain" / "aiken" / "plutus.json"
+# PLUTUS_JSON lets the cross-check runner point this flow at any on-chain
+# blueprint (aiken, scalus, …); falls back to the local Aiken blueprint.
+BLUEPRINT_PATH = Path(
+    os.environ.get(
+        "PLUTUS_JSON",
+        Path(__file__).resolve().parents[2] / "onchain" / "aiken" / "plutus.json",
+    )
 )
 
 # Short cool-down so we don't have to wait minutes for FINALIZE.

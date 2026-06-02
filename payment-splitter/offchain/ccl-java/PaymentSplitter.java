@@ -61,7 +61,7 @@ static PlutusScript plutusScript;
 static String scriptAddress;
 
 static void init() {
-    var plutusContractBlueprint = PlutusBlueprintLoader.loadBlueprint(new File("../../onchain/aiken/plutus.json"));
+    var plutusContractBlueprint = PlutusBlueprintLoader.loadBlueprint(new File(System.getenv("PLUTUS_JSON") != null && !System.getenv("PLUTUS_JSON").isBlank() ? System.getenv("PLUTUS_JSON") : "../../onchain/aiken/plutus.json"));
     String paymentSplitterValidatorCompiledCode = plutusContractBlueprint.getValidators().get(0).getCompiledCode();
 
     String compiledCode = AikenScriptUtil.applyParamToScript(ListPlutusData.of(

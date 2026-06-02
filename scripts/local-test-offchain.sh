@@ -154,24 +154,28 @@ print_fw_summary() {
   GRAND_FAILED=$(( GRAND_FAILED + RM_FAILED ))
 }
 
-# run_matrix <off-id> <off-prefix> <entry-glob> <run-fn>
-#   Discovers examples via <entry-glob>, then for each (example × on-chain) runs
-#   <run-fn> "<entry-file>" "<plutus-json>" "<logfile>" inside the example dir.
+# run_matrix <off-id> <off-prefix> <subdir> <entry-glob> <runtime>
+#   Discovers examples (dirs containing <subdir>), resolves the entry file via
+#   <entry-glob>, then for each (example × on-chain) runs the runtime inside the
+#   example's off-chain dir with PLUTUS_JSON pointed at that on-chain's blueprint.
+#   Fully driven by frameworks.json fields — no per-framework code.
 run_matrix() {
-  local off_id="$1" off_pfx="$2" glob="$3" run_fn="$4"
+  local off_id="$1" off_pfx="$2" subdir="$3" entry_glob="$4" runtime="$5"
   RM_TOTAL=0; RM_PASSED=0; RM_FAILED=0
 
-  while IFS= read -r marker; do
-    [[ -f "$marker" ]] || continue
-    local dir example
-    dir=$(dirname "$marker")
-    example=$(echo "$marker" | cut -d'/' -f2)
+  while IFS= read -r dir; do
+    [[ -d "$dir" ]] || continue
+    local example
+    example=$(echo "$dir" | cut -d'/' -f2)
 
-    # Resolve the entry file (language-specific) once per example.
+    # Optional scope filter for fast local iteration: ONLY_EXAMPLE=auction.
+    [[ -n "${ONLY_EXAMPLE:-}" && "$example" != "${ONLY_EXAMPLE}" ]] && continue
+
+    # Resolve the entry file via the framework's entryGlob.
     local entry
-    entry=$("resolve_entry_${off_pfx}" "$dir") || true
+    entry=$(_first_basename "$dir" "$entry_glob") || true
     if [[ -z "$entry" ]]; then
-      echo -e "   ${RED}❌ No entry file in $dir${NC}"
+      echo -e "   ${RED}❌ No entry file ($entry_glob) in $dir${NC}"
       continue
     fi
 
@@ -207,7 +211,7 @@ run_matrix() {
 
       # `|| code=$?` keeps `set -e` from aborting the whole run on a failing test.
       local code=0
-      ( cd "$dir" && PLUTUS_JSON="$pj" "$run_fn" "$entry" "$log" ) || code=$?
+      ( cd "$dir" && PLUTUS_JSON="$pj" run_offchain "$runtime" "$entry" "$log" ) || code=$?
 
       local status; status=$(classify_exit "$code")
       write_status "$off_pfx" "$onid" "$example" "$status"
@@ -225,77 +229,81 @@ run_matrix() {
       fi
       echo ""
     done
-  done < <(find . -maxdepth 4 -path "$glob" -type f | sort)
+  done < <(find . -maxdepth 4 -path "*/${subdir}" -type d | sort)
 }
 
-# ── Entry-file resolvers (per off-chain language; portable, no `xargs -r`) ─────
+# ── Entry-file resolver (portable, no `xargs -r`) ─────────────────────────────
 _first_basename() { local f; f=$(find "$1" -maxdepth 1 -name "$2" -type f | head -1); [[ -n "$f" ]] && basename "$f"; }
-resolve_entry_ccl()       { _first_basename "$1" "*.java"; }
-resolve_entry_mesh()      { _first_basename "$1" "*.ts"; }
-resolve_entry_evosdk()    { _first_basename "$1" "*.ts"; }
-resolve_entry_pycardano() { _first_basename "$1" "*.py"; }
 
-# ── Run-functions (executed inside the example dir; PLUTUS_JSON already set) ───
-run_ccl() {
-  run_with_timeout 300 jbang "$1" 2>&1 | tee "$2"
-  return "${PIPESTATUS[0]}"
-}
-run_deno() {
-  run_with_timeout 300 deno run --allow-all "$1" 2>&1 | tee "$2"
-  return "${PIPESTATUS[0]}"
-}
-run_pycardano() {
-  local entry="$1" log="$2"
-  local venv=".venv-local"
-  [[ -d "$venv" ]] || python3 -m venv "$venv"
-  # shellcheck source=/dev/null
-  source "$venv/bin/activate"
-  pip install --quiet --upgrade pip >/dev/null 2>&1 || true
-  pip install --quiet -r requirements.txt >/dev/null 2>&1 || true
-  run_with_timeout 300 python "$entry" 2>&1 | tee "$log"
-  local code="${PIPESTATUS[0]}"
-  deactivate || true
-  return "$code"
+# ── Runtime support ────────────────────────────────────────────────────────────
+# A runtime is the language toolchain an off-chain framework runs on. Adding a
+# new framework that uses an EXISTING runtime needs no edits here — only a
+# frameworks.json entry. A genuinely new runtime adds one case to each function.
+runtime_tool_ok() {
+  case "$1" in
+    deno)   command -v deno    &>/dev/null ;;
+    jbang)  command -v jbang   &>/dev/null ;;
+    python) command -v python3 &>/dev/null ;;
+    *)      return 1 ;;
+  esac
 }
 
-# ── CCL Java ──────────────────────────────────────────────────────────────────
-echo -e "${BLUE}Testing CCL Java Examples${NC}"; echo "----------------------------------------"
-if command -v jbang &>/dev/null; then
-  echo "JBang: $(jbang version 2>/dev/null || echo unknown)"; echo ""
-  run_matrix "ccl-java" "ccl" "*/offchain/ccl-java/*.java" run_ccl
-  print_fw_summary "CCL Java"
-else
-  echo -e "${RED}❌ JBang not installed. Skipping CCL Java tests.${NC}"; echo ""
-fi
+# run_offchain <runtime> <entry> <log>  (cwd = example off-chain dir; PLUTUS_JSON set)
+run_offchain() {
+  local runtime="$1" entry="$2" log="$3"
+  case "$runtime" in
+    jbang)
+      run_with_timeout 300 jbang "$entry" 2>&1 | tee "$log"
+      return "${PIPESTATUS[0]}" ;;
+    deno)
+      run_with_timeout 300 deno run --allow-all "$entry" 2>&1 | tee "$log"
+      return "${PIPESTATUS[0]}" ;;
+    python)
+      local venv=".venv-local"
+      [[ -d "$venv" ]] || python3 -m venv "$venv"
+      # shellcheck source=/dev/null
+      source "$venv/bin/activate"
+      pip install --quiet --upgrade pip >/dev/null 2>&1 || true
+      [[ -f requirements.txt ]] && pip install --quiet -r requirements.txt >/dev/null 2>&1 || true
+      run_with_timeout 300 python "$entry" 2>&1 | tee "$log"
+      local code="${PIPESTATUS[0]}"
+      deactivate || true
+      return "$code" ;;
+    *)
+      echo "unknown runtime: $runtime" >&2
+      return 2 ;;
+  esac
+}
 
-# ── Mesh.js ───────────────────────────────────────────────────────────────────
-echo ""; echo -e "${BLUE}Testing Mesh.js Examples${NC}"; echo "----------------------------------------"
-if command -v deno &>/dev/null; then
-  echo "Deno: $(deno --version | head -1)"; echo ""
-  run_matrix "meshjs" "mesh" "*/offchain/meshjs/*.ts" run_deno
-  print_fw_summary "Mesh.js"
-else
-  echo -e "${RED}❌ Deno not installed. Skipping Mesh.js tests.${NC}"; echo ""
+# ── Run every off-chain framework, fully driven by frameworks.json ─────────────
+# Adding a framework = one frameworks.json entry (id/label/statusPrefix/subdir/
+# entryGlob/runtime). No code below changes.
+if ! command -v jq &>/dev/null || [ ! -f "$FRAMEWORKS_FILE" ]; then
+  echo -e "${RED}❌ jq and frameworks.json are required to drive the off-chain matrix.${NC}" >&2
+  exit 1
 fi
+while IFS= read -r fw; do
+  off_id=$(jq -r '.id'                                          <<<"$fw")
+  off_lbl=$(jq -r '.label'                                      <<<"$fw")
+  off_pfx=$(jq -r '.statusPrefix'                               <<<"$fw")
+  subdir=$(jq -r '.subdir // (.discoveryPath | sub("/[^/]+$";""))' <<<"$fw")
+  entry_glob=$(jq -r '.entryGlob // "*"'                        <<<"$fw")
+  runtime=$(jq -r '.runtime // ""'                              <<<"$fw")
 
-# ── Evolution SDK ─────────────────────────────────────────────────────────────
-echo ""; echo -e "${BLUE}Testing Evolution SDK Examples${NC}"; echo "----------------------------------------"
-if command -v deno &>/dev/null; then
-  run_matrix "evolutionsdk" "evosdk" "*/offchain/evolutionsdk/*.ts" run_deno
-  print_fw_summary "Evolution SDK"
-else
-  echo -e "${RED}❌ Deno not installed. Skipping Evolution SDK tests.${NC}"; echo ""
-fi
+  # Optional scope filter for fast local iteration: ONLY_FRAMEWORK=meshjs.
+  [[ -n "${ONLY_FRAMEWORK:-}" && "$off_id" != "${ONLY_FRAMEWORK}" ]] && continue
 
-# ── PyCardano ─────────────────────────────────────────────────────────────────
-echo ""; echo -e "${BLUE}Testing PyCardano Examples${NC}"; echo "----------------------------------------"
-if command -v python3 &>/dev/null; then
-  echo "Python: $(python3 --version 2>&1)"; echo ""
-  run_matrix "pycardano" "pycardano" "*/offchain/pycardano/requirements.txt" run_pycardano
-  print_fw_summary "PyCardano"
-else
-  echo -e "${RED}❌ Python not installed. Skipping PyCardano tests.${NC}"; echo ""
-fi
+  echo ""
+  echo -e "${BLUE}Testing ${off_lbl} Examples${NC}"; echo "----------------------------------------"
+  if [ -z "$runtime" ]; then
+    echo -e "${YELLOW}⚠️  No runtime declared for ${off_id} — skipping${NC}"; continue
+  fi
+  if ! runtime_tool_ok "$runtime"; then
+    echo -e "${RED}❌ runtime '${runtime}' not installed — skipping ${off_lbl}${NC}"; continue
+  fi
+  run_matrix "$off_id" "$off_pfx" "$subdir" "$entry_glob" "$runtime"
+  print_fw_summary "$off_lbl"
+done < <(jq -c '.frameworks[] | select(.kind=="offchain")' "$FRAMEWORKS_FILE")
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo -e "${BLUE}========================================"

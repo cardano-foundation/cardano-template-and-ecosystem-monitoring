@@ -8,7 +8,12 @@ import {
   type Validator,
   getAddressDetails,
 } from "@evolution-sdk/lucid";
-import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
+// PLUTUS_JSON lets the cross-check runner point this flow at any on-chain
+// blueprint (aiken, scalus, …); falls back to the local Aiken blueprint.
+const BLUEPRINT_PATH =
+  Deno.env.get("PLUTUS_JSON") ??
+  new URL("../../onchain/aiken/plutus.json", import.meta.url).pathname;
+const blueprint = JSON.parse(Deno.readTextFileSync(BLUEPRINT_PATH)) as { validators: any[] };
 import { EscrowDatum, EscrowRedeemer } from "./types.ts";
 
 // ----------------------------------------------------------------------------

@@ -136,7 +136,7 @@ public class AtomicTransaction {
 
         private static PlutusScript getPlutusScript() {
                 String workingDir = System.getProperty("user.dir");
-                Path plutusJsonPath = Paths.get(workingDir, "..", "..", "onchain", "aiken", "plutus.json");
+                Path plutusJsonPath = Paths.get(System.getenv("PLUTUS_JSON") != null && !System.getenv("PLUTUS_JSON").isBlank() ? System.getenv("PLUTUS_JSON") : "../../onchain/aiken/plutus.json");
 
                 PlutusContractBlueprint plutusContractBlueprint = PlutusBlueprintLoader
                                 .loadBlueprint(plutusJsonPath.toFile());

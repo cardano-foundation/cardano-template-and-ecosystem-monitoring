@@ -15,7 +15,12 @@ import {
 } from "@evolution-sdk/lucid";
 import { encodeHex } from "@std/encoding/hex";
 import { sha3_256 } from "@noble/hashes/sha3.js";
-import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
+// PLUTUS_JSON lets the cross-check runner point this flow at any on-chain
+// blueprint (aiken, scalus, …); falls back to the local Aiken blueprint.
+const BLUEPRINT_PATH =
+  Deno.env.get("PLUTUS_JSON") ??
+  new URL("../../onchain/aiken/plutus.json", import.meta.url).pathname;
+const blueprint = JSON.parse(Deno.readTextFileSync(BLUEPRINT_PATH)) as { validators: any[] };
 import { ProxyDatum, WithdrawalRedeemerV1, WithdrawalRedeemerV2 } from "./types.ts";
 
 // ----------------------------------------------------------------------------

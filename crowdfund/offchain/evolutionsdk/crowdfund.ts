@@ -10,7 +10,12 @@ import {
   type Script,
 } from "@evolution-sdk/lucid";
 import { SLOT_CONFIG_NETWORK } from "@evolution-sdk/plutus";
-import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
+// PLUTUS_JSON lets the cross-check runner point this flow at any on-chain
+// blueprint (aiken, scalus, …); falls back to the local Aiken blueprint.
+const BLUEPRINT_PATH =
+  Deno.env.get("PLUTUS_JSON") ??
+  new URL("../../onchain/aiken/plutus.json", import.meta.url).pathname;
+const blueprint = JSON.parse(Deno.readTextFileSync(BLUEPRINT_PATH)) as { validators: any[] };
 
 // ----------------------------------------------------------------------------
 // Crowdfund. Parameterised PlutusV3 validator (beneficiary_vkh, goal,

@@ -140,7 +140,7 @@ public class TokenTransfer {
 
         private static PlutusScript createParametrizedContract() throws CborSerializationException {
                 PlutusContractBlueprint plutusContractBlueprint = PlutusBlueprintLoader
-                                .loadBlueprint(new File("../../onchain/aiken/plutus.json"));
+                                .loadBlueprint(new File(System.getenv("PLUTUS_JSON") != null && !System.getenv("PLUTUS_JSON").isBlank() ? System.getenv("PLUTUS_JSON") : "../../onchain/aiken/plutus.json"));
                 String simpleTransferCompiledCode = plutusContractBlueprint.getValidators().getFirst()
                                 .getCompiledCode();
 

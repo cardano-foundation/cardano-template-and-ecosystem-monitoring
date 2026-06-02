@@ -18,7 +18,12 @@ import {
   scriptHashToRewardAddress,
 } from "@meshsdk/core-csl";
 import { sha3_256 } from "@noble/hashes/sha3";
-import blueprint from "../../onchain/aiken/plutus.json" with { type: "json" };
+// PLUTUS_JSON lets the cross-check runner point this flow at any on-chain
+// blueprint (aiken, scalus, …); falls back to the local Aiken blueprint.
+const BLUEPRINT_PATH =
+  Deno.env.get("PLUTUS_JSON") ??
+  new URL("../../onchain/aiken/plutus.json", import.meta.url).pathname;
+const blueprint = JSON.parse(Deno.readTextFileSync(BLUEPRINT_PATH)) as { validators: any[] };
 
 // Upgradable proxy: proxy script publishes itself as a reference UTxO and delegates logic
 // via withdraw-zero to versioned logic scripts. Scenario: init → mint(v1) → swap → mint(v2).

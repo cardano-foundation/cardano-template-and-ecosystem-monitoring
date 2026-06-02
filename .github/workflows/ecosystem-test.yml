@@ -7,21 +7,22 @@ name: Cardano Ecosystem CI
 # .github/workflows/_*.yml and composite actions under .github/actions/.
 #
 # Off-chain tests run in a cross-product: each off-chain framework is tested
-# against every on-chain framework that has compiled a plutus.json artifact.
+# against every on-chain framework whose example set it shares. The discover job
+# computes that cross-product as `offchain-matrix` (in local-test-discovery.sh),
+# and a single matrix-driven `test-offchain` job runs every combo through the
+# runtime-generic reusable workflow `_test-offchain.yml`.
 # Artifact and log naming: plutus-<onchain>-<example> / logs-<prefix>-<onchain>-<example>
 # so the dashboard generator can correlate them automatically.
 #
-# Adding a new on-chain framework:
-#   1. Add it to frameworks.json (kind: onchain).
-#   2. Add a compile-<id> job below pointing at the right reusable compile workflow.
-#   3. Add test-<offchain>-vs-<id> blocks for each off-chain framework.
-#   4. Add the new onchain id to the compute-cross-matrix intersections.
-#   5. Add compile-<id> and test-*-vs-<id> to the report-and-dashboard needs list.
+# Adding a new OFF-CHAIN framework:
+#   1. Add it to frameworks.json (kind: offchain, with runtime/subdir/entryGlob).
+#      It flows into `offchain-matrix` automatically — no YAML changes here.
 #
-# Adding a new off-chain framework:
-#   1. Add it to frameworks.json (kind: offchain).
-#   2. Add test-<id>-vs-aiken and test-<id>-vs-scalus blocks below.
-#   3. Add those jobs to the report-and-dashboard needs list.
+# Adding a new ON-CHAIN framework:
+#   1. Add it to frameworks.json (kind: onchain).
+#   2. Add a compile-<id> job below pointing at the right reusable compile workflow,
+#      and add it to test-offchain's `needs` + the report-and-dashboard `needs`.
+#      (Off-chain combos against it appear in `offchain-matrix` automatically.)
 
 on:
   push:
@@ -50,12 +51,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      aiken-examples:  ${{ steps.discovery.outputs.aiken-examples }}
-      scalus-examples: ${{ steps.discovery.outputs.scalus-examples }}
-      ccl-examples:    ${{ steps.discovery.outputs.ccl-examples }}
-      mesh-examples:   ${{ steps.discovery.outputs.mesh-examples }}
-      evosdk-examples: ${{ steps.discovery.outputs.evosdk-examples }}
-      pycardano-examples: ${{ steps.discovery.outputs.pycardano-examples }}
+      # On-chain example lists drive the compile jobs; offchain-matrix is the
+      # off-chain × on-chain cross-product that drives the single test job.
+      aiken-examples:   ${{ steps.discovery.outputs.aiken-examples }}
+      scalus-examples:  ${{ steps.discovery.outputs.scalus-examples }}
+      offchain-matrix:  ${{ steps.discovery.outputs.offchain-matrix }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -66,37 +66,8 @@ jobs:
           chmod +x scripts/local-test-discovery.sh
           scripts/local-test-discovery.sh
 
-  # ───────────────────────────────────────────────────────────────────────────
-  # Cross-matrix: compute offchain ∩ scalus for each off-chain framework
-  # ───────────────────────────────────────────────────────────────────────────
-  compute-cross-matrix:
-    name: Compute cross-product example lists
-    needs: discover
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      ccl-x-scalus:       ${{ steps.compute.outputs.ccl-x-scalus }}
-      mesh-x-scalus:      ${{ steps.compute.outputs.mesh-x-scalus }}
-      evosdk-x-scalus:    ${{ steps.compute.outputs.evosdk-x-scalus }}
-      pycardano-x-scalus: ${{ steps.compute.outputs.pycardano-x-scalus }}
-    steps:
-      - name: Compute intersections
-        id: compute
-        env:
-          CCL:       ${{ needs.discover.outputs.ccl-examples }}
-          MESH:      ${{ needs.discover.outputs.mesh-examples }}
-          EVOSDK:    ${{ needs.discover.outputs.evosdk-examples }}
-          PYCARDANO: ${{ needs.discover.outputs.pycardano-examples }}
-          SCALUS:    ${{ needs.discover.outputs.scalus-examples }}
-        run: |
-          intersect() {
-            jq -cn --argjson a "$1" --argjson b "$2" \
-              '[$a[] | . as $x | if ($b | index($x)) != null then $x else empty end]'
-          }
-          echo "ccl-x-scalus=$(intersect       "$CCL"       "$SCALUS")" >> "$GITHUB_OUTPUT"
-          echo "mesh-x-scalus=$(intersect      "$MESH"      "$SCALUS")" >> "$GITHUB_OUTPUT"
-          echo "evosdk-x-scalus=$(intersect    "$EVOSDK"    "$SCALUS")" >> "$GITHUB_OUTPUT"
-          echo "pycardano-x-scalus=$(intersect "$PYCARDANO" "$SCALUS")" >> "$GITHUB_OUTPUT"
+  # (Cross-product example lists are now computed in local-test-discovery.sh and
+  #  exposed as the single `offchain-matrix` output of the discover job.)
 
   # ───────────────────────────────────────────────────────────────────────────
   # Toolchain prepare
@@ -125,17 +96,13 @@ jobs:
           cache-version: ${{ env.CACHE_VERSION }}
 
       - name: Setup JBang + Java
-        if: needs.discover.outputs.ccl-examples != '[]'
+        if: contains(needs.discover.outputs.offchain-matrix, '"runtime":"jbang"')
         uses: ./.github/actions/setup-jbang-java
         with:
           cache-version: ${{ env.CACHE_VERSION }}
 
       - name: Setup Yaci DevKit (install only)
-        if: |
-          needs.discover.outputs.ccl-examples != '[]' ||
-          needs.discover.outputs.mesh-examples != '[]' ||
-          needs.discover.outputs.evosdk-examples != '[]' ||
-          needs.discover.outputs.pycardano-examples != '[]'
+        if: needs.discover.outputs.offchain-matrix != '[]'
         uses: ./.github/actions/setup-yaci-devkit
         with:
           start: 'false'
@@ -163,107 +130,34 @@ jobs:
       cache-version: v1
 
   # ───────────────────────────────────────────────────────────────────────────
-  # Off-chain tests — Aiken on-chain
+  # Off-chain tests — one matrix-driven job over the off-chain × on-chain
+  # cross-product computed by discover (`offchain-matrix`). Each matrix row is a
+  # {framework-id, status-prefix, subdir, runtime, onchain, examples} combo run
+  # through the runtime-generic reusable workflow. Adding a framework adds rows
+  # to the matrix automatically — no new jobs here.
   # ───────────────────────────────────────────────────────────────────────────
-  test-ccl-vs-aiken:
-    needs: [discover, prepare-toolchains, compile-aiken]
-    if: needs.discover.outputs.ccl-examples != '[]'
-    uses: ./.github/workflows/_test-offchain-jbang.yml
+  test-offchain:
+    needs: [discover, prepare-toolchains, compile-aiken, compile-scalus]
+    # Run whenever the matrix is non-empty and no prerequisite *failed*. A
+    # conditionally-skipped compile job (e.g. no scalus examples) must not block
+    # the aiken combos, so we allow 'skipped'/'success' but not 'failure'.
+    if: >-
+      ${{ !cancelled()
+          && needs.discover.outputs.offchain-matrix != '[]'
+          && needs.compile-aiken.result != 'failure'
+          && needs.compile-scalus.result != 'failure' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.discover.outputs.offchain-matrix) }}
+    uses: ./.github/workflows/_test-offchain.yml
     with:
-      framework-id:      ccl-java
-      status-prefix:     ccl
-      subdir:            offchain/ccl-java
-      examples:          ${{ needs.discover.outputs.ccl-examples }}
-      onchain-framework: aiken
-      jdk-version:       '24'
-      cache-version:     v1
-
-  test-mesh-vs-aiken:
-    needs: [discover, prepare-toolchains, compile-aiken]
-    if: needs.discover.outputs.mesh-examples != '[]'
-    uses: ./.github/workflows/_test-offchain-deno.yml
-    with:
-      framework-id:      meshjs
-      status-prefix:     mesh
-      subdir:            offchain/meshjs
-      examples:          ${{ needs.discover.outputs.mesh-examples }}
-      onchain-framework: aiken
-      cache-version:     v1
-
-  test-evosdk-vs-aiken:
-    needs: [discover, prepare-toolchains, compile-aiken]
-    if: needs.discover.outputs.evosdk-examples != '[]'
-    uses: ./.github/workflows/_test-offchain-deno.yml
-    with:
-      framework-id:      evolutionsdk
-      status-prefix:     evosdk
-      subdir:            offchain/evolutionsdk
-      examples:          ${{ needs.discover.outputs.evosdk-examples }}
-      onchain-framework: aiken
-      cache-version:     v1
-
-  test-pycardano-vs-aiken:
-    needs: [discover, prepare-toolchains, compile-aiken]
-    if: needs.discover.outputs.pycardano-examples != '[]'
-    uses: ./.github/workflows/_test-offchain-python.yml
-    with:
-      framework-id:      pycardano
-      status-prefix:     pycardano
-      subdir:            offchain/pycardano
-      examples:          ${{ needs.discover.outputs.pycardano-examples }}
-      onchain-framework: aiken
-      cache-version:     v1
-
-  # ───────────────────────────────────────────────────────────────────────────
-  # Off-chain tests — Scalus on-chain (cross-check)
-  # ───────────────────────────────────────────────────────────────────────────
-  test-ccl-vs-scalus:
-    needs: [compute-cross-matrix, prepare-toolchains, compile-scalus]
-    if: needs.compute-cross-matrix.outputs.ccl-x-scalus != '[]'
-    uses: ./.github/workflows/_test-offchain-jbang.yml
-    with:
-      framework-id:      ccl-java
-      status-prefix:     ccl
-      subdir:            offchain/ccl-java
-      examples:          ${{ needs.compute-cross-matrix.outputs.ccl-x-scalus }}
-      onchain-framework: scalus
-      jdk-version:       '24'
-      cache-version:     v1
-
-  test-mesh-vs-scalus:
-    needs: [compute-cross-matrix, prepare-toolchains, compile-scalus]
-    if: needs.compute-cross-matrix.outputs.mesh-x-scalus != '[]'
-    uses: ./.github/workflows/_test-offchain-deno.yml
-    with:
-      framework-id:      meshjs
-      status-prefix:     mesh
-      subdir:            offchain/meshjs
-      examples:          ${{ needs.compute-cross-matrix.outputs.mesh-x-scalus }}
-      onchain-framework: scalus
-      cache-version:     v1
-
-  test-evosdk-vs-scalus:
-    needs: [compute-cross-matrix, prepare-toolchains, compile-scalus]
-    if: needs.compute-cross-matrix.outputs.evosdk-x-scalus != '[]'
-    uses: ./.github/workflows/_test-offchain-deno.yml
-    with:
-      framework-id:      evolutionsdk
-      status-prefix:     evosdk
-      subdir:            offchain/evolutionsdk
-      examples:          ${{ needs.compute-cross-matrix.outputs.evosdk-x-scalus }}
-      onchain-framework: scalus
-      cache-version:     v1
-
-  test-pycardano-vs-scalus:
-    needs: [compute-cross-matrix, prepare-toolchains, compile-scalus]
-    if: needs.compute-cross-matrix.outputs.pycardano-x-scalus != '[]'
-    uses: ./.github/workflows/_test-offchain-python.yml
-    with:
-      framework-id:      pycardano
-      status-prefix:     pycardano
-      subdir:            offchain/pycardano
-      examples:          ${{ needs.compute-cross-matrix.outputs.pycardano-x-scalus }}
-      onchain-framework: scalus
+      framework-id:      ${{ matrix.framework-id }}
+      status-prefix:     ${{ matrix.status-prefix }}
+      subdir:            ${{ matrix.subdir }}
+      runtime:           ${{ matrix.runtime }}
+      examples:          ${{ toJson(matrix.examples) }}
+      onchain-framework: ${{ matrix.onchain }}
       cache-version:     v1
 
   # ───────────────────────────────────────────────────────────────────────────
@@ -274,17 +168,14 @@ jobs:
     needs:
       - compile-aiken
       - compile-scalus
-      - test-ccl-vs-aiken
-      - test-mesh-vs-aiken
-      - test-evosdk-vs-aiken
-      - test-pycardano-vs-aiken
-      - test-ccl-vs-scalus
-      - test-mesh-vs-scalus
-      - test-evosdk-vs-scalus
-      - test-pycardano-vs-scalus
+      - test-offchain
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Publishing the dashboard needs to push commits and open PRs.
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -397,8 +288,10 @@ jobs:
             .local-test-results/version-report.md
           retention-days: 30
 
+      # Only comment on the PR when the version check flagged outdated libraries —
+      # avoids posting a report on every run when there's nothing actionable.
       - name: Post PR comment
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && env.VERSIONS_OUTDATED == 'true'
         uses: actions/github-script@v7
         with:
           script: |
@@ -414,31 +307,74 @@ jobs:
               body: report + versionReport
             });
 
-      - name: Commit dashboard.json
-        if: github.event_name == 'schedule' || github.event_name == 'pull_request'
+      # Publish the dashboard resiliently:
+      #   • only when dashboard.json *meaningfully* changed (lastUpdated ignored);
+      #   • on the default branch → open a PR (never a direct commit to main);
+      #   • on any other branch (e.g. a PR's head branch) → commit directly;
+      #   • never fail the build if publishing can't push/open a PR.
+      - name: Detect dashboard change
+        id: dash
+        env:
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          changed=false
+          if [ ! -f dashboard/dashboard.json ]; then
+            echo "dashboard/dashboard.json missing — nothing to publish"
+          else
+            CURR=$(jq -S 'del(.lastUpdated)' dashboard/dashboard.json 2>/dev/null || echo '')
+            PREV=$(git show HEAD:dashboard/dashboard.json 2>/dev/null \
+                     | jq -S 'del(.lastUpdated)' 2>/dev/null || echo '')
+            if [ "$CURR" = "$PREV" ]; then
+              echo "No meaningful change (lastUpdated ignored) — discarding timestamp-only churn"
+              git checkout -- dashboard/dashboard.json 2>/dev/null || true
+            else
+              echo "Dashboard changed — will publish"
+              changed=true
+            fi
+          fi
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+          if [ "$BRANCH" = "$DEFAULT_BRANCH" ]; then
+            echo "on default branch ($BRANCH) → PR"
+            echo "is_default=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "on branch ($BRANCH) → direct commit"
+            echo "is_default=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit dashboard.json to branch
+        if: steps.dash.outputs.changed == 'true' && steps.dash.outputs.is_default != 'true'
+        continue-on-error: true
         env:
           BRANCH: ${{ github.head_ref || github.ref_name }}
         run: |
-          set -e
-          if [ ! -f docs/dashboard.json ]; then
-            echo "docs/dashboard.json missing — nothing to commit"
-            exit 0
-          fi
-
-          CURR=$(jq -S 'del(.lastUpdated)' docs/dashboard.json)
-          PREV=$(git show HEAD:docs/dashboard.json 2>/dev/null \
-                   | jq -S 'del(.lastUpdated)' 2>/dev/null || echo '')
-
-          if [ "$CURR" = "$PREV" ]; then
-            echo "No meaningful changes to dashboard.json — skipping commit"
-            exit 0
-          fi
-
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add docs/dashboard.json
+          git add dashboard/dashboard.json
           git commit -m "chore: update dashboard.json [skip ci]"
           git push origin "HEAD:${BRANCH}"
+
+      - name: Open dashboard PR (default branch)
+        if: steps.dash.outputs.changed == 'true' && steps.dash.outputs.is_default == 'true'
+        continue-on-error: true
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          base: ${{ github.event.repository.default_branch }}
+          branch: automated/dashboard-update
+          delete-branch: true
+          add-paths: dashboard/dashboard.json
+          title: "chore: update dashboard.json"
+          commit-message: "chore: update dashboard.json [skip ci]"
+          body: |
+            ## Automated dashboard update
+
+            The ecosystem CI detected a change in the cross-check matrix.
+            This PR updates `dashboard/dashboard.json` (the `lastUpdated`
+            timestamp alone never triggers it).
+
+            ---
+            _Generated by the ecosystem CI workflow_
 
       - name: Update versions.json from upstream
         if: github.event_name == 'schedule' && env.VERSIONS_OUTDATED == 'true'
