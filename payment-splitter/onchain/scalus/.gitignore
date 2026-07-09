@@ -1,7 +1,0 @@
-target/
-.bsp/
-.metals/
-.vscode/
-.idea/
-.DS_Store
-*.plutus
