@@ -13,7 +13,7 @@ This repository is divided into directories based on use cases and the technolog
 For example:
 - `/payment-splitter/onchain/aiken/`
 - `/payment-splitter/offchain/meshjs/`
-- `/payment-splitter/fullstack/Scalus/`
+- `/payment-splitter/fullstack/scalus/`
 
 The use cases implemented in this repository are based on the research paper [Smart Contract Languages: A Comparative Analysis](https://arxiv.org/abs/2404.04129) by Massimo Bartoletti et al. (2024). An on-chain implementation for Cardano in `aiken`, `scalus` and in other languages for other blockchain ecosystems are already available in the [rosetta-smart-contracts repository](https://github.com/blockchain-unica/rosetta-smart-contracts).
 
