@@ -8,12 +8,14 @@ This repository is divided into directories based on use cases and the technolog
 
 - `/use-case/onchain/<technology>/`: Contains the on-chain implementation of a specific use case using a particular technology (e.g. aiken, scalus, plu-ts, etc.).
 - `/use-case/offchain/<framework>/`: Contains the off-chain implementation of the same use case using a specific framework (e.g. meshjs, evolutionsdk, cardano-client-lib, etc.).
+- `/use-case/fullstack/<framework>/`: Contains the on-chain & off-chain implementation of a specific use case using a particular technology (scalus)
 
 For example:
 - `/payment-splitter/onchain/aiken/`
 - `/payment-splitter/offchain/meshjs/`
+- `/payment-splitter/fullstack/scalus/`
 
-The use cases implemented in this repository are based on the research paper [Smart Contract Languages: A Comparative Analysis](https://arxiv.org/abs/2404.04129) by Massimo Bartoletti et al. (2024). An on-chain implementation for Cardano in `aiken` and in other languages for other blockchain ecosystems are already available in the [rosetta-smart-contracts repository](https://github.com/blockchain-unica/rosetta-smart-contracts).
+The use cases implemented in this repository are based on the research paper [Smart Contract Languages: A Comparative Analysis](https://arxiv.org/abs/2404.04129) by Massimo Bartoletti et al. (2024). An on-chain implementation for Cardano in `aiken`, `scalus` and in other languages for other blockchain ecosystems are already available in the [rosetta-smart-contracts repository](https://github.com/blockchain-unica/rosetta-smart-contracts).
 
 ### Use Cases
 
@@ -35,7 +37,7 @@ The 21 use cases identified in the research paper are as follows:
 14. [Lottery](lottery/README.md)  
 15. [Constant-product AMM](constant-product-amm/README.md)  
 16. [Upgradeable Proxy](upgradable-proxy/README.md)  
-17. Factory 
+17. [Factory](upgradable-proxy/README.md)
 18. [Decentralized identity](decentralized-identity/README.md)  
 19. [Editable NFT](editable-nft/README.md)  
 20. [Anonymous Data](anonymous-data/README.md)  

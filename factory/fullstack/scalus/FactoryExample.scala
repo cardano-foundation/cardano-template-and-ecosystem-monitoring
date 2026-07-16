@@ -1,0 +1,86 @@
+package factory
+
+import scalus.compiler.Compile
+
+import scalus.*
+import scalus.uplc.builtin.Data
+import scalus.compiler.Options
+import scalus.cardano.blueprint.{Blueprint, Contract}
+import scalus.cardano.onchain.plutus.v3.*
+import scalus.cardano.onchain.plutus.prelude.*
+import scalus.cardano.onchain.plutus.v3.Validator
+import scalus.uplc.PlutusV3
+
+/** Factory Pattern Example — a combined minting + spending validator.
+  *
+  * '''Minting (factory):'''
+  *   - `Create(tag, seedUtxo)`: mints a product NFT (one-shot via seed UTxO) and locks a product
+  *     UTxO at this script's address
+  *   - `Destroy`: burns a product NFT
+  *
+  * '''Spending (product):'''
+  *   - Consuming a product UTxO requires burning the NFT and signing by the creator
+  *
+  * The spending validator address is the same as the minting policy hash (single script), so the
+  * `spendingScriptHash` parameter passed to `validateCreate` is the policy's own hash.
+  *
+  * @see
+  *   [[https://github.com/blockchain-unica/rosetta-smart-contracts/tree/main/contracts/factory]]
+  */
+@Compile
+object FactoryExample extends Validator {
+
+    inline override def mint(redeemer: Data, policyId: PolicyId, tx: TxInfo): Unit = {
+        val action = redeemer.to[FactoryAction]
+        action match
+            case FactoryAction.Create(tag, seedUtxo) =>
+                Factory.validateCreate(
+                  tag = tag,
+                  seedUtxo = seedUtxo,
+                  policyId = policyId,
+                  spendingScriptHash = policyId, // same script for minting and spending
+                  tx = tx
+                )
+            case FactoryAction.Destroy =>
+                Factory.validateDestroy(
+                  policyId = policyId,
+                  tx = tx
+                )
+    }
+
+    inline override def spend(
+        datum: Option[Data],
+        redeemer: Data,
+        tx: TxInfo,
+        ownRef: TxOutRef
+    ): Unit = {
+        val productDatum = datum.getOrFail("Datum required").to[ProductDatum]
+
+        // Derive the factory policy from our own script address
+        val ownInput = tx.findOwnInputOrFail(ownRef)
+        val factoryPolicyId =
+            ownInput.resolved.address.credential.scriptOption
+                .getOrFail("Own address must be Script")
+
+        Factory.validateSpend(
+          datum = productDatum,
+          factoryPolicyId = factoryPolicyId,
+          ownInputValue = ownInput.resolved.value,
+          tx = tx
+        )
+    }
+}
+
+object FactoryContract extends Contract {
+    private given Options = Options.release
+    lazy val compiled = PlutusV3.compile(FactoryExample.validate)
+    lazy val blueprint = Blueprint.plutusV3[ProductDatum, FactoryAction](
+      title = "Factory",
+      description = "Factory pattern: a combined minting + spending validator. " +
+          "Create mints a one-shot product NFT via a seed UTxO and locks a product UTxO " +
+          "at the script address. Destroy / spend burn the NFT with the creator's signature.",
+      version = "1.0.0",
+      license = Some("Apache-2.0"),
+      compiled = compiled
+    )
+}
