@@ -38,7 +38,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  AIKEN_VERSION: v1.1.21
+  AIKEN_VERSION: v1.1.22
   SCALUS_JAVA_VERSION: '21'
   CACHE_VERSION: v1
 
@@ -117,7 +117,7 @@ jobs:
     uses: ./.github/workflows/_compile-aiken.yml
     with:
       examples:      ${{ needs.discover.outputs.aiken-examples }}
-      aiken-version: v1.1.21
+      aiken-version: v1.1.22
       cache-version: v1
 
   compile-scalus:

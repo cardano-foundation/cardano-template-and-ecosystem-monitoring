@@ -137,6 +137,41 @@ done < <(find "$REPO_ROOT" -name "aiken.toml" -not -path "*/build/*" -print0 | s
 
 echo ""
 
+# ── 1b. Aiken pin in the CI workflow ───────────────────────────────────────────
+# ecosystem-test.yml pins aiken twice: env.AIKEN_VERSION, and a literal in
+# compile-aiken's `with:` block (reusable-workflow inputs cannot read env).
+echo "=== Updating workflow aiken pin ==="
+
+WORKFLOW_FILE="$REPO_ROOT/.github/workflows/ecosystem-test.yml"
+
+update_workflow_pin() {
+  local key="$1"        # e.g. "AIKEN_VERSION:" or "aiken-version:"
+  local target_ver="$2"
+
+  # Only lines with a literal version (skips `aiken-version: ${{ env... }}`)
+  local current_ver
+  current_ver=$(grep -E "${key} *v[0-9]" "$WORKFLOW_FILE" | head -1 | sed -E "s|.*${key} *||" | tr -d '[:space:]' || true)
+
+  if [ -z "$current_ver" ]; then
+    return 0
+  fi
+
+  if [ "$current_ver" = "$target_ver" ]; then
+    echo -e "  ${YELLOW}[SKIP]${NC}    ${key} already up to date in $(basename "$WORKFLOW_FILE") ($WORKFLOW_FILE)"
+  elif [ "$CHECK_MODE" = true ]; then
+    echo -e "  ${RED}[DRIFT]${NC}   ${key} has '$current_ver', want '$target_ver' in $WORKFLOW_FILE"
+    DRIFTED_FILES+=("$WORKFLOW_FILE")
+  else
+    sed_inplace "$WORKFLOW_FILE" "s|(${key} *)v[0-9][^[:space:]]*|\1${target_ver}|"
+    echo -e "  ${GREEN}[UPDATED]${NC} ${key} in $(basename "$WORKFLOW_FILE") ($WORKFLOW_FILE)"
+  fi
+}
+
+update_workflow_pin "AIKEN_VERSION:" "$AIKEN_COMPILER"
+update_workflow_pin "aiken-version:" "$AIKEN_COMPILER"
+
+echo ""
+
 # ── 2. Mesh.js deno.json files ─────────────────────────────────────────────────
 # Updates @meshsdk/core, @meshsdk/core-csl, @meshsdk/common.
 # Does NOT touch @meshsdk/core-cst (a different package, not in versions.json).
