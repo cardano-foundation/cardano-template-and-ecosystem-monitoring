@@ -18,6 +18,7 @@
 # Environments
 .env
 wallet_*.txt
+wallet_*.json
 htlc_store.json
 
 # compiled output
@@ -42,4 +43,7 @@ build/
 .venv
 wallet.txt
 
-wallet_*.txt
+# CI runner workspace scratch (report job)
+artifacts/
+/report.md
+*.history
