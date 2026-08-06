@@ -104,12 +104,6 @@ build_onchain() {
         (cd "$dir" && aiken build >/dev/null 2>&1) || true
       fi
       ;;
-    scalus)
-      # Regenerate so the blueprint reflects the current source.
-      if [[ -f "$dir/build.sbt" ]] && command -v sbt &>/dev/null; then
-        (cd "$dir" && sbt -batch run >/dev/null 2>&1) || true
-      fi
-      ;;
     *)
       if [[ ! -f "$pj" && -f "$dir/aiken.toml" ]] && command -v aiken &>/dev/null; then
         (cd "$dir" && aiken build >/dev/null 2>&1) || true

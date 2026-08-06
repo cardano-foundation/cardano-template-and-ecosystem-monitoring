@@ -7,5 +7,6 @@
   "@meshsdk/common": "1.9.0",
   "@evolution-sdk/lucid": "2.0.1",
   "cardano-client-lib": "0.8.0-pre4",
-  "pycardano": "0.19.2"
+  "pycardano": "0.19.2",
+  "julc": "0.1.0-pre16"
 }

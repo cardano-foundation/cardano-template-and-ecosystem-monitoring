@@ -56,16 +56,22 @@ mkdir -p "$OUTPUT_DIR"
 # ── Split frameworks by kind ────────────────────────────────────────────────────
 ONCHAIN_FRAMEWORKS=$(jq -c  '[.frameworks[] | select(.kind == "onchain")]'  "$FRAMEWORKS_FILE")
 OFFCHAIN_FRAMEWORKS=$(jq -c '[.frameworks[] | select(.kind == "offchain")]' "$FRAMEWORKS_FILE")
+# Fullstack frameworks are self-contained (own validator + own off-chain flow),
+# so each is a single column rather than a cross-product axis.
+FULLSTACK_FRAMEWORKS=$(jq -c '[.frameworks[] | select(.kind == "fullstack")]' "$FRAMEWORKS_FILE")
 
 # Flat technology list (kind preserved) — emitted as `technologies` so the
 # frontend can render a chip strip of underlying technologies separately from
 # the cross-product matrix columns. New frameworks added to frameworks.json
 # appear in the strip automatically.
-TECHNOLOGIES_JSON=$(jq -c '[.frameworks[] | {id, label, kind}]' "$FRAMEWORKS_FILE")
+# `repo` drives the link on each technology card; `verify` tells the reader what a
+# green cell in that column actually certifies. Both come straight from the registry.
+TECHNOLOGIES_JSON=$(jq -c '[.frameworks[] | {id, label, kind, repo, verify}]' "$FRAMEWORKS_FILE")
 
 # All status-file prefixes (for example-name extraction from file names)
 ALL_ONCHAIN_PREFIXES=$(jq -r '.[] | .statusPrefix' <<<"$ONCHAIN_FRAMEWORKS")
 ALL_OFFCHAIN_PREFIXES=$(jq -r '.[] | .statusPrefix' <<<"$OFFCHAIN_FRAMEWORKS")
+ALL_FULLSTACK_PREFIXES=$(jq -r '.[] | .statusPrefix' <<<"$FULLSTACK_FRAMEWORKS")
 
 # ── Discover all use-case names ─────────────────────────────────────────────────
 echo -e "${BLUE}Scanning test results in $RESULTS_DIR...${NC}"
@@ -93,6 +99,16 @@ if [ -d "$RESULTS_DIR" ]; then
               break 2
             fi
           done
+        done
+        # Strip fullstack prefix  (e.g. "julc-htlc" → "htlc"). Fullstack status
+        # files have no on-chain segment, so they match neither loop above and
+        # would otherwise drop the use case from the matrix entirely.
+        for pfx in $ALL_FULLSTACK_PREFIXES; do
+          if [[ "$name" == "${pfx}-"* ]]; then
+            name="${name#${pfx}-}"
+            printf '%s\n' "$name"
+            break
+          fi
         done
       done \
     | sort -u)
@@ -168,6 +184,16 @@ while IFS= read -r ofw; do
   done < <(jq -c '.[]' <<<"$ONCHAIN_FRAMEWORKS")
 done < <(jq -c '.[]' <<<"$OFFCHAIN_FRAMEWORKS")
 
+# 3. Fullstack columns — one per framework, no cross-product.
+while IFS= read -r fw; do
+  id=$(jq -r '.id'    <<<"$fw")
+  lbl=$(jq -r '.label' <<<"$fw")
+  COLUMNS_JSON=$(jq -n \
+    --argjson cols "$COLUMNS_JSON" \
+    --arg id "$id" --arg label "$lbl" \
+    '$cols + [{id: $id, label: $label, kind: "fullstack"}]')
+done < <(jq -c '.[]' <<<"$FULLSTACK_FRAMEWORKS")
+
 echo -e "  ${#COLUMNS_JSON} column(s) built"
 echo ""
 
@@ -218,6 +244,22 @@ if [ -n "$ALL_EXAMPLES" ]; then
           '$s + {($k): $v}')
       done < <(jq -c '.[]' <<<"$ONCHAIN_FRAMEWORKS")
     done < <(jq -c '.[]' <<<"$OFFCHAIN_FRAMEWORKS")
+
+    # Fullstack status: look for <fullstack-prefix>-<example>-status.txt
+    while IFS= read -r fw; do
+      fs_id=$(jq -r  '.id'          <<<"$fw")
+      fs_pfx=$(jq -r '.statusPrefix' <<<"$fw")
+      sf="$RESULTS_DIR/${fs_pfx}-${example}-status.txt"
+      if [ -f "$sf" ]; then
+        status=$(map_status "$(tr -d '[:space:]' < "$sf")")
+      else
+        status='not-implemented'
+      fi
+      log_line="${log_line} ${fs_id}=${status}"
+      statuses_json=$(jq -n \
+        --argjson s "$statuses_json" --arg k "$fs_id" --arg v "$status" \
+        '$s + {($k): $v}')
+    done < <(jq -c '.[]' <<<"$FULLSTACK_FRAMEWORKS")
 
     echo -e "$log_line"
 

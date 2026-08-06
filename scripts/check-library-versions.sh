@@ -40,6 +40,7 @@ PINNED_MESH_COMMON=$(jq -r '.["@meshsdk/common"]'         "$VERSIONS_FILE")
 PINNED_LUCID=$(jq -r '.["@evolution-sdk/lucid"]'          "$VERSIONS_FILE")
 PINNED_CCL=$(jq -r '.["cardano-client-lib"]'              "$VERSIONS_FILE")
 PINNED_PYCARDANO=$(jq -r '.["pycardano"]'                "$VERSIONS_FILE")
+PINNED_JULC=$(jq -r '.["julc"]'                          "$VERSIONS_FILE")
 
 echo -e "${BLUE}Checking upstream versions against $VERSIONS_FILE${NC}"
 echo ""
@@ -199,12 +200,14 @@ LATEST_MESH_COMMON=$(fetch_npm_latest "@meshsdk/common")
 LATEST_LUCID=$(fetch_npm_latest "@evolution-sdk/lucid")
 LATEST_CCL=$(fetch_maven_latest "com/bloxbean/cardano" "cardano-client-lib")
 LATEST_PYCARDANO=$(fetch_pypi_latest "pycardano")
+# julc publishes every module on the same version train; julc-stdlib stands in for all.
+LATEST_JULC=$(fetch_maven_latest "com/bloxbean/cardano" "julc-stdlib")
 
 echo ""
 
 # ── Compare and build report data ───────────────────────────────────────────────
 OUTDATED_COUNT=0
-TOTAL_COUNT=9
+TOTAL_COUNT=10
 HAS_MAJOR=false
 
 # compare_entry <name> <pinned> <latest>
@@ -275,6 +278,9 @@ ENTRY_CCL="$ENTRY_JSON"
 compare_entry "pycardano"            "$PINNED_PYCARDANO"       "$LATEST_PYCARDANO"
 ENTRY_PYCARDANO="$ENTRY_JSON"
 
+compare_entry "julc"                 "$PINNED_JULC"            "$LATEST_JULC"
+ENTRY_JULC="$ENTRY_JSON"
+
 echo ""
 
 UP_TO_DATE_COUNT=$((TOTAL_COUNT - OUTDATED_COUNT))
@@ -295,7 +301,8 @@ cat > "$JSON_FILE" <<EOF
     ${ENTRY_MESH_COMMON},
     ${ENTRY_LUCID},
     ${ENTRY_CCL},
-    ${ENTRY_PYCARDANO}
+    ${ENTRY_PYCARDANO},
+    ${ENTRY_JULC}
   },
   "summary": {
     "total": ${TOTAL_COUNT},
@@ -353,6 +360,7 @@ MD_FILE="$RESULTS_DIR/version-report.md"
   print_md_row "@evolution-sdk/lucid" "$PINNED_LUCID"           "$LATEST_LUCID"
   print_md_row "cardano-client-lib"   "$PINNED_CCL"             "$LATEST_CCL"
   print_md_row "pycardano"            "$PINNED_PYCARDANO"       "$LATEST_PYCARDANO"
+  print_md_row "julc"                 "$PINNED_JULC"            "$LATEST_JULC"
 
   echo ""
   echo "---"

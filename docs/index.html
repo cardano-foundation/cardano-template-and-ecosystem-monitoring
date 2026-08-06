@@ -27,6 +27,9 @@
       --yellow:       #d29922;
       --yellow-glow:  rgba(210, 153, 34, 0.18);
       --purple:       #a371f7;
+      /* Fullstack — deliberately outside the blue/purple pair used by the
+         on-chain × off-chain axes, since it is a separate kind, not a mix. */
+      --teal:         #2dd4bf;
       --amber-bg:     #2d2009;
       --amber-border: #6e4c00;
     }
@@ -454,6 +457,7 @@
       margin-right: 6px;
       vertical-align: middle;
     }
+    thead th.grp .grp-dot.fullstack { background: var(--teal); }
     thead th.sub-first { border-left: 2px solid var(--border); }
     thead th.sub-compile { color: var(--text-muted); font-style: italic; }
     tbody td.grp-first { border-left: 2px solid var(--border); }
@@ -641,44 +645,56 @@
 
     /* Supported Frameworks chips — driven entirely from data.technologies
        so adding an entry to frameworks.json shows up here automatically. */
-    .tech-strip {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      margin-top: 6px;
+    /* Technology rail — one linked card per framework, grouped by the role it plays
+       in the matrix. The rail colour is the role, so colour carries meaning rather
+       than decoration, and the whole card is the link to the project's source. */
+    .tech-strip { display: flex; flex-direction: column; gap: 18px; margin-top: 6px; }
+
+    .tech-group { display: flex; flex-direction: column; gap: 8px; }
+    .tech-group-title {
+      font-size: 11px; font-weight: 600; letter-spacing: 0.08em;
+      text-transform: uppercase; color: var(--text-dim);
+    }
+    .tech-cards {
+      display: grid; gap: 10px;
+      grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
     }
 
-    .tech-chip {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      background: var(--bg-card);
-      border: 1px solid var(--border-light);
-      border-radius: 999px;
-      padding: 5px 12px;
-      font-size: 0.8rem;
-      color: var(--text);
-      transition: border-color 0.15s ease, transform 0.15s ease;
+    .tech-card {
+      display: flex; gap: 0; overflow: hidden;
+      border: 1px solid var(--border); border-radius: 10px;
+      background: var(--card); text-decoration: none; color: inherit;
+      transition: border-color .15s ease, transform .15s ease, box-shadow .15s ease;
     }
-
-    .tech-chip:hover { border-color: var(--accent-light); transform: translateY(-1px); }
-
-    .tech-chip .kind-dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      flex-shrink: 0;
+    .tech-card:hover, .tech-card:focus-visible {
+      border-color: var(--accent-light);
+      transform: translateY(-2px);
+      box-shadow: 0 6px 18px rgba(0,0,0,.28);
     }
+    .tech-card:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 2px; }
 
-    .tech-chip .kind-dot.onchain  { background: var(--accent-light); }
-    .tech-chip .kind-dot.offchain { background: var(--purple); }
+    .tech-rail { width: 3px; flex: none; background: var(--text-dim); }
+    .tech-card.onchain   .tech-rail { background: var(--accent-light); }
+    .tech-card.offchain  .tech-rail { background: var(--purple); }
+    .tech-card.fullstack .tech-rail { background: var(--teal); }
 
-    .tech-chip .kind-tag {
-      font-size: 0.65rem;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      color: var(--text-dim);
-      margin-left: 2px;
+    .tech-body { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
+    .tech-head { display: flex; align-items: center; gap: 6px; }
+    .tech-name { font-size: 13px; font-weight: 600; color: var(--text); }
+    .tech-ext { width: 12px; height: 12px; flex: none; fill: var(--text-dim); opacity: 0; transition: opacity .15s ease; }
+    .tech-card:hover .tech-ext, .tech-card:focus-visible .tech-ext { opacity: 1; }
+    .tech-role { font-size: 11px; color: var(--text-muted); line-height: 1.35; }
+
+    .tech-meter { height: 4px; border-radius: 2px; background: var(--border); overflow: hidden; }
+    .tech-meter-fill { display: block; height: 100%; border-radius: 2px; background: var(--text-dim); }
+    .tech-card.onchain   .tech-meter-fill { background: var(--accent-light); }
+    .tech-card.offchain  .tech-meter-fill { background: var(--purple); }
+    .tech-card.fullstack .tech-meter-fill { background: var(--teal); }
+    .tech-count { font-size: 11px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+
+    @media (prefers-reduced-motion: reduce) {
+      .tech-card, .tech-ext { transition: none; }
+      .tech-card:hover, .tech-card:focus-visible { transform: none; }
     }
 
     /* Outdated banner */
@@ -882,20 +898,24 @@
 
   <!-- Supported Frameworks — dynamic from frameworks.json via dashboard.json.
        Adding a new framework to frameworks.json adds a chip here automatically. -->
+  <!-- Technology rail. Cards are built from dashboard.json at render(); each links
+       to the project's source, so adding a framework to frameworks.json adds a card
+       here with no HTML change. -->
   <section id="tech-section" class="hidden">
-    <h2>Supported Frameworks</h2>
+    <h2>Technologies tracked</h2>
     <div id="tech-strip" class="tech-strip"></div>
   </section>
 
   <!-- Ecosystem Readiness Matrix -->
   <section>
     <h2>Ecosystem Readiness Matrix</h2>
-    <!-- On-chain pivot: collapses the multiplicative (off-chain × on-chain)
-         column explosion into a chooser. Picking one on-chain language shows a
-         narrow use-case × off-chain table; "All" shows a grouped overview.
-         Buttons are injected from the on-chain framework list at render(). -->
+    <!-- View pivot: collapses the multiplicative (off-chain × on-chain) column
+         explosion into a chooser. Picking one on-chain language shows a narrow
+         use-case × off-chain table; "Fullstack" shows the self-contained examples
+         on their own; "All" shows the grouped overview. Buttons are injected from
+         the framework lists at render(). -->
     <div class="pivot-bar">
-      <span class="pivot-label">On-chain</span>
+      <span class="pivot-label">View</span>
       <div class="pivot-group" id="pivot-group" role="tablist"></div>
     </div>
     <div class="toolbar">
@@ -996,6 +1016,11 @@
   let FRAMEWORK_LIST = [];
   let ONCHAIN_LIST = [];
   let OFFCHAIN_LIST = [];
+  // Fullstack frameworks are self-contained (own validator + own off-chain flow),
+  // so they are not an axis of the cross-product — they render as one extra group
+  // of plain columns, and only in the 'all' view, since narrowing to an on-chain
+  // language says nothing about them.
+  let FULLSTACK_LIST = [];
   let activePivot = 'all';
 
   // Column descriptors {id, label} shown under the current pivot. The `id` keys
@@ -1006,10 +1031,31 @@
     if (activePivot === 'all') {
       return FRAMEWORK_LIST.map(f => ({ id: f.id, label: f.label }));
     }
+    if (activePivot === 'fullstack') {
+      return FULLSTACK_LIST.map(f => ({ id: f.id, label: f.label }));
+    }
     const on = activePivot;
     const cols = [{ id: on, label: 'compile' }];
     OFFCHAIN_LIST.forEach(o => cols.push({ id: o.id + '+' + on, label: o.label }));
     return cols;
+  }
+
+  // How many use cases a technology actually covers.
+  //
+  // On-chain and fullstack map to a single column each. Off-chain libraries have no
+  // column of their own — they appear only as `<off>+<on>` cross columns — so a bare
+  // id lookup would report zero for every one of them. Count a use case as covered if
+  // the library is implemented against any on-chain language.
+  function coverageOf(tech, useCases) {
+    const rows = useCases || [];
+    const implemented = v => v && v !== 'not-implemented';
+
+    if (tech.kind === 'offchain') {
+      const prefix = tech.id + '+';
+      return rows.filter(uc =>
+        Object.keys(uc).some(k => k.startsWith(prefix) && implemented(uc[k]))).length;
+    }
+    return rows.filter(uc => implemented(uc[tech.id])).length;
   }
 
   // ── Use-case health calc ─────────────────────────────────
@@ -1048,6 +1094,9 @@
       textContent: label,
     });
     ONCHAIN_LIST.forEach(on => group.appendChild(mk(on.id, on.label)));
+    // Fullstack is its own view rather than an on-chain choice: those examples carry their
+    // own validator, so narrowing by on-chain language says nothing about them.
+    if (FULLSTACK_LIST.length) group.appendChild(mk('fullstack', 'Fullstack'));
     group.appendChild(mk('all', 'All'));
   }
 
@@ -1065,6 +1114,12 @@
         th.appendChild(document.createTextNode(on.label));
         r1.appendChild(th);
       });
+      if (FULLSTACK_LIST.length) {
+        const th = el('th', { className: 'grp', colspan: String(FULLSTACK_LIST.length) });
+        th.appendChild(el('span', { className: 'grp-dot fullstack' }));
+        th.appendChild(document.createTextNode('Fullstack'));
+        r1.appendChild(th);
+      }
       r1.appendChild(el('th', { className: 'th-center', rowspan: '2', textContent: 'Health' }));
       head.appendChild(r1);
 
@@ -1077,7 +1132,22 @@
         }));
         OFFCHAIN_LIST.forEach(o => r2.appendChild(el('th', { className: 'th-center', textContent: o.label })));
       });
+      FULLSTACK_LIST.forEach((f, i) => r2.appendChild(el('th', {
+        className: 'th-center' + (i === 0 ? ' sub-first' : ''),
+        textContent: f.label,
+        'data-tip': f.label + ' fullstack example (own validator + own off-chain flow)',
+      })));
       head.appendChild(r2);
+    } else if (activePivot === 'fullstack') {
+      const r = el('tr');
+      r.appendChild(el('th', { textContent: 'Use Case' }));
+      FULLSTACK_LIST.forEach(f => r.appendChild(el('th', {
+        className: 'th-center',
+        textContent: f.label,
+        'data-tip': f.label + ' fullstack example (own validator + own off-chain flow)',
+      })));
+      r.appendChild(el('th', { className: 'th-center', textContent: 'Health' }));
+      head.appendChild(r);
     } else {
       const on = ONCHAIN_LIST.find(x => x.id === activePivot) || { id: activePivot, label: activePivot };
       const r = el('tr');
@@ -1160,19 +1230,32 @@
 
       // Data cells: per on-chain group (compile + each off-chain cross). The
       // compile cell starts each group and carries the divider border.
-      const onchains = (activePivot === 'all')
-        ? ONCHAIN_LIST
-        : [ONCHAIN_LIST.find(x => x.id === activePivot) || { id: activePivot, label: activePivot }];
+      if (activePivot === 'fullstack') {
+        FULLSTACK_LIST.forEach(f =>
+          cells.push(statusTd(uc[f.id], f.label + ' fullstack example')));
+      } else {
+        const onchains = (activePivot === 'all')
+          ? ONCHAIN_LIST
+          : [ONCHAIN_LIST.find(x => x.id === activePivot) || { id: activePivot, label: activePivot }];
 
-      onchains.forEach(on => {
-        const compileCell = statusTd(uc[on.id], on.label + ' on-chain compile');
-        if (activePivot === 'all') compileCell.classList.add('grp-first');
-        cells.push(compileCell);
-        OFFCHAIN_LIST.forEach(o => {
-          const id = o.id + '+' + on.id;
-          cells.push(statusTd(uc[id], o.label + ' × ' + on.label));
+        onchains.forEach(on => {
+          const compileCell = statusTd(uc[on.id], on.label + ' on-chain compile');
+          if (activePivot === 'all') compileCell.classList.add('grp-first');
+          cells.push(compileCell);
+          OFFCHAIN_LIST.forEach(o => {
+            const id = o.id + '+' + on.id;
+            cells.push(statusTd(uc[id], o.label + ' × ' + on.label));
+          });
         });
-      });
+
+        if (activePivot === 'all') {
+          FULLSTACK_LIST.forEach((f, i) => {
+            const cell = statusTd(uc[f.id], f.label + ' fullstack example');
+            if (i === 0) cell.classList.add('grp-first');
+            cells.push(cell);
+          });
+        }
+      }
 
       const healthCell = td({
         className: 'td-center',
@@ -1244,8 +1327,16 @@
       });
     }
 
-    // Keep the pivot valid if the selected on-chain disappeared between loads.
-    if (activePivot !== 'all' && !ONCHAIN_LIST.some(o => o.id === activePivot)) activePivot = 'all';
+    FULLSTACK_LIST = techs.filter(t => t.kind === 'fullstack').map(t => ({ id: t.id, label: t.label }));
+    if (FULLSTACK_LIST.length === 0) {
+      FULLSTACK_LIST = FRAMEWORK_LIST.filter(f => f.kind === 'fullstack').map(f => ({ id: f.id, label: f.label }));
+    }
+
+    // Keep the pivot valid if the view it names disappeared between loads.
+    const pivotStillExists = activePivot === 'all'
+      || (activePivot === 'fullstack' && FULLSTACK_LIST.length > 0)
+      || ONCHAIN_LIST.some(o => o.id === activePivot);
+    if (!pivotStillExists) activePivot = 'all';
 
     buildPivot();
     buildMatrixHead();
@@ -1289,6 +1380,9 @@
   // Chip strip for underlying technologies. Falls back to deriving onchain
   // tech from data.frameworks when `technologies` is absent (older dashboard.json
   // snapshots predate the field), so the UI still renders something useful.
+  // Technology rail. Each framework becomes a card linking to its source, grouped
+  // by the role it plays in the matrix. Everything is driven from frameworks.json
+  // via dashboard.json, so adding a framework adds a card with no HTML change.
   function renderTechnologies(data) {
     const section = document.getElementById('tech-section');
     const strip = document.getElementById('tech-strip');
@@ -1297,7 +1391,7 @@
     let techs = Array.isArray(data.technologies) ? data.technologies : null;
     if (!techs) {
       techs = (Array.isArray(data.frameworks) ? data.frameworks : [])
-        .filter(f => f.kind === 'onchain' || f.kind === 'offchain');
+        .filter(f => f.kind === 'onchain' || f.kind === 'offchain' || f.kind === 'fullstack');
     }
     if (!techs || techs.length === 0) {
       section.classList.add('hidden');
@@ -1305,16 +1399,87 @@
     }
     section.classList.remove('hidden');
 
-    techs.forEach(t => {
-      const chip = el('span', {
-        className: 'tech-chip',
-        'data-tip': (t.kind === 'onchain' ? 'On-chain framework' : 'Off-chain framework'),
+    const KIND_TITLE = {
+      onchain: 'On-chain — compile validators to Plutus',
+      offchain: 'Off-chain — build transactions against a blueprint',
+      fullstack: 'Fullstack — validator and off-chain flow in one project',
+    };
+    // What a green cell in this framework's column actually certifies. The two
+    // fullstack columns are not equal evidence, so the card says which is which.
+    const ROLE = {
+      onchain: () => 'compiles to a Plutus blueprint',
+      offchain: () => 'tested against every on-chain language',
+      fullstack: (t) => t.verify === 'build+run'
+        ? 'compiled, unit tested, run on a devnet'
+        : 'compiled and unit tested',
+    };
+
+    const useCases = Array.isArray(data.useCases) ? data.useCases : [];
+    const total = useCases.length;
+
+    ['onchain', 'offchain', 'fullstack'].forEach(kind => {
+      const members = techs.filter(t => t.kind === kind);
+      if (!members.length) return;
+
+      const group = el('div', { className: 'tech-group' });
+      group.appendChild(el('span', { className: 'tech-group-title', textContent: KIND_TITLE[kind] }));
+
+      const cards = el('div', { className: 'tech-cards' });
+      members.forEach(t => {
+        const done = coverageOf(t, useCases);
+        const pct = total ? Math.round((done / total) * 100) : 0;
+
+        // An anchor when we know where the source lives, a plain div otherwise, so
+        // a missing repo never renders a link that goes nowhere.
+        const card = t.repo
+          ? el('a', {
+              className: 'tech-card ' + kind,
+              href: t.repo,
+              target: '_blank',
+              rel: 'noopener noreferrer',
+              'data-tip': 'Open ' + (t.label || t.id) + ' on GitHub',
+            })
+          : el('div', { className: 'tech-card ' + kind });
+
+        const body = el('div', { className: 'tech-body' });
+
+        const head = el('div', { className: 'tech-head' });
+        head.appendChild(el('span', { className: 'tech-name', textContent: t.label || t.id }));
+        if (t.repo) head.appendChild(externalIcon());
+        body.appendChild(head);
+
+        body.appendChild(el('span', { className: 'tech-role', textContent: ROLE[kind](t) }));
+
+        const meter = el('span', { className: 'tech-meter' });
+        const fill = el('span', { className: 'tech-meter-fill' });
+        fill.style.width = pct + '%';
+        meter.appendChild(fill);
+        body.appendChild(meter);
+
+        body.appendChild(el('span', {
+          className: 'tech-count',
+          textContent: done + ' of ' + total + ' use cases',
+        }));
+
+        card.appendChild(el('span', { className: 'tech-rail' }));
+        card.appendChild(body);
+        cards.appendChild(card);
       });
-      chip.appendChild(el('span', { className: 'kind-dot ' + (t.kind || '') }));
-      chip.appendChild(document.createTextNode(t.label || t.id));
-      chip.appendChild(el('span', { className: 'kind-tag', textContent: t.kind || '' }));
-      strip.appendChild(chip);
+
+      group.appendChild(cards);
+      strip.appendChild(group);
     });
+  }
+
+  function externalIcon() {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('class', 'tech-ext');
+    svg.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', 'M14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7zM5 5h5V3H3v18h18v-7h-2v5H5V5z');
+    svg.appendChild(path);
+    return svg;
   }
 
   function renderVersions(data) {

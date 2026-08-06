@@ -44,7 +44,7 @@ echo ""
 
 # Step 1: Discovery
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${BLUE}Step 1/5: Discovering Examples${NC}"
+echo -e "${BLUE}Step 1/6: Discovering Examples${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
@@ -60,7 +60,7 @@ sleep 2
 
 # Step 2: Compile Aiken
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${BLUE}Step 2/5: Compiling Aiken Examples${NC}"
+echo -e "${BLUE}Step 2/6: Compiling Aiken Examples${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
@@ -77,7 +77,7 @@ sleep 2
 
 # Step 3: Check Yaci DevKit
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${BLUE}Step 3/5: Verifying Yaci DevKit${NC}"
+echo -e "${BLUE}Step 3/6: Verifying Yaci DevKit${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
@@ -139,7 +139,7 @@ sleep 2
 
 # Step 4: Run off-chain tests
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${BLUE}Step 4/5: Running Off-chain Integration Tests${NC}"
+echo -e "${BLUE}Step 4/6: Running Off-chain Integration Tests${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
@@ -154,9 +154,26 @@ fi
 echo ""
 sleep 2
 
-# Step 5: Generate report
+# Step 5: Run fullstack examples
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${BLUE}Step 5/5: Generating Ecosystem Report${NC}"
+echo -e "${BLUE}Step 5/6: Running Fullstack Examples${NC}"
+echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+
+if "$SCRIPT_DIR/local-test-fullstack.sh"; then
+  echo -e "${GREEN}✅ Fullstack examples completed${NC}"
+  FULLSTACK_SUCCESS=true
+else
+  echo -e "${YELLOW}⚠️  Some fullstack examples failed${NC}"
+  FULLSTACK_SUCCESS=false
+fi
+
+echo ""
+sleep 2
+
+# Step 6: Generate report
+echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${BLUE}Step 6/6: Generating Ecosystem Report${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
@@ -194,6 +211,12 @@ else
   echo -e "Off-chain Tests:     ${RED}❌ FAILED${NC}"
 fi
 
+if [[ "$FULLSTACK_SUCCESS" == true ]]; then
+  echo -e "Fullstack Examples:  ${GREEN}✅ PASSED${NC}"
+else
+  echo -e "Fullstack Examples:  ${RED}❌ FAILED${NC}"
+fi
+
 if [[ "$REPORT_SUCCESS" == true ]]; then
   echo -e "Report Generation:   ${GREEN}✅ SUCCESS${NC}"
 else
@@ -208,7 +231,7 @@ echo "📝 All logs available in: .local-test-results/"
 echo ""
 
 # Exit with appropriate code
-if [[ "$AIKEN_SUCCESS" == true && "$OFFCHAIN_SUCCESS" == true ]]; then
+if [[ "$AIKEN_SUCCESS" == true && "$OFFCHAIN_SUCCESS" == true && "$FULLSTACK_SUCCESS" == true ]]; then
   echo -e "${GREEN}╔══════════════════════════════════════════════════════╗${NC}"
   echo -e "${GREEN}║           🎉 All Tests Passed! 🎉                   ║${NC}"
   echo -e "${GREEN}╚══════════════════════════════════════════════════════╝${NC}"

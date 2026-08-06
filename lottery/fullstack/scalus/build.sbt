@@ -10,6 +10,14 @@ lazy val root = (project in file("."))
     .settings(
         name := "lottery",
         scalacOptions ++= Seq("-deprecation", "-feature"),
+        // Scalus's UPLC evaluator logs into a plain mutable ArrayBuffer
+        // (scalus.uplc.eval.Log), which is not thread-safe. This example has three
+        // suites and two of them evaluate many games concurrently, so running them
+        // in parallel races that buffer and aborts LotteryValidatorTest with
+        // "arraycopy: last source index 513 out of bounds for object array[512]" —
+        // a torn resize, not a contract failure. Serial execution avoids the race.
+        // Only this example needs it: the others have a single suite each.
+        Test / parallelExecution := false,
         libraryDependencies ++= Seq(
             "org.scalus" %% "scalus"                % scalusVersion,
             "org.scalus" %% "scalus-cardano-ledger" % scalusVersion,
