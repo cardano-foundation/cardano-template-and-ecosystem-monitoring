@@ -58,6 +58,15 @@ public class App {
     /** A separate account, so "the receiver signed" is a real condition and not automatic. */
     private static final Account RECEIVER = new Account(NETWORK);
 
+    /**
+     * A clean, ada-only account used to pay for the collection.
+     *
+     * <p>Deliberately not the shared devkit wallet: on a long-lived devnet that wallet
+     * accumulates tokens from other examples, and any change output carrying one would trip the
+     * validator's anti-batching rule.
+     */
+    private static final Account PAYER = new Account(NETWORK);
+
     private static final BackendService BACKEND = new BFBackendService(BACKEND_URL, "Dummy Key");
     private static final QuickTxBuilder TX_BUILDER = new QuickTxBuilder(BACKEND);
     private static final UtxoSupplier UTXOS = new DefaultUtxoSupplier(BACKEND.getUtxoService());
@@ -141,6 +150,7 @@ public class App {
     private static void fundReceiver() throws Exception {
         Tx fund = new Tx()
                 .payToAddress(RECEIVER.baseAddress(), Amount.lovelace(BigInteger.valueOf(20_000_000)))
+                .payToAddress(PAYER.baseAddress(), Amount.lovelace(BigInteger.valueOf(20_000_000)))
                 .from(SENDER.baseAddress());
 
         TxResult result = TX_BUILDER.compose(fund)
@@ -190,11 +200,16 @@ public class App {
                             List.of(Amount.lovelace(MIN_ADA),
                                     Amount.asset(otherPolicy.getPolicyId(), otherName, QUANTITY)));
         }
-        collectTx = collectTx.withChangeAddress(SENDER.baseAddress());
+        // Fees and change go through a dedicated ada-only account, never the shared wallet.
+        // The anti-batching rule below rejects *any* output leaving the script that carries a
+        // foreign token — and cardano-client-lib's change output is such an output. Paying from
+        // a wallet that has accumulated unrelated tokens therefore fails the collection for a
+        // reason that has nothing to do with batching.
+        collectTx = collectTx.withChangeAddress(PAYER.baseAddress());
 
         var builder = TX_BUILDER.compose(collectTx)
-                .feePayer(SENDER.baseAddress())
-                .withSigner(SignerProviders.signerFrom(SENDER));
+                .feePayer(PAYER.baseAddress())
+                .withSigner(SignerProviders.signerFrom(PAYER));
 
         if (receiverSigns) {
             builder = builder

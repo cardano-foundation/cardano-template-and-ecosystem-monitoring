@@ -2,7 +2,7 @@ package org.cardanofoundation.templates.validator;
 
 import java.math.BigInteger;
 
-import com.bloxbean.cardano.client.plutus.spec.PlutusData;
+import com.bloxbean.cardano.julc.core.PlutusData;
 import com.bloxbean.cardano.julc.ledger.Interval;
 import com.bloxbean.cardano.julc.ledger.IntervalBoundType;
 import com.bloxbean.cardano.julc.ledger.ScriptContext;

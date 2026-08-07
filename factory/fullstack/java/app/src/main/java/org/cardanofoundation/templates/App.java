@@ -68,6 +68,9 @@ public class App {
 
     private static final String MARKER_NAME = "FACTORY_MARKER";
 
+    /** Ada put into the purpose-made seed UTxO. */
+    private static final BigInteger SEED_ADA = BigInteger.valueOf(15_000_000);
+
     /** Enough ada to keep every script output above the minimum and cover fees. */
     private static final BigInteger OUTPUT_ADA = BigInteger.valueOf(3_000_000);
 
@@ -84,7 +87,7 @@ public class App {
         // product scripts instead of colliding on an already-minted token.
         productId = ("WIDGET-" + System.currentTimeMillis()).getBytes(StandardCharsets.UTF_8);
 
-        Utxo seed = pickSeed();
+        Utxo seed = prepareSeed();
 
         // The parameter chain: the marker policy fixes the factory's identity, the factory
         // script is built around that identity, and the product script around both.
@@ -315,14 +318,31 @@ public class App {
     // ── Wallet helpers ────────────────────────────────────────────────────────────────
 
     /** An ada-only UTxO big enough to seed the factory and cover fees. */
-    private static Utxo pickSeed() throws Exception {
+    /**
+     * Creates a clean, ada-only UTxO and returns it as the seed.
+     *
+     * <p>Deliberately not "find a suitable UTxO in the wallet". On a long-lived devnet the
+     * wallet accumulates native tokens from other examples, and a seed carrying them makes the
+     * marker mint fail for reasons unrelated to what this example demonstrates. Minting one
+     * on demand is deterministic and independent of whatever ran before.
+     */
+    private static Utxo prepareSeed() throws Exception {
+        Tx fund = new Tx()
+                .payToAddress(OWNER.baseAddress(), Amount.lovelace(SEED_ADA))
+                .from(OWNER.baseAddress());
+
+        TxResult result = TX_BUILDER.compose(fund)
+                .withSigner(SignerProviders.signerFrom(OWNER))
+                .completeAndWait();
+        require(result.isSuccessful(), "preparing the seed UTxO failed: " + result);
+
         return UTXOS.getAll(OWNER.baseAddress()).stream()
+                .filter(utxo -> utxo.getTxHash().equals(result.getTxHash()))
                 .filter(utxo -> utxo.getAmount().size() == 1)
-                .filter(utxo -> utxo.getAmount().get(0).getQuantity()
-                        .compareTo(BigInteger.valueOf(10_000_000)) >= 0)
                 .findFirst()
                 .orElseThrow(() -> new IllegalStateException(
-                        "no ada-only UTxO of at least 10 ada to seed the factory"));
+                        "the seed transaction " + result.getTxHash()
+                                + " produced no ada-only output"));
     }
 
     /**

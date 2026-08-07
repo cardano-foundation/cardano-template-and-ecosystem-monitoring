@@ -1,6 +1,6 @@
 package org.cardanofoundation.templates.validator;
 
-import com.bloxbean.cardano.client.plutus.spec.PlutusData;
+import com.bloxbean.cardano.julc.core.PlutusData;
 import com.bloxbean.cardano.julc.ledger.ScriptContext;
 import com.bloxbean.cardano.julc.stdlib.annotation.Entrypoint;
 import com.bloxbean.cardano.julc.stdlib.annotation.MultiValidator;

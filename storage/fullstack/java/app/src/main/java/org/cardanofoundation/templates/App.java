@@ -12,6 +12,7 @@ import org.cardanofoundation.templates.validator.StorageValidator;
 import com.bloxbean.cardano.client.account.Account;
 import com.bloxbean.cardano.client.address.AddressProvider;
 import com.bloxbean.cardano.client.api.UtxoSupplier;
+import com.bloxbean.cardano.client.api.model.Amount;
 import com.bloxbean.cardano.client.api.model.Utxo;
 import com.bloxbean.cardano.client.backend.api.BackendService;
 import com.bloxbean.cardano.client.backend.api.DefaultUtxoSupplier;
@@ -282,13 +283,22 @@ public class App {
 
     /** An ada-only UTxO big enough to seed the publication and cover fees. */
     private static Utxo pickSeed() throws Exception {
+        // Any UTxO with enough ada will do. It deliberately does *not* require an ada-only
+        // UTxO: on a long-lived devnet every UTxO eventually carries leftover tokens from
+        // earlier examples, and native tokens on the seed are simply returned as change.
         return UTXOS.getAll(PUBLISHER.baseAddress()).stream()
-                .filter(utxo -> utxo.getAmount().size() == 1)
-                .filter(utxo -> utxo.getAmount().get(0).getQuantity()
-                        .compareTo(BigInteger.valueOf(10_000_000)) >= 0)
+                .filter(utxo -> lovelaceOf(utxo).compareTo(BigInteger.valueOf(10_000_000)) >= 0)
                 .findFirst()
                 .orElseThrow(() -> new IllegalStateException(
-                        "no ada-only UTxO of at least 10 ada to seed the publication"));
+                        "no UTxO of at least 10 ada to seed the publication"));
+    }
+
+    private static BigInteger lovelaceOf(Utxo utxo) {
+        return utxo.getAmount().stream()
+                .filter(amount -> "lovelace".equals(amount.getUnit()))
+                .map(Amount::getQuantity)
+                .findFirst()
+                .orElse(BigInteger.ZERO);
     }
 
     private static Utxo registryEntryFrom(String txHash) throws Exception {
