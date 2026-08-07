@@ -319,15 +319,15 @@ jobs:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           changed=false
-          if [ ! -f dashboard/dashboard.json ]; then
-            echo "dashboard/dashboard.json missing — nothing to publish"
+          if [ ! -f docs/dashboard.json ]; then
+            echo "docs/dashboard.json missing — nothing to publish"
           else
-            CURR=$(jq -S 'del(.lastUpdated)' dashboard/dashboard.json 2>/dev/null || echo '')
-            PREV=$(git show HEAD:dashboard/dashboard.json 2>/dev/null \
+            CURR=$(jq -S 'del(.lastUpdated)' docs/dashboard.json 2>/dev/null || echo '')
+            PREV=$(git show HEAD:docs/dashboard.json 2>/dev/null \
                      | jq -S 'del(.lastUpdated)' 2>/dev/null || echo '')
             if [ "$CURR" = "$PREV" ]; then
               echo "No meaningful change (lastUpdated ignored) — discarding timestamp-only churn"
-              git checkout -- dashboard/dashboard.json 2>/dev/null || true
+              git checkout -- docs/dashboard.json 2>/dev/null || true
             else
               echo "Dashboard changed — will publish"
               changed=true
@@ -350,7 +350,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add dashboard/dashboard.json
+          git add docs/dashboard.json
           git commit -m "chore: update dashboard.json [skip ci]"
           git push origin "HEAD:${BRANCH}"
 
@@ -363,14 +363,14 @@ jobs:
           base: ${{ github.event.repository.default_branch }}
           branch: automated/dashboard-update
           delete-branch: true
-          add-paths: dashboard/dashboard.json
+          add-paths: docs/dashboard.json
           title: "chore: update dashboard.json"
           commit-message: "chore: update dashboard.json [skip ci]"
           body: |
             ## Automated dashboard update
 
             The ecosystem CI detected a change in the cross-check matrix.
-            This PR updates `dashboard/dashboard.json` (the `lastUpdated`
+            This PR updates `docs/dashboard.json` (the `lastUpdated`
             timestamp alone never triggers it).
 
             ---
