@@ -18,6 +18,7 @@
 # Environments
 .env
 wallet_*.txt
+wallet_*.json
 htlc_store.json
 
 # compiled output
@@ -62,3 +63,7 @@ wallet_*.txt
 # write to `bin/` instead.
 */fullstack/java/.gradle/
 */fullstack/java/app/bin/
+# CI runner workspace scratch (report job)
+artifacts/
+/report.md
+*.history

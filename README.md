@@ -37,7 +37,7 @@ The 21 use cases identified in the research paper are as follows:
 14. [Lottery](lottery/README.md)  
 15. [Constant-product AMM](constant-product-amm/README.md)  
 16. [Upgradeable Proxy](upgradable-proxy/README.md)  
-17. [Factory](upgradable-proxy/README.md)
+17. [Factory](factory/README.md)
 18. [Decentralized identity](decentralized-identity/README.md)  
 19. [Editable NFT](editable-nft/README.md)  
 20. [Anonymous Data](anonymous-data/README.md)  
