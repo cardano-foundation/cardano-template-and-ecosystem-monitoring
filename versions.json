@@ -1,11 +1,11 @@
 {
-  "aiken-compiler": "v1.1.22",
+  "aiken-compiler": "v1.1.23",
   "aiken-lang/stdlib": "v3.1.0",
   "sidan-lab/vodka": "0.1.23",
-  "@meshsdk/core": "1.9.0",
-  "@meshsdk/core-csl": "1.9.0",
-  "@meshsdk/common": "1.9.0",
+  "@meshsdk/core": "1.9.1",
+  "@meshsdk/core-csl": "1.9.1",
+  "@meshsdk/common": "1.9.1",
   "@evolution-sdk/lucid": "2.0.1",
-  "cardano-client-lib": "0.8.0-pre4",
+  "cardano-client-lib": "0.8.0-pre5",
   "pycardano": "0.19.2"
 }
