@@ -69,13 +69,36 @@ public class App {
     /**
      * The betting window, in the devkit's reported block time.
      *
-     * <p>Generous on purpose. This devnet reports a block's {@code slot} and its {@code time}
-     * out of step with each other, so a deadline derived from block time cannot be compared
-     * directly against a slot-derived transaction bound. Rather than assume the size of that
-     * skew, the window is wide enough to absorb it and settlement simply retries until the
-     * chain agrees the window has closed.
+     * <p>Generous, and it has to be. This devnet starts its chain with the clock shifted
+     * backwards, so the POSIX time a <em>slot</em> maps to runs several hundred seconds ahead of
+     * the block {@code time} the API reports. Every transaction bound here is built from a slot
+     * while the expiry in the datum comes from block time, so a window narrower than that skew
+     * makes even the opening transaction look as though it lands after the expiry.
+     *
+     * <p>Measured on the devkit at ~635s. Do not shrink this to save CI time without
+     * re-measuring: the failure it causes is at bet <em>creation</em>, which reads as a
+     * validator bug rather than a clock problem.
      */
     private static final long BETTING_WINDOW_SECONDS = 700;
+
+    /**
+     * How long to wait for the chain's clock to pass the expiry before giving up.
+     *
+     * <p>A bound, not an expectation, and necessarily larger than the window above. Without one
+     * a stalled devnet leaves the example sleeping until the CI job is killed, which surfaces as
+     * a cancelled job with no explanation instead of a failure that names its cause.
+     */
+    private static final long MAX_WAIT_SECONDS = 900;
+
+    /**
+     * Settlement attempts once chain time is past the expiry.
+     *
+     * <p>A block's reported {@code time} and its {@code slot} advance out of step on this
+     * devnet, and a transaction's validity bound is set from the slot. So the chain clock
+     * passing the expiry does not guarantee the next transaction's lower bound has caught up —
+     * these attempts absorb that residual skew.
+     */
+    private static final int SETTLE_ATTEMPTS = 12;
 
     private static final PlutusScript BET = JulcScriptLoader.load(BetValidator.class);
     private static final String BET_ADDRESS =
@@ -125,7 +148,12 @@ public class App {
         Utxo live = utxoFrom(BET_ADDRESS, joined.getTxHash());
         System.out.println("Player 2 joined in " + joined.getTxHash());
 
-        // 6. The oracle cannot call it early.
+        // 6. The oracle cannot call it early. Stated as a precondition rather than assumed: if
+        //    the earlier steps had already run past the expiry, a rejection here would prove
+        //    nothing, and the case would quietly stop testing anything.
+        require(chainTimeSeconds() < expirySeconds,
+                "the betting window closed before the early-settlement case could run; "
+                        + "raise BETTING_WINDOW_SECONDS");
         require(isRejected(() -> settle(live, PLAYER1)),
                 "settling before the expiry must be rejected");
         System.out.println("Early settlement rejected as expected");
@@ -133,7 +161,7 @@ public class App {
         // 7. Wait out the betting window, then settle. Retrying is what makes this independent
         //    of the devnet's slot/time skew: the first attempt that succeeds is, by definition,
         //    the first one the chain considers to be past the expiry.
-        TxResult settled = settleWhenWindowCloses(live);
+        TxResult settled = settleWhenWindowCloses(live, expirySeconds);
         System.out.println("Oracle announced player 1 in " + settled.getTxHash());
 
         require(spendsBet(settled.getTxHash()),
@@ -313,21 +341,46 @@ public class App {
 
     // ── Helpers ───────────────────────────────────────────────────────────────────────
 
-    /** Retries settlement until the chain accepts it, i.e. until the window has demonstrably closed. */
-    private static TxResult settleWhenWindowCloses(Utxo bet) throws Exception {
+    /**
+     * Waits for the betting window to close, then settles.
+     *
+     * <p>Two phases, because they cost very different amounts. Watching the chain's own clock is
+     * one query per tick; attempting a settlement builds a transaction and runs a script
+     * evaluation. Polling until the expiry has demonstrably passed, and only then attempting to
+     * settle, keeps the expensive operation to a handful of tries instead of one per tick.
+     */
+    private static TxResult settleWhenWindowCloses(Utxo bet, long expirySeconds) throws Exception {
         System.out.println("Waiting for the betting window to close…");
-        for (int attempt = 0; attempt < 90; attempt++) {
-            Thread.sleep(10_000);
+
+        long giveUpAt = System.currentTimeMillis() + MAX_WAIT_SECONDS * 1000;
+        long chainTime = chainTimeSeconds();
+
+        while (chainTime <= expirySeconds) {
+            require(System.currentTimeMillis() < giveUpAt,
+                    "the chain clock did not reach the expiry within " + MAX_WAIT_SECONDS
+                            + "s (chain time " + chainTime + ", expiry " + expirySeconds
+                            + ", short by " + (expirySeconds - chainTime) + "s)");
+            Thread.sleep(5_000);
+            chainTime = chainTimeSeconds();
+        }
+        System.out.println("Window closed (chain time " + chainTime + " > expiry "
+                + expirySeconds + "); settling");
+
+        // The chain clock is past the expiry, but the slot a validity bound is built from may
+        // still lag it. These attempts absorb that.
+        for (int attempt = 0; attempt < SETTLE_ATTEMPTS; attempt++) {
             try {
                 TxResult result = settle(bet, PLAYER1);
                 if (result.isSuccessful()) {
                     return result;
                 }
-            } catch (Exception stillTooEarly) {
-                // The validator is refusing because the expiry has not passed yet.
+            } catch (Exception boundHasNotCaughtUp) {
+                // The validity bound still reads as inside the window; try again shortly.
             }
+            Thread.sleep(5_000);
         }
-        throw new IllegalStateException("the betting window never closed");
+        throw new IllegalStateException("settlement was still refused " + SETTLE_ATTEMPTS
+                + " attempts after the chain clock passed the expiry");
     }
 
     private static long chainTimeSeconds() throws Exception {
