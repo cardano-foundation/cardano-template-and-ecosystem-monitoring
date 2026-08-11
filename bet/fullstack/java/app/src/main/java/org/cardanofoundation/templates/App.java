@@ -7,16 +7,17 @@ import org.cardanofoundation.templates.validator.BetValidator;
 
 import com.bloxbean.cardano.client.account.Account;
 import com.bloxbean.cardano.client.address.AddressProvider;
+import com.bloxbean.cardano.client.api.TransactionEvaluator;
 import com.bloxbean.cardano.client.api.UtxoSupplier;
 import com.bloxbean.cardano.client.api.model.Amount;
 import com.bloxbean.cardano.client.api.model.Utxo;
 import com.bloxbean.cardano.client.backend.api.BackendService;
+import com.bloxbean.cardano.client.backend.api.DefaultProtocolParamsSupplier;
 import com.bloxbean.cardano.client.backend.api.DefaultUtxoSupplier;
 import com.bloxbean.cardano.client.backend.blockfrost.service.BFBackendService;
 import com.bloxbean.cardano.client.common.model.Network;
 import com.bloxbean.cardano.client.common.model.Networks;
 import com.bloxbean.cardano.client.function.helper.SignerProviders;
-import com.bloxbean.cardano.client.plutus.spec.BigIntPlutusData;
 import com.bloxbean.cardano.client.plutus.spec.BytesPlutusData;
 import com.bloxbean.cardano.client.plutus.spec.ConstrPlutusData;
 import com.bloxbean.cardano.client.plutus.spec.PlutusData;
@@ -27,6 +28,9 @@ import com.bloxbean.cardano.client.quicktx.Tx;
 import com.bloxbean.cardano.client.quicktx.TxResult;
 import com.bloxbean.cardano.client.transaction.spec.Asset;
 import com.bloxbean.cardano.julc.clientlib.JulcScriptLoader;
+import com.bloxbean.cardano.julc.clientlib.PlutusDataAdapter;
+import com.bloxbean.cardano.julc.clientlib.eval.JulcTransactionEvaluator;
+import com.bloxbean.cardano.julc.clientlib.eval.SlotConfig;
 
 /**
  * A two-player bet settled by an oracle.
@@ -67,19 +71,31 @@ public class App {
     private static final BigInteger POT = STAKE.multiply(BigInteger.TWO);
 
     /**
-     * The betting window, in the devkit's reported block time.
+     * How far the POSIX time a <em>slot</em> maps to runs ahead of the block {@code time} the API
+     * reports. The devkit compresses Byron through Alonzo into an instant and starts Babbage at a
+     * relative time of 600s, and that offset stays for the life of the chain.
      *
-     * <p>Generous, and it has to be. This devnet starts its chain with the clock shifted
-     * backwards, so the POSIX time a <em>slot</em> maps to runs several hundred seconds ahead of
-     * the block {@code time} the API reports. Every transaction bound here is built from a slot
-     * while the expiry in the datum comes from block time, so a window narrower than that skew
-     * makes even the opening transaction look as though it lands after the expiry.
-     *
-     * <p>Measured on the devkit at ~635s. Do not shrink this to save CI time without
-     * re-measuring: the failure it causes is at bet <em>creation</em>, which reads as a
-     * validator bug rather than a clock problem.
+     * <p>Measured from the node's own rejection dump, which prints the datum and the translated
+     * validity bound side by side: an expiry of {@code 1786356209000} built from block time
+     * against a bound of {@code 1786356724000} on a transaction ending 30 slots out.
      */
-    private static final long BETTING_WINDOW_SECONDS = 700;
+    private static final long SLOT_TIME_SKEW_SECONDS =
+            Long.parseLong(envOrDefault("CARDANO_SLOT_TIME_SKEW_SECONDS", "600"));
+
+    /**
+     * The betting window, in the time base the validator compares against.
+     *
+     * <p>Near enough the runtime of the whole example, since settlement is what everything waits
+     * on. It only has to outlast the transactions that must land before the expiry — four script
+     * transactions, ~20s here — plus the lead {@link #soon()} puts on their upper bound.
+     *
+     * <p>It can be this small only because scripts are costed locally against
+     * {@link #devnetSlots()} rather than by ogmios. Ogmios does not apply
+     * {@link #SLOT_TIME_SKEW_SECONDS}, so a transaction it happily evaluates can still be refused
+     * by the node — and settlement, which it gates, would wait a further 600s for plain block time
+     * to catch up. That disagreement, not the contract, is what used to force a 700s window.
+     */
+    private static final long BETTING_WINDOW_SECONDS = 45;
 
     /**
      * How long to wait for the chain's clock to pass the expiry before giving up.
@@ -88,39 +104,40 @@ public class App {
      * a stalled devnet leaves the example sleeping until the CI job is killed, which surfaces as
      * a cancelled job with no explanation instead of a failure that names its cause.
      */
-    private static final long MAX_WAIT_SECONDS = 900;
+    private static final long MAX_WAIT_SECONDS = 180;
 
     /**
-     * Settlement attempts once chain time is past the expiry.
+     * How long to pause between settlement attempts while the window is still open.
      *
-     * <p>A block's reported {@code time} and its {@code slot} advance out of step on this
-     * devnet, and a transaction's validity bound is set from the slot. So the chain clock
-     * passing the expiry does not guarantee the next transaction's lower bound has caught up —
-     * these attempts absorb that residual skew.
+     * <p>Also the worst case by which the run overshoots the expiry, since the window closing is
+     * only noticed on the next attempt. Evaluating locally makes an attempt cheap enough to poll
+     * this often, which is most of why the run finishes close to the window rather than well past
+     * it.
      */
-    private static final int SETTLE_ATTEMPTS = 12;
+    private static final long SETTLE_RETRY_SECONDS = 3;
 
     private static final PlutusScript BET = JulcScriptLoader.load(BetValidator.class);
     private static final String BET_ADDRESS =
-            AddressProvider.getEntAddress(BET, NETWORK).toBech32();
+            AddressProvider.getEntAddress(BET, NETWORK).getAddress();
 
     private static final byte[] EMPTY = new byte[0];
+
+    /** Costs every script this example submits. See {@link #localEvaluator()}. */
+    private static final TransactionEvaluator EVALUATOR = localEvaluator();
 
     public static void main(String[] args) throws Exception {
         // Times come from the chain rather than the local clock, so the example does not assume
         // the devnet's slot-to-time mapping matches this machine.
-        long expirySeconds = chainTimeSeconds() + BETTING_WINDOW_SECONDS;
+        long expirySeconds = chainPosixSeconds() + BETTING_WINDOW_SECONDS;
         BigInteger expiration = BigInteger.valueOf(expirySeconds * 1000);
 
         System.out.println("Bet address: " + BET_ADDRESS);
         System.out.println("Policy id:   " + BET.getPolicyId());
         System.out.println("Player 2:    " + PLAYER2.baseAddress());
         System.out.println("Oracle:      " + ORACLE.baseAddress());
-
         // Both need a little ada so they can sign; only player 1 ever pays a fee.
         fund(PLAYER2, 30_000_000);
         fund(ORACLE, 10_000_000);
-
         // 1. A creator who is also the referee could simply declare themselves the winner.
         require(isRejected(() -> create(datum(keyHash(PLAYER1), EMPTY, keyHash(PLAYER1),
                         expiration))),
@@ -151,7 +168,7 @@ public class App {
         // 6. The oracle cannot call it early. Stated as a precondition rather than assumed: if
         //    the earlier steps had already run past the expiry, a rejection here would prove
         //    nothing, and the case would quietly stop testing anything.
-        require(chainTimeSeconds() < expirySeconds,
+        require(chainPosixSeconds() < expirySeconds,
                 "the betting window closed before the early-settlement case could run; "
                         + "raise BETTING_WINDOW_SECONDS");
         require(isRejected(() -> settle(live, PLAYER1)),
@@ -197,7 +214,7 @@ public class App {
         // mintAsset would send the token with only its minimum ada, and the bet would be opened
         // with a stake nobody chose — which the join rule, checking for exactly double, catches
         // immediately.
-        ScriptTx createTx = new ScriptTx()
+        Tx createTx = new Tx()
                 .mintAsset(BET, List.of(token), PlutusData.unit())
                 .payToContract(BET_ADDRESS,
                         List.of(Amount.lovelace(STAKE),
@@ -210,6 +227,7 @@ public class App {
                 .withSigner(SignerProviders.signerFrom(PLAYER1))
                 .withRequiredSigners(new com.bloxbean.cardano.client.address.Address(
                         PLAYER1.baseAddress()))
+                .withTxEvaluator(EVALUATOR)
                 .validTo(soon())
                 .completeAndWait();
     }
@@ -238,6 +256,7 @@ public class App {
                 .withSigner(SignerProviders.signerFrom(signer))
                 .withRequiredSigners(new com.bloxbean.cardano.client.address.Address(
                         signer.baseAddress()))
+                .withTxEvaluator(EVALUATOR)
                 .validTo(soon())
                 .completeAndWait();
     }
@@ -274,6 +293,7 @@ public class App {
                 .withSigner(SignerProviders.signerFrom(ORACLE))
                 .withRequiredSigners(new com.bloxbean.cardano.client.address.Address(
                         ORACLE.baseAddress()))
+                .withTxEvaluator(EVALUATOR)
                 .validFrom(currentSlot())
                 .completeAndWait();
     }
@@ -283,11 +303,7 @@ public class App {
     /** {@code BetDatum { player1, player2, oracle, expiration }}; empty player2 = still open. */
     private static PlutusData datum(byte[] player1, byte[] player2, byte[] oracle,
             BigInteger expiration) {
-        return ConstrPlutusData.of(0,
-                BytesPlutusData.of(player1),
-                BytesPlutusData.of(player2),
-                BytesPlutusData.of(oracle),
-                BigIntPlutusData.of(expiration));
+        return PlutusDataAdapter.convert(new BetValidator.BetDatum(player1, player2, oracle, expiration));
     }
 
     // ── Verification ──────────────────────────────────────────────────────────────────
@@ -324,9 +340,45 @@ public class App {
         try {
             return !attempt.run().isSuccessful();
         } catch (Exception rejected) {
-            System.out.println("  rejected: " + shortMessage(rejected));
+            String detail = causeChain(rejected);
+
+            // A negative case is only evidence if the script actually ran and refused. QuickTx
+            // wraps *any* failure during cost evaluation — a missing VM provider, an unreachable
+            // backend, a malformed transaction — in a TxBuildException whose own message reads
+            // only "Error while evaluating script cost", so the reason has to come from the
+            // cause. Treating that wrapper as a rejection is not hypothetical: a misconfigured
+            // classpath once reported "No JulcVmProvider found" as the validator saying no.
+            require(isScriptFailure(detail),
+                    "expected the validator to refuse this transaction, but it failed for another "
+                            + "reason: " + detail);
             return true;
         }
+    }
+
+    /** Flattens the exception chain; the useful detail is in the cause, not the top message. */
+    private static String causeChain(Throwable thrown) {
+        StringBuilder chain = new StringBuilder();
+        for (Throwable t = thrown; t != null && t != t.getCause(); t = t.getCause()) {
+            if (chain.length() > 0) {
+                chain.append(" <- ");
+            }
+            chain.append(t.getClass().getSimpleName()).append(": ").append(t.getMessage());
+        }
+        return chain.toString();
+    }
+
+    /**
+     * Evidence that phase-2 evaluation ran and the script said no.
+     *
+     * <p>Each of these names a specific script that refused — the local evaluator's, ogmios's,
+     * and the node's phrasings. Deliberately not "Failed to compute script cost", which is what
+     * cardano-client-lib says whenever evaluation could not be completed <em>at all</em>.
+     */
+    private static boolean isScriptFailure(String detail) {
+        return detail.contains("Script evaluation failed")
+                || detail.contains("EvaluationFailure")
+                || detail.contains("ValidationTagMismatch")
+                || detail.contains("PlutusFailure");
     }
 
     @FunctionalInterface
@@ -334,53 +386,46 @@ public class App {
         TxResult run() throws Exception;
     }
 
-    private static String shortMessage(Exception e) {
-        String message = String.valueOf(e.getMessage());
-        return message.length() > 120 ? message.substring(0, 120) + "…" : message;
-    }
-
     // ── Helpers ───────────────────────────────────────────────────────────────────────
 
     /**
      * Waits for the betting window to close, then settles.
      *
-     * <p>Two phases, because they cost very different amounts. Watching the chain's own clock is
-     * one query per tick; attempting a settlement builds a transaction and runs a script
-     * evaluation. Polling until the expiry has demonstrably passed, and only then attempting to
-     * settle, keeps the expensive operation to a handful of tries instead of one per tick.
+     * <p>Simply retries: costing a script in this process is cheap enough that attempting the
+     * settlement is itself the clock check, and a refusal is the answer rather than a cost.
      */
     private static TxResult settleWhenWindowCloses(Utxo bet, long expirySeconds) throws Exception {
         System.out.println("Waiting for the betting window to close…");
 
         long giveUpAt = System.currentTimeMillis() + MAX_WAIT_SECONDS * 1000;
-        long chainTime = chainTimeSeconds();
 
-        while (chainTime <= expirySeconds) {
-            require(System.currentTimeMillis() < giveUpAt,
-                    "the chain clock did not reach the expiry within " + MAX_WAIT_SECONDS
-                            + "s (chain time " + chainTime + ", expiry " + expirySeconds
-                            + ", short by " + (expirySeconds - chainTime) + "s)");
-            Thread.sleep(5_000);
-            chainTime = chainTimeSeconds();
-        }
-        System.out.println("Window closed (chain time " + chainTime + " > expiry "
-                + expirySeconds + "); settling");
-
-        // The chain clock is past the expiry, but the slot a validity bound is built from may
-        // still lag it. These attempts absorb that.
-        for (int attempt = 0; attempt < SETTLE_ATTEMPTS; attempt++) {
+        // Retrying rather than computing when to stop: the expiry is compared against a bound the
+        // ledger derives from a slot, not against any clock this side can read directly. The first
+        // attempt that succeeds is, by definition, the first one the chain considers to be past it.
+        while (System.currentTimeMillis() < giveUpAt) {
             try {
                 TxResult result = settle(bet, PLAYER1);
                 if (result.isSuccessful()) {
                     return result;
                 }
-            } catch (Exception boundHasNotCaughtUp) {
-                // The validity bound still reads as inside the window; try again shortly.
+            } catch (Exception stillInsideTheWindow) {
+                // Expected until the expiry has passed; the validator is doing its job.
             }
-            Thread.sleep(5_000);
+            Thread.sleep(SETTLE_RETRY_SECONDS * 1000);
         }
-        throw new IllegalStateException("settlement was still refused " + SETTLE_ATTEMPTS
-                + " attempts after the chain clock passed the expiry");
+        throw new IllegalStateException("the betting window had not closed after "
+                + MAX_WAIT_SECONDS + "s (chain time " + chainTimeSeconds()
+                + ", expiry " + expirySeconds + ")");
+    }
+
+    /**
+     * Now, in the base the contract is written against: block time carried into slot time.
+     *
+     * <p>The expiry in the datum and every validity bound the validator reads live here, so the
+     * example works in it throughout rather than converting at each use and getting one wrong.
+     */
+    private static long chainPosixSeconds() throws Exception {
+        return chainTimeSeconds() + SLOT_TIME_SKEW_SECONDS;
     }
 
     private static long chainTimeSeconds() throws Exception {
@@ -391,9 +436,52 @@ public class App {
         return BACKEND.getBlockService().getLatestBlock().getValue().getSlot();
     }
 
-    /** An upper bound comfortably inside the betting window. */
+    /**
+     * The devnet's slot-to-POSIX mapping, read off the chain rather than assumed.
+     *
+     * <p>Slots advance one per second in step with block time — measured, 45 slots per 45s — so a
+     * single sample fixes the whole mapping: the slot and time of any block give the epoch that
+     * slot zero sits at, and {@link #SLOT_TIME_SKEW_SECONDS} carries it into the base the node
+     * validates in. Derived per run because a devnet gets a fresh start time every time it is
+     * recreated, which a hardcoded constant would silently outlive.
+     */
+    private static SlotConfig devnetSlots() {
+        try {
+            var block = BACKEND.getBlockService().getLatestBlock().getValue();
+            long slotZeroPosixMs =
+                    (block.getTime() - block.getSlot() + SLOT_TIME_SKEW_SECONDS) * 1000L;
+            return new SlotConfig(0, slotZeroPosixMs, 1000);
+        } catch (Exception e) {
+            throw new IllegalStateException("could not read the devnet's slot mapping from "
+                    + BACKEND_URL, e);
+        }
+    }
+
+    /**
+     * Costs scripts in this process instead of asking ogmios.
+     *
+     * <p>Not an optimisation but a correctness fix. Ogmios translates slots without the devkit's
+     * era offset, so it disagrees with the node about when a deadline falls: it will pass a
+     * transaction the node then refuses with {@code ValidationTagMismatch}, and it holds up
+     * settlement until plain block time reaches an expiry the node already considers past.
+     * Evaluating against {@link #devnetSlots()} puts the check on the same clock as the node.
+     */
+    private static TransactionEvaluator localEvaluator() {
+        return new JulcTransactionEvaluator(UTXOS,
+                new DefaultProtocolParamsSupplier(BACKEND.getEpochService()),
+                scriptHash -> java.util.Optional.empty(),
+                devnetSlots());
+    }
+
+    /**
+     * An upper bound comfortably inside the betting window.
+     *
+     * <p>Every second of this lead is a second the window has to be longer than the work it
+     * covers, so it is kept just wide enough to survive the few blocks between building a
+     * transaction and it being accepted.
+     */
     private static long soon() throws Exception {
-        return currentSlot() + 30;
+        return currentSlot() + 15;
     }
 
     /**

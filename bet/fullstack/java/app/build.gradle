@@ -23,10 +23,21 @@ dependencies {
     implementation "com.bloxbean.cardano:cardano-client-lib:${cardanoClientLibVersion}"
     implementation "com.bloxbean.cardano:cardano-client-backend-blockfrost:${cardanoClientLibVersion}"
 
-    // Tests evaluate the compiled validator on a real Plutus VM.
+    // Scripts are costed in-process rather than by ogmios, which translates slots without the
+    // devkit's era offset and so disagrees with the node about when a deadline falls. The
+    // evaluator lives in julc-cardano-client-lib above; these supply the VM it looks up at
+    // runtime, and without them it fails with "No JulcVmProvider found".
+    implementation "com.bloxbean.cardano:julc-vm:${julcVersion}"
+    runtimeOnly "com.bloxbean.cardano:julc-vm-scalus:${julcVersion}"
+
+    // No SLF4J binding on purpose. cardano-client-lib both logs and rethrows a failed script
+    // evaluation, and the rethrow keeps the original exception as its cause — so the chain's
+    // actual complaint reaches App.isRejected either way. A binding would only add a stack
+    // trace per deliberate rejection, and this example asserts several.
+
+    // Tests evaluate the compiled validator on a real Plutus VM — the same one the example now
+    // costs its transactions with, inherited from the main source set above.
     testImplementation "com.bloxbean.cardano:julc-testkit:${julcVersion}"
-    testImplementation "com.bloxbean.cardano:julc-vm:${julcVersion}"
-    testRuntimeOnly "com.bloxbean.cardano:julc-vm-scalus:${julcVersion}"
 
     testImplementation platform('org.junit:junit-bom:5.10.0')
     testImplementation 'org.junit.jupiter:junit-jupiter'
