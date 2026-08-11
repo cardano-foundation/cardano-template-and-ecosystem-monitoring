@@ -3,9 +3,9 @@ description: 'Restore Aiken from cache or install via aikup, and add it to PATH.
 
 inputs:
   aiken-version:
-    description: 'Aiken compiler version (with or without leading v, e.g. v1.1.21).'
+    description: 'Aiken compiler version, with the leading v (e.g. v1.1.23).'
     required: false
-    default: 'v1.1.21'
+    default: 'v1.1.23'
   cache-version:
     description: 'Cache-buster suffix. Bump to invalidate every consumer in one step.'
     required: false
@@ -32,7 +32,9 @@ runs:
       run: |
         curl --proto '=https' --tlsv1.2 -LsSf https://install.aiken-lang.org | sh
         export PATH="$HOME/.aiken/bin:$PATH"
-        # aikup install accepts either "v1.1.21" or "1.1.21"; let it normalize.
+        # Pass the tag WITH the leading "v". aikup 0.0.11 resolves the GitHub release
+        # by exact tag name, so a bare "1.1.23" fails with "GitHub / Not Found" — it
+        # does not normalize. The `|| aikup` fallback installs the latest release.
         aikup install "${{ inputs.aiken-version }}" || aikup
         aiken --version
 

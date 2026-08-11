@@ -1,0 +1,146 @@
+name: Test fullstack (reusable)
+
+# One reusable workflow for every fullstack framework.
+#
+# A fullstack example is self-contained: it carries its own on-chain validator
+# *and* its own off-chain flow in a single project. That is why it is not part of
+# the off-chain × on-chain cross-product in _test-offchain.yml — there is no
+# separate blueprint to download and no on-chain axis to vary. Each example is
+# one column in the dashboard.
+#
+# Artifact and status naming therefore drops the on-chain segment:
+#   logs-<prefix>-<example>   (off-chain uses logs-<prefix>-<onchain>-<example>)
+# which generate-dashboard.sh reads as <prefix>-<example>-status.txt.
+#
+# `./gradlew build` compiles the validator to Plutus and runs the validator unit
+# tests on a real Plutus VM; `./gradlew run` executes the flow against a devnet.
+# The example's main() exits non-zero when any assertion fails, so the exit code
+# is the whole result.
+
+on:
+  workflow_call:
+    inputs:
+      framework-id:
+        description: 'Identifier matching frameworks.json (e.g. julc-java).'
+        type: string
+        required: true
+      status-prefix:
+        description: 'Short prefix used in the log artifact names (e.g. julc).'
+        type: string
+        required: true
+      subdir:
+        description: 'Path under the example dir containing the project.'
+        type: string
+        required: true
+      examples:
+        description: 'JSON array of example names to run.'
+        type: string
+        required: true
+      runtime:
+        description: >-
+          Build tool: gradle | sbt. Also selects the verification bar. `gradle`
+          examples carry a runnable entrypoint and are executed against a devnet;
+          `sbt` examples have none, so they stop after compile + unit tests.
+        type: string
+        required: false
+        default: 'gradle'
+      jdk-version:
+        type: string
+        required: false
+        default: '25'
+      cache-version:
+        type: string
+        required: false
+        default: 'v1'
+
+jobs:
+  test:
+    name: ${{ inputs.framework-id }} - ${{ matrix.example }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        example: ${{ fromJson(inputs.examples) }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java + Gradle
+        if: inputs.runtime == 'gradle'
+        uses: ./.github/actions/setup-java-gradle
+        with:
+          jdk-version: ${{ inputs.jdk-version }}
+          cache-version: ${{ inputs.cache-version }}
+
+      - name: Setup SBT
+        if: inputs.runtime == 'sbt'
+        uses: ./.github/actions/setup-sbt
+        with:
+          java-version: ${{ inputs.jdk-version }}
+          cache-version: ${{ inputs.cache-version }}
+
+      # Only the runnable examples need a chain to run against.
+      - name: Setup Yaci DevKit
+        if: inputs.runtime == 'gradle'
+        uses: ./.github/actions/setup-yaci-devkit
+        with:
+          cache-version: ${{ inputs.cache-version }}
+
+      # Compile + unit tests first. These need no devnet, so a failure here is
+      # unambiguously a contract problem rather than an environment problem.
+      - name: Build and unit test
+        working-directory: ${{ matrix.example }}/${{ inputs.subdir }}
+        env:
+          RUNTIME: ${{ inputs.runtime }}
+        run: |
+          set -o pipefail
+          case "$RUNTIME" in
+            gradle) ./gradlew build --no-daemon --console=plain 2>&1 | tee build-output.log ;;
+            sbt)    sbt -batch test                              2>&1 | tee build-output.log ;;
+            *) echo "unknown runtime: $RUNTIME" >&2; exit 2 ;;
+          esac
+
+      # Skipped for runtimes whose examples have no entrypoint; for those the
+      # build step above is the whole result, so record it here instead.
+      - name: Record build-only result
+        if: inputs.runtime != 'gradle'
+        working-directory: ${{ matrix.example }}/${{ inputs.subdir }}
+        run: echo success > test-status.txt
+
+      - name: Run example against devnet
+        if: inputs.runtime == 'gradle'
+        working-directory: ${{ matrix.example }}/${{ inputs.subdir }}
+        env:
+          EXAMPLE: ${{ matrix.example }}
+        run: |
+          # Retry once with a 15s pause: yaci's readiness probe covers most
+          # startup flake, but tx submission can still hit mempool/indexer gaps.
+          EXIT=1
+          for ATTEMPT in 1 2; do
+            echo "Running $EXAMPLE (attempt $ATTEMPT/2)"
+            set +e
+            timeout 600 ./gradlew run --no-daemon --console=plain 2>&1 | tee test-output.log
+            EXIT=${PIPESTATUS[0]}
+            set -e
+            if [ "$EXIT" -eq 0 ]; then break; fi
+            if [ "$ATTEMPT" -eq 1 ]; then
+              echo "::warning::$EXAMPLE attempt $ATTEMPT failed with exit $EXIT — retrying after 15s"
+              sleep 15
+            fi
+          done
+          if [ "$EXIT" -eq 0 ]; then echo success > test-status.txt; else echo failed > test-status.txt; fi
+          exit "$EXIT"
+
+      # `if: always()` so a failed run still publishes its status file; without
+      # it the dashboard would show the combo as never attempted.
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-${{ inputs.status-prefix }}-${{ matrix.example }}
+          path: |
+            ${{ matrix.example }}/${{ inputs.subdir }}/build-output.log
+            ${{ matrix.example }}/${{ inputs.subdir }}/test-output.log
+            ${{ matrix.example }}/${{ inputs.subdir }}/test-status.txt
+          retention-days: 30

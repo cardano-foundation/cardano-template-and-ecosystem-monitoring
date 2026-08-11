@@ -1,10 +1,10 @@
 {
   "version": "5",
   "specifiers": {
-    "npm:@meshsdk/common@1.9.0": "1.9.0",
-    "npm:@meshsdk/core-csl@1.9.0": "1.9.0",
-    "npm:@meshsdk/core-cst@^1.9.0-beta.94": "1.9.0_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.0",
-    "npm:@meshsdk/core@1.9.0": "1.9.0_@bufbuild+protobuf@1.10.1_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.0",
+    "npm:@meshsdk/common@1.9.1": "1.9.1",
+    "npm:@meshsdk/core-csl@1.9.1": "1.9.1",
+    "npm:@meshsdk/core-cst@^1.9.0-beta.94": "1.9.1_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.1",
+    "npm:@meshsdk/core@1.9.1": "1.9.1_@bufbuild+protobuf@1.10.1_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.1",
     "npm:bech32@*": "2.0.0"
   },
   "npm": {
@@ -209,8 +209,8 @@
         "@harmoniclabs/uint8array-utils"
       ]
     },
-    "@harmoniclabs/crypto@0.3.0": {
-      "integrity": "sha512-UvmGQOLFVFhRIDYLpcWbPQLXl9advCt0h02Z/BtBuXtHiy35WRxKQ3njcUKI0v6zGITuvqQhsf6VOPMeekLdeA==",
+    "@harmoniclabs/crypto@0.3.1": {
+      "integrity": "sha512-KA9KgI+2c+9KddAU0A5mTAC/O94J25IwvU6z6wzvgIZMYY5f4VxWLvPWA6aRpAe9pO7hOC9s5hu1FzZWxJkZ5A==",
       "dependencies": [
         "@harmoniclabs/bitstream",
         "@harmoniclabs/uint8array-utils"
@@ -235,13 +235,13 @@
     "@harmoniclabs/uint8array-utils@1.0.4": {
       "integrity": "sha512-Z454prSbX4geXGHyjjcn9vm6u9NsD3VJykv8f8yE1VjIXSPitaLPEnm8u2+B+GMp1chYlLilOq+kW4OvJ6y28A=="
     },
-    "@harmoniclabs/uplc@1.4.1_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+cbor@1.6.0_@harmoniclabs+crypto@0.3.0_@harmoniclabs+pair@1.0.0_@harmoniclabs+plutus-data@1.2.6__@harmoniclabs+bytestring@1.0.0__@harmoniclabs+cbor@1.6.0": {
+    "@harmoniclabs/uplc@1.4.1_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+cbor@1.6.0_@harmoniclabs+crypto@0.3.1_@harmoniclabs+pair@1.0.0_@harmoniclabs+plutus-data@1.2.6__@harmoniclabs+bytestring@1.0.0__@harmoniclabs+cbor@1.6.0": {
       "integrity": "sha512-sELKStjxPBPBxBMylU4oBSUe0/8eJe2HqRblNSwrMu8Fso4YpSPDqHZ33iDZ8QAadVUsT5r2EQKX0TLrj7qXvQ==",
       "dependencies": [
         "@harmoniclabs/bigint-utils",
         "@harmoniclabs/bytestring",
         "@harmoniclabs/cbor",
-        "@harmoniclabs/crypto@0.3.0",
+        "@harmoniclabs/crypto@0.3.1",
         "@harmoniclabs/pair",
         "@harmoniclabs/plutus-data",
         "@harmoniclabs/uint8array-utils"
@@ -261,15 +261,6 @@
         "uint8arraylist"
       ]
     },
-    "@meshsdk/common@1.9.0": {
-      "integrity": "sha512-FBS1j5eALPZ4WXjzH23do3GQr6VgzcFJ7vUzemDYGjeUtf+E6a/J14Vf1YFFIqVcjINLjeU/xl3Pjm46j4DgUg==",
-      "dependencies": [
-        "bech32",
-        "bip39",
-        "blake2b",
-        "blakejs"
-      ]
-    },
     "@meshsdk/common@1.9.0-beta.100": {
       "integrity": "sha512-H3ktKR9eheRKZupg7DLdUr8A9dsefJbu7Wc+I1suwrv+oAZWiJ2wCuF3bX2QQo3LyWrSkVCE7WEiKFfQmukIww==",
       "dependencies": [
@@ -279,10 +270,19 @@
         "blakejs"
       ]
     },
-    "@meshsdk/core-csl@1.9.0": {
-      "integrity": "sha512-CdEEVanE1H7texWTNlriXYzF1Wxxl0yMRpISqx9UIqb9n9l6bioV+L387XzohZvxdmFhmoIy4sMhk/tVd2FSVQ==",
+    "@meshsdk/common@1.9.1": {
+      "integrity": "sha512-66l7vcY+h9w71auVaE7RLJYs87DmO+JTEmQ2xknd6F8fAcR73nMxLZunMRbygPoV9gHDBTMYfHoMBZqWt7N6EA==",
       "dependencies": [
-        "@meshsdk/common@1.9.0",
+        "bech32",
+        "bip39",
+        "blake2b",
+        "blakejs"
+      ]
+    },
+    "@meshsdk/core-csl@1.9.1": {
+      "integrity": "sha512-4NPxkpAsGTs0pBTZM67uqxYrlU0Aorp2HHqljhzV/mm6+Q/swb8IxYVMN88VHS5TFI5zF0Ye+3+b1fYczYtRJg==",
+      "dependencies": [
+        "@meshsdk/common@1.9.1",
         "@sidan-lab/whisky-js-browser",
         "@sidan-lab/whisky-js-nodejs",
         "@types/base32-encoding",
@@ -292,7 +292,7 @@
         "whisky-evaluator"
       ]
     },
-    "@meshsdk/core-cst@1.9.0-beta.100_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.0": {
+    "@meshsdk/core-cst@1.9.0-beta.100_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.1": {
       "integrity": "sha512-gXC7c81puzv12C3xJ6vhH/KIEc/P6ScuXsgmLlqFMpDv0SuoMg+42HgdyWi0WrccVwi8cdepsn5YhtCaYVn0nw==",
       "dependencies": [
         "@cardano-sdk/core",
@@ -313,8 +313,8 @@
         "scalus@0.14.2"
       ]
     },
-    "@meshsdk/core-cst@1.9.0_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.0": {
-      "integrity": "sha512-2M0oZ5lRTnNfgTy65SEdp/i16CMqm31UNHKq7W7FvTIbIg2k8L8BNB2tq55ARBtXPqO6dYICzXEvHI4pfM6NAQ==",
+    "@meshsdk/core-cst@1.9.1_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.1": {
+      "integrity": "sha512-1e72mtTehjV/XQWpxtnejhEXyhU1f8CWqoTaQfq2rfBydLJfFs/NDEYfBKBOx697MOWM7VPAHjLvVAENqS57EQ==",
       "dependencies": [
         "@cardano-sdk/core",
         "@cardano-sdk/crypto",
@@ -324,7 +324,7 @@
         "@harmoniclabs/pair",
         "@harmoniclabs/plutus-data",
         "@harmoniclabs/uplc",
-        "@meshsdk/common@1.9.0",
+        "@meshsdk/common@1.9.1",
         "@types/base32-encoding",
         "base32-encoding",
         "bech32",
@@ -333,44 +333,44 @@
         "hash.js"
       ]
     },
-    "@meshsdk/core@1.9.0_@bufbuild+protobuf@1.10.1_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.0": {
-      "integrity": "sha512-6YTH9EhWOYjEgkUfEzKqOiHjZrtOzbB/tx15lDPx/bBITAuxKUe2LByHZjmzUYbMhd1LnkoJ9v6WrCqiWS7juA==",
+    "@meshsdk/core@1.9.1_@bufbuild+protobuf@1.10.1_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.1": {
+      "integrity": "sha512-khMrEkMU71t3kn6nHM8/5rjVry055jORdln+xegP0KpVzCjWxjOe+bzyCMnQehwNT7R8OEe7wx8zYUL4qTijkA==",
       "dependencies": [
-        "@meshsdk/common@1.9.0",
-        "@meshsdk/core-cst@1.9.0_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.0",
+        "@meshsdk/common@1.9.1",
+        "@meshsdk/core-cst@1.9.1_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.1",
         "@meshsdk/provider",
         "@meshsdk/transaction",
         "@meshsdk/wallet",
         "scalus@0.17.0"
       ]
     },
-    "@meshsdk/provider@1.9.0-beta.101_@bufbuild+protobuf@1.10.1_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.0": {
+    "@meshsdk/provider@1.9.0-beta.101_@bufbuild+protobuf@1.10.1_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.1": {
       "integrity": "sha512-xbb0pCDpeHk8WEzgZCUlwy1CLpOPSPNn3TPtuLuMNnebCO8lZhvP3NYZqX/CUnTkOjXP4dxu5Zbf7ipZ43V4RQ==",
       "dependencies": [
         "@meshsdk/common@1.9.0-beta.100",
-        "@meshsdk/core-cst@1.9.0-beta.100_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.0",
+        "@meshsdk/core-cst@1.9.0-beta.100_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.1",
         "@utxorpc/sdk",
         "@utxorpc/spec",
         "axios",
         "cbor"
       ]
     },
-    "@meshsdk/transaction@1.9.0_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.0": {
-      "integrity": "sha512-1PxLGoH88A5jUQDV/cUaBh1KvT3sjWwp0DFRP6ASBzwYmhDWr8SNuYQtDB0MLDM7sGXY4VVYq5N46r15TIcB1Q==",
+    "@meshsdk/transaction@1.9.1_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.1": {
+      "integrity": "sha512-FjKSoUi2xFaKJPI1ObQ13UkrCJu+iPW6THP//ZD/f5I1NciaUz3bcoQ7xWcc7El4TCcDunBPp9di6w9JitBR6Q==",
       "dependencies": [
         "@cardano-sdk/core",
         "@cardano-sdk/input-selection",
         "@cardano-sdk/util",
-        "@meshsdk/common@1.9.0",
-        "@meshsdk/core-cst@1.9.0_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.0",
+        "@meshsdk/common@1.9.1",
+        "@meshsdk/core-cst@1.9.1_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.1",
         "json-bigint"
       ]
     },
-    "@meshsdk/wallet@1.9.0_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.0": {
-      "integrity": "sha512-yu84c5Ao6/8AI76HKq1TqxNZFVwqO/yahufgI8o8IAikG3zaqQpdIl3UwFLFcUeStlbFi1zpYQNNybjmffHvqw==",
+    "@meshsdk/wallet@1.9.1_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.1": {
+      "integrity": "sha512-lPovMk86Ex6t1s12CiSJFfxnTM31vXxwB7h0BOnznPgueBts2z0cgvQVtBMlhIKHTmPWW1/gkuEH/5dGMfZ3jA==",
       "dependencies": [
-        "@meshsdk/common@1.9.0",
-        "@meshsdk/core-cst@1.9.0_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.0",
+        "@meshsdk/common@1.9.1",
+        "@meshsdk/core-cst@1.9.1_@harmoniclabs+bytestring@1.0.0_@harmoniclabs+crypto@0.3.1",
         "@meshsdk/transaction",
         "@simplewebauthn/browser"
       ]
@@ -480,8 +480,8 @@
         "possible-typed-array-names"
       ]
     },
-    "axios@1.16.1": {
-      "integrity": "sha512-caYkukvroVPO8KrzuJEb50Hm07KwfBZPEC3VeFHTsqWHvKTsy54hjJz9BS/cdaypROE2rH6xvm9mHX4fgWkr3A==",
+    "axios@1.19.0": {
+      "integrity": "sha512-ht/iuYZXEjFxLH/Hkezgd7m6JKlHHXEUSneaDz8uZe1Gj5QZtCnpyDsckvAiEnT89OEbCLmnte4R4sn7P0EKFw==",
       "dependencies": [
         "follow-redirects",
         "form-data",
@@ -705,8 +705,8 @@
         "is-callable"
       ]
     },
-    "form-data@4.0.5": {
-      "integrity": "sha512-8RipRLol37bNs2bhoV67fiTEvdTrbMUYcFTiy3+wuuOnUog2QBHCZWXDRijWQfAkhBj2Uf5UnVaiWwA5vdd82w==",
+    "form-data@4.0.6": {
+      "integrity": "sha512-vKatAh4SlVfgbv+YtmhiRjhEMJsYpsG1Y2rMQtR+SVSbytsSD1YGzDIcrAJmdFec88u/+VoGmxnl+80gL1tRCQ==",
       "dependencies": [
         "asynckit",
         "combined-stream",
@@ -796,8 +796,8 @@
     "hashlru@2.3.0": {
       "integrity": "sha512-0cMsjjIC8I+D3M44pOQdsy0OHXGLVz6Z0beRuufhKa0KfaD2wGwAev6jILzXsd3/vpnNQJmWyZtIILqM1N+n5A=="
     },
-    "hasown@2.0.3": {
-      "integrity": "sha512-ej4AhfhfL2Q2zpMmLo7U1Uv9+PyhIZpgQLGT1F9miIGmiCJIoCgSmczFdrc97mWT4kVY72KA+WnnhJ5pghSvSg==",
+    "hasown@2.0.4": {
+      "integrity": "sha512-T2UbfbBEF32wiepXIsMlTW9+dDYC6wMh/t/vYA4tuOMKqWz/n3vr1NFSxQiyP+zk2mXsoMA/i/7qV6LKut1t1A==",
       "dependencies": [
         "function-bind"
       ]
@@ -1206,10 +1206,10 @@
   "workspace": {
     "dependencies": [
       "jsr:@std/assert@1",
-      "npm:@meshsdk/common@1.9.0",
-      "npm:@meshsdk/core-csl@1.9.0",
+      "npm:@meshsdk/common@1.9.1",
+      "npm:@meshsdk/core-csl@1.9.1",
       "npm:@meshsdk/core-cst@^1.9.0-beta.94",
-      "npm:@meshsdk/core@1.9.0"
+      "npm:@meshsdk/core@1.9.1"
     ]
   }
 }

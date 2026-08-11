@@ -1,0 +1,48 @@
+plugins {
+    // Adds the `run` task that executes App.main().
+    id 'application'
+}
+
+ext {
+    julcVersion = '0.1.0-pre16'
+    cardanoClientLibVersion = '0.8.0-pre5'
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // julc compiles the validator from Java to Plutus V3 during javac.
+    implementation "com.bloxbean.cardano:julc-stdlib:${julcVersion}"
+    implementation "com.bloxbean.cardano:julc-ledger-api:${julcVersion}"
+    annotationProcessor "com.bloxbean.cardano:julc-annotation-processor:${julcVersion}"
+
+    // Off-chain: load the compiled script, then build and submit transactions.
+    implementation "com.bloxbean.cardano:julc-cardano-client-lib:${julcVersion}"
+    implementation "com.bloxbean.cardano:cardano-client-lib:${cardanoClientLibVersion}"
+    implementation "com.bloxbean.cardano:cardano-client-backend-blockfrost:${cardanoClientLibVersion}"
+
+    // Tests evaluate the compiled validator on a real Plutus VM.
+    testImplementation "com.bloxbean.cardano:julc-testkit:${julcVersion}"
+    testImplementation "com.bloxbean.cardano:julc-vm:${julcVersion}"
+    testRuntimeOnly "com.bloxbean.cardano:julc-vm-scalus:${julcVersion}"
+
+    testImplementation platform('org.junit:junit-bom:5.10.0')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+}
+
+application {
+    mainClass = 'org.cardanofoundation.templates.App'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}

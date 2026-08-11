@@ -23,6 +23,14 @@ name: Cardano Ecosystem CI
 #   2. Add a compile-<id> job below pointing at the right reusable compile workflow,
 #      and add it to test-offchain's `needs` + the report-and-dashboard `needs`.
 #      (Off-chain combos against it appear in `offchain-matrix` automatically.)
+#
+# Adding a new FULLSTACK framework (self-contained: own validator + own off-chain
+# flow, so it is one dashboard column rather than a cross-product):
+#   1. Add it to frameworks.json (kind: fullstack). Discovery emits its
+#      `<statusPrefix>-examples` list automatically.
+#   2. Expose that list as a `discover` output, add a test-<id> job pointing at
+#      _test-fullstack.yml, add it to the report-and-dashboard `needs`, and add a
+#      `resolve_status <statusPrefix>` line to the status-reconstruct step.
 
 on:
   push:
@@ -38,8 +46,10 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  AIKEN_VERSION: v1.1.21
+  AIKEN_VERSION: v1.1.23
   SCALUS_JAVA_VERSION: '21'
+  # julc targets a newer JDK than the jbang off-chain scripts.
+  FULLSTACK_JAVA_VERSION: '25'
   CACHE_VERSION: v1
 
 jobs:
@@ -53,9 +63,12 @@ jobs:
     outputs:
       # On-chain example lists drive the compile jobs; offchain-matrix is the
       # off-chain × on-chain cross-product that drives the single test job.
+      # Fullstack lists are plain per-framework lists — a fullstack example is
+      # self-contained, so there is no on-chain axis to cross it with.
       aiken-examples:   ${{ steps.discovery.outputs.aiken-examples }}
-      scalus-examples:  ${{ steps.discovery.outputs.scalus-examples }}
       offchain-matrix:  ${{ steps.discovery.outputs.offchain-matrix }}
+      julc-examples:     ${{ steps.discovery.outputs.julc-examples }}
+      scalusfs-examples: ${{ steps.discovery.outputs.scalusfs-examples }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -89,7 +102,7 @@ jobs:
           cache-version: ${{ env.CACHE_VERSION }}
 
       - name: Setup SBT
-        if: needs.discover.outputs.scalus-examples != '[]'
+        if: needs.discover.outputs.scalusfs-examples != '[]'
         uses: ./.github/actions/setup-sbt
         with:
           java-version: ${{ env.SCALUS_JAVA_VERSION }}
@@ -101,8 +114,15 @@ jobs:
         with:
           cache-version: ${{ env.CACHE_VERSION }}
 
+      - name: Setup Java + Gradle
+        if: needs.discover.outputs.julc-examples != '[]'
+        uses: ./.github/actions/setup-java-gradle
+        with:
+          jdk-version: ${{ env.FULLSTACK_JAVA_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+
       - name: Setup Yaci DevKit (install only)
-        if: needs.discover.outputs.offchain-matrix != '[]'
+        if: needs.discover.outputs.offchain-matrix != '[]' || needs.discover.outputs.julc-examples != '[]'
         uses: ./.github/actions/setup-yaci-devkit
         with:
           start: 'false'
@@ -117,16 +137,7 @@ jobs:
     uses: ./.github/workflows/_compile-aiken.yml
     with:
       examples:      ${{ needs.discover.outputs.aiken-examples }}
-      aiken-version: v1.1.21
-      cache-version: v1
-
-  compile-scalus:
-    needs: [discover, prepare-toolchains]
-    if: needs.discover.outputs.scalus-examples != '[]'
-    uses: ./.github/workflows/_compile-scalus.yml
-    with:
-      examples:     ${{ needs.discover.outputs.scalus-examples }}
-      java-version: '21'
+      aiken-version: v1.1.23
       cache-version: v1
 
   # ───────────────────────────────────────────────────────────────────────────
@@ -137,15 +148,14 @@ jobs:
   # to the matrix automatically — no new jobs here.
   # ───────────────────────────────────────────────────────────────────────────
   test-offchain:
-    needs: [discover, prepare-toolchains, compile-aiken, compile-scalus]
-    # Run whenever the matrix is non-empty and no prerequisite *failed*. A
-    # conditionally-skipped compile job (e.g. no scalus examples) must not block
-    # the aiken combos, so we allow 'skipped'/'success' but not 'failure'.
+    needs: [discover, prepare-toolchains, compile-aiken]
+    # Run whenever the matrix is non-empty and the compile step did not *fail*.
+    # A conditionally-skipped compile job must not block the combos, so we allow
+    # 'skipped'/'success' but not 'failure'.
     if: >-
       ${{ !cancelled()
           && needs.discover.outputs.offchain-matrix != '[]'
-          && needs.compile-aiken.result != 'failure'
-          && needs.compile-scalus.result != 'failure' }}
+          && needs.compile-aiken.result != 'failure' }}
     strategy:
       fail-fast: false
       matrix:
@@ -161,14 +171,51 @@ jobs:
       cache-version:     v1
 
   # ───────────────────────────────────────────────────────────────────────────
+  # Fullstack tests — self-contained examples that carry their own validator and
+  # their own off-chain flow. No on-chain axis and no blueprint download, so they
+  # run as a plain per-example matrix rather than a cross-product, and they do
+  # not depend on the compile jobs.
+  # ───────────────────────────────────────────────────────────────────────────
+  test-fullstack:
+    needs: [discover, prepare-toolchains]
+    if: needs.discover.outputs.julc-examples != '[]'
+    uses: ./.github/workflows/_test-fullstack.yml
+    with:
+      framework-id:  julc-java
+      status-prefix: julc
+      subdir:        fullstack/java
+      examples:      ${{ needs.discover.outputs.julc-examples }}
+      runtime:       gradle
+      jdk-version:   '25'
+      cache-version: v1
+
+  # Scalus fullstack examples verify at a *lower* bar than the Java ones: they
+  # carry no runnable entrypoint, so there is nothing to execute against a devnet
+  # and the job stops after compile + unit tests. frameworks.json records this as
+  # `"verify": "build"` so the difference is declared rather than accidental.
+  test-fullstack-scalus:
+    needs: [discover, prepare-toolchains]
+    if: needs.discover.outputs.scalusfs-examples != '[]'
+    uses: ./.github/workflows/_test-fullstack.yml
+    with:
+      framework-id:  scalus-fullstack
+      status-prefix: scalusfs
+      subdir:        fullstack/scalus
+      examples:      ${{ needs.discover.outputs.scalusfs-examples }}
+      runtime:       sbt
+      jdk-version:   '21'
+      cache-version: v1
+
+  # ───────────────────────────────────────────────────────────────────────────
   # Report & Dashboard
   # ───────────────────────────────────────────────────────────────────────────
   report-and-dashboard:
     name: Report & Dashboard
     needs:
       - compile-aiken
-      - compile-scalus
       - test-offchain
+      - test-fullstack
+      - test-fullstack-scalus
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -235,6 +282,12 @@ jobs:
           resolve_status evosdk    "Uncaught|AssertionError|TypeError:|ReferenceError:|SyntaxError:|^error:"
           resolve_status pycardano "Traceback|Error:|Exception:"
 
+          # Fullstack artifacts are named logs-<prefix>-<example> (no on-chain
+          # segment), so `rest` is already the bare example name and the same
+          # helper produces <prefix>-<example>-status.txt.
+          resolve_status julc      "BUILD FAILED|FAILURE: Build failed|Exception in thread"
+          resolve_status scalusfs  "\\[error\\]|Compilation failed|TESTS FAILED"
+
       - name: Generate markdown report
         env:
           REPO:   ${{ github.repository }}
@@ -248,17 +301,19 @@ jobs:
           echo "## Summary" >> report.md
           echo "" >> report.md
           AIKEN_COUNT=$(find artifacts -name "plutus-aiken-*"  -type d 2>/dev/null | wc -l)
-          SCALUS_COUNT=$(find artifacts -name "plutus-scalus-*" -type d 2>/dev/null | wc -l)
           CCL_COUNT=$(find artifacts -name "logs-ccl-*"    -type d 2>/dev/null | wc -l)
           MESH_COUNT=$(find artifacts -name "logs-mesh-*"   -type d 2>/dev/null | wc -l)
           EVOSDK_COUNT=$(find artifacts -name "logs-evosdk-*" -type d 2>/dev/null | wc -l)
           PYCARDANO_COUNT=$(find artifacts -name "logs-pycardano-*" -type d 2>/dev/null | wc -l)
+          JULC_COUNT=$(find artifacts -name "logs-julc-*" -type d 2>/dev/null | wc -l)
+          SCALUSFS_COUNT=$(find artifacts -name "logs-scalusfs-*" -type d 2>/dev/null | wc -l)
           echo "- **Aiken Examples Compiled**: $AIKEN_COUNT"   >> report.md
-          echo "- **Scalus Examples Compiled**: $SCALUS_COUNT" >> report.md
           echo "- **CCL Java Tests**: $CCL_COUNT"              >> report.md
           echo "- **Mesh.js Tests**: $MESH_COUNT"              >> report.md
           echo "- **Evolution SDK Tests**: $EVOSDK_COUNT"      >> report.md
           echo "- **PyCardano Tests**: $PYCARDANO_COUNT"       >> report.md
+          echo "- **JulC + CCL (Java) Fullstack**: $JULC_COUNT" >> report.md
+          echo "- **Scalus Fullstack**: $SCALUSFS_COUNT"        >> report.md
           echo "" >> report.md
           echo "All test logs and build artifacts are available in the workflow artifacts." >> report.md
 

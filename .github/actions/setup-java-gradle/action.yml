@@ -1,0 +1,38 @@
+name: 'Setup Java + Gradle'
+description: 'Set up the JDK for the fullstack Java examples and cache Gradle dependencies.'
+
+# The fullstack Java examples need a newer JDK than the jbang off-chain scripts
+# (julc targets 25), and they build with the Gradle wrapper rather than jbang,
+# so they get their own setup action instead of reusing setup-jbang-java.
+
+inputs:
+  jdk-version:
+    description: 'JDK major version (Temurin distribution).'
+    required: false
+    default: '25'
+  cache-version:
+    description: 'Cache-buster suffix.'
+    required: false
+    default: 'v1'
+
+runs:
+  using: composite
+  steps:
+    - name: Setup JDK
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: ${{ inputs.jdk-version }}
+
+    # Caches both the downloaded Gradle distribution and the resolved Maven
+    # artifacts. julc and cardano-client-lib pull a large dependency tree
+    # (including the Scala-based Plutus VM used by the unit tests).
+    - name: Cache Gradle
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: gradle-${{ inputs.cache-version }}-${{ runner.os }}-${{ hashFiles('**/fullstack/java/app/build.gradle', '**/fullstack/java/gradle/wrapper/gradle-wrapper.properties') }}
+        restore-keys: |
+          gradle-${{ inputs.cache-version }}-${{ runner.os }}-

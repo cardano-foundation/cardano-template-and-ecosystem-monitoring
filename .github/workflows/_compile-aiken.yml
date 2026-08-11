@@ -17,7 +17,7 @@ on:
         description: 'Pinned Aiken compiler version.'
         type: string
         required: false
-        default: 'v1.1.21'
+        default: 'v1.1.23'
       cache-version:
         description: 'Cache-buster forwarded to setup-aiken.'
         type: string

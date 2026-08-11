@@ -12,10 +12,10 @@
   },
   "imports": {
     "@std/assert": "jsr:@std/assert@1",
-    "@meshsdk/common": "npm:@meshsdk/common@1.9.0",
-    "@meshsdk/core": "npm:@meshsdk/core@1.9.0",
+    "@meshsdk/common": "npm:@meshsdk/common@1.9.1",
+    "@meshsdk/core": "npm:@meshsdk/core@1.9.1",
     "@meshsdk/core-cst": "npm:@meshsdk/core-cst@^1.9.0-beta.94",
-    "@meshsdk/core-csl": "npm:@meshsdk/core-csl@1.9.0"
+    "@meshsdk/core-csl": "npm:@meshsdk/core-csl@1.9.1"
   },
   "nodeModulesDir": "auto"
 }

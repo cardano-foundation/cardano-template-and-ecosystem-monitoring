@@ -6,15 +6,8 @@
       "kind": "onchain",
       "discoveryPath": "onchain/aiken/aiken.toml",
       "statusPrefix": "aiken",
-      "build": "aiken"
-    },
-    {
-      "id": "scalus",
-      "label": "Scalus",
-      "kind": "onchain",
-      "discoveryPath": "onchain/scalus/build.sbt",
-      "statusPrefix": "scalus",
-      "build": "scalus"
+      "build": "aiken",
+      "repo": "https://github.com/aiken-lang/aiken"
     },
     {
       "id": "ccl-java",
@@ -26,7 +19,10 @@
       "entryGlob": "*.java",
       "runtime": "jbang",
       "versionFile": "offchain/ccl-java/*.java",
-      "packages": ["cardano-client-lib"]
+      "packages": [
+        "cardano-client-lib"
+      ],
+      "repo": "https://github.com/bloxbean/cardano-client-lib"
     },
     {
       "id": "meshjs",
@@ -38,7 +34,12 @@
       "entryGlob": "*.ts",
       "runtime": "deno",
       "versionFile": "offchain/meshjs/deno.json",
-      "packages": ["@meshsdk/core", "@meshsdk/core-csl", "@meshsdk/common"]
+      "packages": [
+        "@meshsdk/core",
+        "@meshsdk/core-csl",
+        "@meshsdk/common"
+      ],
+      "repo": "https://github.com/MeshJS/mesh"
     },
     {
       "id": "evolutionsdk",
@@ -50,7 +51,10 @@
       "entryGlob": "*.ts",
       "runtime": "deno",
       "versionFile": "offchain/evolutionsdk/deno.json",
-      "packages": ["@evolution-sdk/lucid"]
+      "packages": [
+        "@evolution-sdk/lucid"
+      ],
+      "repo": "https://github.com/no-witness-labs/evolution-sdk"
     },
     {
       "id": "pycardano",
@@ -62,7 +66,41 @@
       "entryGlob": "*.py",
       "runtime": "python",
       "versionFile": "offchain/pycardano/requirements.txt",
-      "packages": ["pycardano"]
+      "packages": [
+        "pycardano"
+      ],
+      "repo": "https://github.com/Python-Cardano/pycardano"
+    },
+    {
+      "id": "julc-java",
+      "label": "JulC + CCL (Java)",
+      "kind": "fullstack",
+      "discoveryPath": "fullstack/java/settings.gradle",
+      "statusPrefix": "julc",
+      "subdir": "fullstack/java",
+      "runtime": "gradle",
+      "versionFile": "fullstack/java/app/build.gradle",
+      "packages": [
+        "cardano-client-lib",
+        "julc"
+      ],
+      "verify": "build+run",
+      "repo": "https://github.com/bloxbean/julc"
+    },
+    {
+      "id": "scalus-fullstack",
+      "label": "Scalus",
+      "kind": "fullstack",
+      "discoveryPath": "fullstack/scalus/build.sbt",
+      "statusPrefix": "scalusfs",
+      "subdir": "fullstack/scalus",
+      "runtime": "sbt",
+      "versionFile": "fullstack/scalus/build.sbt",
+      "packages": [
+        "scalus"
+      ],
+      "verify": "build",
+      "repo": "https://github.com/scalus3/scalus"
     }
   ]
 }

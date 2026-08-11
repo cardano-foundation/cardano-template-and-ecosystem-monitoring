@@ -40,6 +40,7 @@ MESH_COMMON=$(jq -r '.["@meshsdk/common"]' "$VERSIONS_FILE")
 LUCID_VERSION=$(jq -r '.["@evolution-sdk/lucid"]' "$VERSIONS_FILE")
 CCL_VERSION=$(jq -r '.["cardano-client-lib"]' "$VERSIONS_FILE")
 PYCARDANO_VERSION=$(jq -r '.["pycardano"]' "$VERSIONS_FILE")
+JULC_VERSION=$(jq -r '.["julc"]' "$VERSIONS_FILE")
 
 if [ "$CHECK_MODE" = true ]; then
   echo "Checking version consistency against $VERSIONS_FILE"
@@ -55,6 +56,7 @@ echo "  @meshsdk/common:       $MESH_COMMON"
 echo "  @evolution-sdk/lucid:  $LUCID_VERSION"
 echo "  cardano-client-lib:    $CCL_VERSION"
 echo "  pycardano:             $PYCARDANO_VERSION"
+echo "  julc:                  $JULC_VERSION"
 echo ""
 
 # ── Portable in-place sed ──────────────────────────────────────────────────────
@@ -224,6 +226,44 @@ while IFS= read -r -d '' java_file; do
   update_ccl_dep "$java_file" "cardano-client-lib"               "$CCL_VERSION"
   update_ccl_dep "$java_file" "cardano-client-backend-blockfrost" "$CCL_VERSION"
 done < <(find "$REPO_ROOT" -path "*/offchain/ccl-java/*.java" -print0 | sort -z)
+
+echo ""
+
+# ── 4b. Fullstack Java build.gradle files ──────────────────────────────────────
+# These pin their versions in an `ext { ... }` block rather than jbang //DEPS
+# lines, so they need their own updater. Without this the fullstack examples
+# would silently drift away from versions.json on every bump.
+echo "=== Updating fullstack Java build.gradle files ==="
+
+update_gradle_ext() {
+  local file="$1"
+  local prop="$2"          # e.g. julcVersion
+  local target_ver="$3"
+
+  if ! grep -qE "^[[:space:]]*${prop}[[:space:]]*=" "$file" 2>/dev/null; then
+    return 0
+  fi
+
+  local current_ver
+  current_ver=$(grep -E "^[[:space:]]*${prop}[[:space:]]*=" "$file" \
+    | head -1 | sed -E "s|.*=[[:space:]]*['\"]([^'\"]*)['\"].*|\1|")
+
+  if [ "$current_ver" = "$target_ver" ]; then
+    echo -e "  ${YELLOW}[SKIP]${NC}    ${prop} already up to date in $file"
+  elif [ "$CHECK_MODE" = true ]; then
+    echo -e "  ${RED}[DRIFT]${NC}   ${prop}: has '$current_ver', want '$target_ver' in $file"
+    DRIFTED_FILES+=("$file")
+  else
+    sed_inplace "$file" \
+      "s|^([[:space:]]*${prop}[[:space:]]*=[[:space:]]*)['\"][^'\"]*['\"]|\1'${target_ver}'|"
+    echo -e "  ${GREEN}[UPDATED]${NC} ${prop} in $file"
+  fi
+}
+
+while IFS= read -r -d '' gradle_file; do
+  update_gradle_ext "$gradle_file" "julcVersion"            "$JULC_VERSION"
+  update_gradle_ext "$gradle_file" "cardanoClientLibVersion" "$CCL_VERSION"
+done < <(find "$REPO_ROOT" -path "*/fullstack/java/app/build.gradle" -print0 | sort -z)
 
 echo ""
 
