@@ -244,6 +244,7 @@ runtime_tool_ok() {
     deno)   command -v deno    &>/dev/null ;;
     jbang)  command -v jbang   &>/dev/null ;;
     python) command -v python3 &>/dev/null ;;
+    go)     command -v go      &>/dev/null ;;
     *)      return 1 ;;
   esac
 }
@@ -269,6 +270,13 @@ run_offchain() {
       local code="${PIPESTATUS[0]}"
       deactivate || true
       return "$code" ;;
+    go)
+      # `go run .` (not the resolved entry file) so a package split across
+      # files — or a stray *_test.go — cannot change what gets run.
+      # GOFLAGS=-mod=mod is deliberately NOT set: go.sum is committed and
+      # builds must stay reproducible under the default -mod=readonly.
+      run_with_timeout 300 go run . 2>&1 | tee "$log"
+      return "${PIPESTATUS[0]}" ;;
     *)
       echo "unknown runtime: $runtime" >&2
       return 2 ;;

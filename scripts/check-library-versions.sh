@@ -40,6 +40,7 @@ PINNED_MESH_COMMON=$(jq -r '.["@meshsdk/common"]'         "$VERSIONS_FILE")
 PINNED_LUCID=$(jq -r '.["@evolution-sdk/lucid"]'          "$VERSIONS_FILE")
 PINNED_CCL=$(jq -r '.["cardano-client-lib"]'              "$VERSIONS_FILE")
 PINNED_PYCARDANO=$(jq -r '.["pycardano"]'                "$VERSIONS_FILE")
+PINNED_APOLLO=$(jq -r '.["github.com/Salvionied/apollo/v2"]'  "$VERSIONS_FILE")
 
 echo -e "${BLUE}Checking upstream versions against $VERSIONS_FILE${NC}"
 echo ""
@@ -160,6 +161,29 @@ fetch_maven_latest() {
   fi
 }
 
+# ── Go module proxy helper ──────────────────────────────────────────────────────
+# Usage: fetch_goproxy_latest <module-path>
+# The proxy requires case-escaped paths: uppercase -> '!' + lowercase.
+# @latest prefers release versions and falls back to prereleases when none
+# exist, so this tracks new stable releases automatically as they ship.
+# Prints the latest version string, or "unknown" on failure.
+fetch_goproxy_latest() {
+  local module="$1"
+  local escaped
+  escaped=$(printf '%s' "$module" | sed -E 's/([A-Z])/!\L\1/g')
+  local response
+  response=$(curl -s --max-time 10 "https://proxy.golang.org/${escaped}/@latest" 2>/dev/null) || true
+
+  local ver
+  ver=$(printf '%s' "$response" | jq -r '.Version // empty' 2>/dev/null) || true
+
+  if [ -z "$ver" ] || [ "$ver" = "null" ]; then
+    echo "unknown"
+  else
+    echo "$ver"
+  fi
+}
+
 # ── Semver bump type helper ─────────────────────────────────────────────────────
 # Usage: bump_type <pinned> <latest>
 # Strips leading 'v'. Returns: major | minor | patch
@@ -199,12 +223,13 @@ LATEST_MESH_COMMON=$(fetch_npm_latest "@meshsdk/common")
 LATEST_LUCID=$(fetch_npm_latest "@evolution-sdk/lucid")
 LATEST_CCL=$(fetch_maven_latest "com/bloxbean/cardano" "cardano-client-lib")
 LATEST_PYCARDANO=$(fetch_pypi_latest "pycardano")
+LATEST_APOLLO=$(fetch_goproxy_latest "github.com/Salvionied/apollo/v2")
 
 echo ""
 
 # ── Compare and build report data ───────────────────────────────────────────────
 OUTDATED_COUNT=0
-TOTAL_COUNT=9
+TOTAL_COUNT=10
 HAS_MAJOR=false
 
 # compare_entry <name> <pinned> <latest>
@@ -275,6 +300,9 @@ ENTRY_CCL="$ENTRY_JSON"
 compare_entry "pycardano"            "$PINNED_PYCARDANO"       "$LATEST_PYCARDANO"
 ENTRY_PYCARDANO="$ENTRY_JSON"
 
+compare_entry "github.com/Salvionied/apollo/v2" "$PINNED_APOLLO" "$LATEST_APOLLO"
+ENTRY_APOLLO="$ENTRY_JSON"
+
 echo ""
 
 UP_TO_DATE_COUNT=$((TOTAL_COUNT - OUTDATED_COUNT))
@@ -295,7 +323,8 @@ cat > "$JSON_FILE" <<EOF
     ${ENTRY_MESH_COMMON},
     ${ENTRY_LUCID},
     ${ENTRY_CCL},
-    ${ENTRY_PYCARDANO}
+    ${ENTRY_PYCARDANO},
+    ${ENTRY_APOLLO}
   },
   "summary": {
     "total": ${TOTAL_COUNT},
@@ -353,6 +382,7 @@ MD_FILE="$RESULTS_DIR/version-report.md"
   print_md_row "@evolution-sdk/lucid" "$PINNED_LUCID"           "$LATEST_LUCID"
   print_md_row "cardano-client-lib"   "$PINNED_CCL"             "$LATEST_CCL"
   print_md_row "pycardano"            "$PINNED_PYCARDANO"       "$LATEST_PYCARDANO"
+  print_md_row "github.com/Salvionied/apollo/v2" "$PINNED_APOLLO" "$LATEST_APOLLO"
 
   echo ""
   echo "---"

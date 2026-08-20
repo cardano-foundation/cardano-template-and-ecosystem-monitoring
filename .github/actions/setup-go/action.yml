@@ -1,0 +1,25 @@
+name: 'Setup Go'
+description: 'Install Go from the example module''s go.mod and cache module downloads.'
+
+inputs:
+  example:
+    description: 'Example directory name.'
+    required: true
+  subdir:
+    description: 'Path under the example dir containing go.mod.'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # go-version-file tracks the module's own requirement, so bumping Apollo's
+    # Go floor needs no workflow edit.
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: ${{ inputs.example }}/${{ inputs.subdir }}/go.mod
+        cache-dependency-path: ${{ inputs.example }}/${{ inputs.subdir }}/go.sum
+
+    - name: Report toolchain
+      shell: bash
+      run: go version

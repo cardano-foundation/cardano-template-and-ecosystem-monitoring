@@ -36,3 +36,31 @@ const contract = new MeshVestingContract({
   networkId: 0,
 });
 ```
+
+## 📄 Off-chain
+
+### Apollo (Go)
+
+This off-chain implementation uses [Apollo](https://github.com/Salvionied/apollo),
+a pure-Go transaction builder built on the Blink Labs Cardano libraries —
+[gouroboros](https://github.com/blinklabs-io/gouroboros) for ledger types, CBOR
+and addresses, [bursa](https://github.com/blinklabs-io/bursa) for wallet
+derivation and signing, and [plutigo](https://github.com/blinklabs-io/plutigo)
+for Plutus data.
+
+The scenario exercises both vesting paths: the owner's unconditional clawback,
+and the beneficiary's time-gated claim (which sets a transaction validity start
+strictly after `lock_until` to satisfy the validator's `valid_after` check).
+
+#### Prerequisites
+
+- [Go](https://go.dev/dl/) 1.21 or newer — `GOTOOLCHAIN=auto` (the default)
+  fetches the 1.25 toolchain the module requires.
+- A running [Yaci DevKit](https://devkit.yaci.xyz/) instance.
+
+#### Usage
+
+```zsh
+cd offchain/apollo
+go run .
+```

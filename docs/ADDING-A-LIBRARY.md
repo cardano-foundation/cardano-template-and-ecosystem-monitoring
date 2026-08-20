@@ -20,14 +20,14 @@ entry — the local runner (`scripts/local-test-offchain.sh`) and CI
   "statusPrefix": "mylib",                      // used in status/log artifact names
   "subdir": "offchain/mylib",                   // dir under each example holding the entry file
   "entryGlob": "*.ts",                          // how to find the entry file
-  "runtime": "deno",                            // deno | jbang | python (toolchain + run command)
+  "runtime": "deno",                            // deno | jbang | python | go (toolchain + run command)
   "versionFile": "offchain/mylib/deno.json",    // optional, for version sync
   "packages": ["my-sdk"]                         // optional, for version sync
 }
 ```
 
 `runtime` is the only thing the runner/CI dispatch on. If your library runs on an
-**existing** runtime (`deno`/`jbang`/`python`), **no script or workflow changes
+**existing** runtime (`deno`/`jbang`/`python`/`go`), **no script or workflow changes
 are needed**. A genuinely new runtime adds one `case` to `run_offchain()` and
 `runtime_tool_ok()` in `scripts/local-test-offchain.sh`, and one conditional setup
 step in `.github/workflows/_test-offchain.yml`.
@@ -43,6 +43,10 @@ This stamps a self-contained skeleton entry file into every example's
 standalone and copy-paste friendly — the boilerplate frame (blueprint loading,
 yaci config) is written into the file, not imported from a shared library, so your
 implementations stay idiomatic. Scope it with `--examples a,b,c` while iterating.
+
+For the `go` runtime, also run `go mod tidy` in each scaffolded directory to
+produce a committed `go.sum` — Go builds are `-mod=readonly` by default, so
+`go run .` fails without one.
 
 ### 3. Implement the contract
 
