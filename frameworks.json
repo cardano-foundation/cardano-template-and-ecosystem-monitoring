@@ -63,6 +63,18 @@
       "runtime": "python",
       "versionFile": "offchain/pycardano/requirements.txt",
       "packages": ["pycardano"]
+    },
+    {
+      "id": "apollo",
+      "label": "Apollo (Go)",
+      "kind": "offchain",
+      "discoveryPath": "offchain/apollo/go.mod",
+      "statusPrefix": "apollo",
+      "subdir": "offchain/apollo",
+      "entryGlob": "*.go",
+      "runtime": "go",
+      "versionFile": "offchain/apollo/go.mod",
+      "packages": ["github.com/Salvionied/apollo/v2"]
     }
   ]
 }

@@ -101,6 +101,13 @@ jobs:
         with:
           cache-version: ${{ env.CACHE_VERSION }}
 
+      - name: Setup Go
+        if: contains(needs.discover.outputs.offchain-matrix, '"runtime":"go"')
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: false
+
       - name: Setup Yaci DevKit (install only)
         if: needs.discover.outputs.offchain-matrix != '[]'
         uses: ./.github/actions/setup-yaci-devkit
@@ -234,6 +241,7 @@ jobs:
           resolve_status mesh      "Uncaught|AssertionError|TypeError:|ReferenceError:|SyntaxError:|^error:"
           resolve_status evosdk    "Uncaught|AssertionError|TypeError:|ReferenceError:|SyntaxError:|^error:"
           resolve_status pycardano "Traceback|Error:|Exception:"
+          resolve_status apollo    "FAILED:|panic:"
 
       - name: Generate markdown report
         env:
@@ -253,12 +261,14 @@ jobs:
           MESH_COUNT=$(find artifacts -name "logs-mesh-*"   -type d 2>/dev/null | wc -l)
           EVOSDK_COUNT=$(find artifacts -name "logs-evosdk-*" -type d 2>/dev/null | wc -l)
           PYCARDANO_COUNT=$(find artifacts -name "logs-pycardano-*" -type d 2>/dev/null | wc -l)
+          APOLLO_COUNT=$(find artifacts -name "logs-apollo-*" -type d 2>/dev/null | wc -l)
           echo "- **Aiken Examples Compiled**: $AIKEN_COUNT"   >> report.md
           echo "- **Scalus Examples Compiled**: $SCALUS_COUNT" >> report.md
           echo "- **CCL Java Tests**: $CCL_COUNT"              >> report.md
           echo "- **Mesh.js Tests**: $MESH_COUNT"              >> report.md
           echo "- **Evolution SDK Tests**: $EVOSDK_COUNT"      >> report.md
           echo "- **PyCardano Tests**: $PYCARDANO_COUNT"       >> report.md
+          echo "- **Apollo (Go) Tests**: $APOLLO_COUNT"        >> report.md
           echo "" >> report.md
           echo "All test logs and build artifacts are available in the workflow artifacts." >> report.md
 

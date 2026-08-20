@@ -89,6 +89,37 @@ cd offchain/ccl-java
 jbang simple-transfer.java
 ```
 
+### Apollo (Go)
+
+This off-chain implementation uses [Apollo](https://github.com/Salvionied/apollo),
+a pure-Go transaction builder. Apollo v2 is built on the Blink Labs Cardano
+libraries — [gouroboros](https://github.com/blinklabs-io/gouroboros) for ledger
+types, CBOR and addresses, [bursa](https://github.com/blinklabs-io/bursa) for
+wallet derivation and signing, and
+[plutigo](https://github.com/blinklabs-io/plutigo) for Plutus data.
+
+Apollo has no `ApplyParamsToScript`, so this example applies the receiver key
+hash to the parameterised validator using plutigo's UPLC codec directly.
+
+#### Prerequisites
+
+- [Go](https://go.dev/dl/) 1.21 or newer — `GOTOOLCHAIN=auto` (the default)
+  fetches the 1.25 toolchain the module requires.
+- A running [Yaci DevKit](https://devkit.yaci.xyz/) instance.
+
+#### Usage
+
+```zsh
+cd offchain/apollo
+go run .
+```
+
+Set `PLUTUS_JSON` to run the same flow against a different on-chain blueprint:
+
+```zsh
+PLUTUS_JSON=../../onchain/aiken/plutus.json go run .
+```
+
 ## Verify the Output
 
 After running the code, you can verify the output in Yaci Viewer. To access Yaci Viewer in docker distribution, use the following url

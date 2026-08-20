@@ -1,0 +1,7 @@
+# Compiled binary — named after this directory, produced by `go build`
+/apollo
+
+# Test binaries and coverage output
+*.test
+coverage.out
+coverage.html

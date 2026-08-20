@@ -60,6 +60,7 @@ case "$RUNTIME" in
   deno)   TPL="$TEMPLATES/deno.ts";    MARKER_TPL="$TEMPLATES/deno.json" ;;
   python) TPL="$TEMPLATES/python.py";  MARKER_TPL="$TEMPLATES/requirements.txt" ;;
   jbang)  TPL="$TEMPLATES/jbang.java"; MARKER_TPL="" ;;
+  go)     TPL="$TEMPLATES/go.go";     MARKER_TPL="$TEMPLATES/go.mod" ;;
   *) echo -e "${RED}no template for runtime '$RUNTIME' — add scripts/templates/offchain/${NC}" >&2; exit 1 ;;
 esac
 [ -f "$TPL" ] || { echo -e "${RED}template not found: $TPL${NC}" >&2; exit 1; }
@@ -102,13 +103,16 @@ for example in "${examples[@]}"; do
   dir="$example/$SUBDIR"
   mkdir -p "$dir"
 
-  # Marker file (discovery anchor) — copy stub if missing.
-  if [ -n "$MARKER_BASENAME" ] && [ -n "$MARKER_TPL" ] && [ ! -f "$dir/$MARKER_BASENAME" ]; then
-    cp "$MARKER_TPL" "$dir/$MARKER_BASENAME"
-  fi
-
   # Entry file name + class name.
   local_class=$(pascal "$example")
+
+  # Marker file (discovery anchor) — stamp stub if missing. Same placeholder
+  # substitution as the entry file below: a no-op for markers without
+  # placeholders (deno.json, requirements.txt), required for go.mod's
+  # __EXAMPLE__-bearing module path.
+  if [ -n "$MARKER_BASENAME" ] && [ -n "$MARKER_TPL" ] && [ ! -f "$dir/$MARKER_BASENAME" ]; then
+    sed -e "s/__EXAMPLE__/${example}/g" -e "s/__CLASS__/${local_class}/g" "$MARKER_TPL" > "$dir/$MARKER_BASENAME"
+  fi
   if [ "$RUNTIME" = "jbang" ]; then
     entry="${local_class}.${EXT}"
   else

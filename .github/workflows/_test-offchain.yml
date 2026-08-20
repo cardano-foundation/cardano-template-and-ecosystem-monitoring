@@ -1,7 +1,7 @@
 name: Test off-chain (reusable, runtime-generic)
 
 # One reusable workflow for every off-chain framework, regardless of language.
-# The caller passes `runtime` (deno | jbang | python) and the toolchain setup,
+# The caller passes `runtime` (deno | jbang | python | go) and the toolchain setup,
 # install, and run command branch on it. This replaces the former per-runtime
 # workflows (_test-offchain-deno/-jbang/-python.yml) so adding a framework on an
 # existing runtime needs no new workflow — just a frameworks.json entry that
@@ -28,7 +28,7 @@ on:
         type: string
         required: true
       runtime:
-        description: 'Toolchain: deno | jbang | python.'
+        description: 'Toolchain: deno | jbang | python | go.'
         type: string
         required: true
       examples:
@@ -96,6 +96,13 @@ jobs:
           example: ${{ matrix.example }}
           subdir: ${{ inputs.subdir }}
 
+      - name: Setup Go
+        if: inputs.runtime == 'go'
+        uses: ./.github/actions/setup-go
+        with:
+          example: ${{ matrix.example }}
+          subdir: ${{ inputs.subdir }}
+
       - name: Setup Yaci DevKit
         uses: ./.github/actions/setup-yaci-devkit
         with:
@@ -125,6 +132,7 @@ jobs:
             deno)   ENTRY=$(ls *.ts   | head -1); CMD=(deno run --allow-all "$ENTRY") ;;
             jbang)  ENTRY=$(ls *.java | head -1); CMD=(jbang "$ENTRY") ;;
             python) ENTRY=$(ls *.py   | head -1); CMD=(python "$ENTRY") ;;
+            go)     ENTRY="."; CMD=(go run .) ;;
             *) echo "unknown runtime: $RUNTIME" >&2; exit 2 ;;
           esac
           # Retry once with a 15s pause: yaci's readiness probe covers most

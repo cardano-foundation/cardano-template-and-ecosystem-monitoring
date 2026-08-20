@@ -40,6 +40,7 @@ MESH_COMMON=$(jq -r '.["@meshsdk/common"]' "$VERSIONS_FILE")
 LUCID_VERSION=$(jq -r '.["@evolution-sdk/lucid"]' "$VERSIONS_FILE")
 CCL_VERSION=$(jq -r '.["cardano-client-lib"]' "$VERSIONS_FILE")
 PYCARDANO_VERSION=$(jq -r '.["pycardano"]' "$VERSIONS_FILE")
+APOLLO_VERSION=$(jq -r '.["github.com/Salvionied/apollo/v2"]' "$VERSIONS_FILE")
 
 if [ "$CHECK_MODE" = true ]; then
   echo "Checking version consistency against $VERSIONS_FILE"
@@ -55,6 +56,7 @@ echo "  @meshsdk/common:       $MESH_COMMON"
 echo "  @evolution-sdk/lucid:  $LUCID_VERSION"
 echo "  cardano-client-lib:    $CCL_VERSION"
 echo "  pycardano:             $PYCARDANO_VERSION"
+echo "  apollo/v2:             $APOLLO_VERSION"
 echo ""
 
 # ── Portable in-place sed ──────────────────────────────────────────────────────
@@ -257,6 +259,75 @@ update_pypi_dep() {
 while IFS= read -r -d '' req_file; do
   update_pypi_dep "$req_file" "pycardano" "$PYCARDANO_VERSION"
 done < <(find "$REPO_ROOT" -path "*/offchain/pycardano/requirements.txt" -print0 | sort -z)
+
+echo ""
+
+# ── 6. Apollo go.mod files ─────────────────────────────────────────────────────
+echo "=== Updating Apollo go.mod files ==="
+
+update_gomod_dep() {
+  local file="$1"
+  local module="$2"      # e.g. github.com/Salvionied/apollo/v2
+  local target_ver="$3"
+
+  if ! grep -qF "$module " "$file" 2>/dev/null; then
+    return 0
+  fi
+
+  # Escaped once and reused for both the extraction regex and the rewrite
+  # regex below, so the two stay anchored to the exact same module path.
+  local escaped_module
+  escaped_module=$(printf '%s' "$module" | sed 's|[./]|\\&|g')
+
+  # Capture only the token immediately after the module path (the version),
+  # not the last whitespace-separated field of the line — a trailing
+  # `// indirect` comment would otherwise make `awk '{print $NF}'` return
+  # "indirect" instead of the version.
+  local current_ver
+  current_ver=$(grep -F "$module " "$file" | head -1 | sed -E "s|.*${escaped_module}[[:space:]]+([^[:space:]]+).*|\1|")
+
+  if [ "$current_ver" = "$target_ver" ]; then
+    echo -e "  ${YELLOW}[SKIP]${NC}    ${module} already up to date in $(basename "$file") ($file)"
+  elif [ "$CHECK_MODE" = true ]; then
+    echo -e "  ${RED}[DRIFT]${NC}   ${module}: has '$current_ver', want '$target_ver' in $file"
+    DRIFTED_FILES+=("$file")
+  else
+    sed_inplace "$file" "s|(${escaped_module}) [^[:space:]]*|\1 ${target_ver}|"
+    echo -e "  ${GREEN}[UPDATED]${NC} ${module} in $(basename "$file") ($file)"
+
+    # go.sum must be regenerated to match the rewritten require line, or every
+    # subsequent -mod=readonly build (local runner, CI) fails with "missing
+    # go.sum entry". Only reached in write mode — CHECK_MODE returns above.
+    # (`go mod tidy` may also raise go.mod's `go` line here, if — and only
+    # if — the new version's own go.mod requires a newer toolchain floor.
+    # That's a correct, necessary side effect of the version bump, not
+    # something to suppress.)
+    local gomod_dir
+    gomod_dir="$(dirname "$file")"
+    if [ ! -f "$gomod_dir/go.sum" ]; then
+      # A scaffold template carries no lockfile: its module path is a
+      # placeholder and the contributor runs `go mod tidy` after scaffolding
+      # (see docs/ADDING-A-LIBRARY.md). Generating a go.sum for a placeholder
+      # module here would commit a lockfile that pins nothing real.
+      echo -e "  ${YELLOW}[SKIP]${NC}    no go.sum in $gomod_dir (template) — nothing to regenerate"
+    elif command -v go &>/dev/null; then
+      if (cd "$gomod_dir" && go mod tidy) >/dev/null 2>&1; then
+        echo -e "  ${GREEN}[UPDATED]${NC} go.sum regenerated in $gomod_dir"
+      else
+        echo -e "  ${RED}[DRIFT]${NC}   go mod tidy failed in $gomod_dir — go.sum may now be stale and must be regenerated manually"
+      fi
+    else
+      echo -e "  ${YELLOW}[SKIP]${NC}    go not installed — go.sum in $gomod_dir may now be stale and must be regenerated manually"
+    fi
+  fi
+}
+
+while IFS= read -r -d '' gomod_file; do
+  update_gomod_dep "$gomod_file" "github.com/Salvionied/apollo/v2" "$APOLLO_VERSION"
+done < <(find "$REPO_ROOT" \
+  \( -path "*/offchain/apollo/go.mod" \
+     -o -path "*/scripts/templates/offchain/go.mod" \) \
+  -print0 | sort -z)
 
 echo ""
 
